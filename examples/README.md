@@ -11,11 +11,12 @@ Current examples:
 Each example is intentionally small and focused on proving the WDIT loop:
 
 1. launch a browser with the built WDIT extension loaded
-2. navigate to a real page
-3. call `window.startTest({ suite, testName })`
-4. perform a small interaction flow
-5. call `window.endTest()`
-6. inspect `wdit flows` on the server side
+2. call `POST /runs/start`
+3. open the WDIT extension bootstrap page returned by the server to bind the browser to that run
+4. perform a small interaction flow on a real page
+5. call `POST /runs/end`
+6. let the extension background poll for the ending state and flush the buffered run
+7. inspect `wdit flows` on the server side
 
 Prerequisites:
 
@@ -29,3 +30,5 @@ Notes:
 - Google may present locale-specific consent or anti-bot UI. The examples use
   `https://www.google.com/ncr` to reduce redirects, but some environments may
   still need minor adjustments.
+- The Chrome/Chromium extension ID is fixed to
+  `mnffaleoplkcmcdhdlknngjlfcickdme` for bootstrap navigation.

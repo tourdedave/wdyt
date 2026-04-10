@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs",
     "dev:server": "node --watch dist/server/index.js",
     "start:server": "node dist/server/index.js",
-    "flows": "node dist/cli/index.js flows"
+    "flows": "node dist/cli/index.js flows",
+    "test:integration": "npm run build && node --test test/integration/control-flow.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",

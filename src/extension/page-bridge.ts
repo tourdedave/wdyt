@@ -1,6 +1,4 @@
 type BridgeDetail =
-  | { kind: "START_RUN"; suite: string; testName: string }
-  | { kind: "END_RUN" }
   | {
       kind: "CAPTURE_EVENT";
       event: {
@@ -8,13 +6,6 @@ type BridgeDetail =
         url: string;
       };
     };
-
-declare global {
-  interface Window {
-    startTest?: (input: { suite: string; testName: string }) => void;
-    endTest?: () => void;
-  }
-}
 
 const BRIDGE_EVENT = "wdit:bridge";
 
@@ -45,11 +36,3 @@ window.addEventListener("popstate", () => {
     },
   });
 });
-
-window.startTest = ({ suite, testName }) => {
-  emit({ kind: "START_RUN", suite, testName });
-};
-
-window.endTest = () => {
-  emit({ kind: "END_RUN" });
-};

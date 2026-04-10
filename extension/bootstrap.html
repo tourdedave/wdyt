@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WDIT Bootstrap</title>
+    <style>
+      body {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        padding: 24px;
+      }
+
+      #status[data-status="ok"] {
+        color: #0a7d21;
+      }
+
+      #status[data-status="error"] {
+        color: #b42318;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="status">WDIT initializing</h1>
+    <pre id="details"></pre>
+    <script src="bootstrap.js"></script>
+  </body>
+</html>

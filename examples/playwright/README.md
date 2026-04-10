@@ -18,9 +18,11 @@ npm test
 
 Expected WDIT behavior:
 
-- `window.startTest(...)` begins a buffered run
+- `POST /runs/start` creates a run and returns a bootstrap URL
+- the bootstrap page binds this browser instance to that run
 - page navigation and user interactions are captured by the extension
-- `window.endTest()` sends one POST to `/ingest`
+- `POST /runs/end` marks the run for completion
+- background polling notices the ending state and flushes one POST to `/ingest`
 
 After running the example, inspect flows from the repo root:
 

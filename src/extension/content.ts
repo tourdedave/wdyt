@@ -1,12 +1,10 @@
 type PageEventType = "click" | "input" | "change" | "submit" | "navigate";
 
 type PageBridgeMessage =
-  | { kind: "START_RUN"; suite: string; testName: string }
-  | { kind: "END_RUN" }
   | {
       kind: "CAPTURE_EVENT";
       event: {
-        type: PageEventType;
+        type: "navigate";
         url?: string;
       };
     };
@@ -77,17 +75,6 @@ function setupCapture() {
       return;
     }
 
-    if (detail.kind === "START_RUN") {
-      sendRuntimeMessage(detail);
-      emitInitialNavigate();
-      return;
-    }
-
-    if (detail.kind === "END_RUN") {
-      sendRuntimeMessage(detail);
-      return;
-    }
-
     if (detail.kind === "CAPTURE_EVENT") {
       sendRuntimeMessage({
         kind: "APPEND_EVENT",
@@ -103,9 +90,13 @@ setupCapture();
 console.log(`[WDIT] content script loaded v${EXTENSION_VERSION} on ${window.location.href}`);
 
 chrome.runtime.sendMessage({ kind: "GET_STATE" }, (response) => {
-  const state = response as { active?: boolean } | undefined;
+  const state = response as { bound?: boolean; browserSessionId?: string } | undefined;
 
-  if (state?.active) {
+  if (state?.bound) {
     emitInitialNavigate();
+  }
+
+  if (state?.browserSessionId) {
+    console.log(`[WDIT] browser session ${state.browserSessionId}`);
   }
 });

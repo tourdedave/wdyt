@@ -25,6 +25,21 @@ export type RunInfo = {
   reason: "completed" | "timeout";
 };
 
+export type StartRunRequest = {
+  suiteName: string;
+  testName: string;
+};
+
+export type StartRunResponse = {
+  runId: string;
+  bootstrapUrl: string;
+};
+
+export type EndRunRequest = {
+  runId: string;
+  reason?: "completed" | "timeout";
+};
+
 export type IngestPayload = {
   suite: SuiteInfo;
   run: RunInfo;

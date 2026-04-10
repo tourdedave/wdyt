@@ -3,9 +3,52 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
+import { DEFAULT_SERVER_URL } from "../../dist/shared/constants.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
+
+async function startRun() {
+  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      suiteName: "examples/playwright",
+      testName: "google search hello world",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Start run failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function endRun(runId) {
+  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/end`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      runId,
+      reason: "completed",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`End run failed with status ${response.status}`);
+  }
+}
+
+async function bootstrapBind(page, bootstrapUrl) {
+  await page.goto(bootstrapUrl, { waitUntil: "domcontentloaded" });
+  await page.locator('#status[data-status="ok"]').waitFor({ timeout: 15_000 });
+}
 
 async function main() {
   const context = await chromium.launchPersistentContext("", {
@@ -19,16 +62,10 @@ async function main() {
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
+    const started = await startRun();
 
+    await bootstrapBind(page, started.bootstrapUrl);
     await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded" });
-    await page.waitForFunction(() => typeof window.startTest === "function");
-
-    await page.evaluate(() => {
-      window.startTest?.({
-        suite: "examples/playwright",
-        testName: "google search hello world",
-      });
-    });
 
     const searchBox = page.locator('textarea[name="q"], input[name="q"]').first();
     await searchBox.waitFor({ state: "visible", timeout: 15_000 });
@@ -39,11 +76,8 @@ async function main() {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2_000);
 
-    await page.evaluate(() => {
-      window.endTest?.();
-    });
-
-    await page.waitForTimeout(2_000);
+    await endRun(started.runId);
+    await page.waitForTimeout(4_000);
   } finally {
     await context.close();
   }

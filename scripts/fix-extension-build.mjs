@@ -6,7 +6,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const extensionDir = path.join(projectRoot, "dist", "extension");
 
-const extensionFiles = ["content.js", "background.js", "page-bridge.js"];
+const extensionFiles = ["content.js", "background.js", "page-bridge.js", "bootstrap.js"];
 
 for (const fileName of extensionFiles) {
   const filePath = path.join(extensionDir, fileName);
