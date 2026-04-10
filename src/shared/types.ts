@@ -33,6 +33,7 @@ export type BrowserInfo = {
 
 export type RunEnvironment = {
   browser?: BrowserInfo;
+  tool?: string;
 };
 
 export type StartRunRequest = {

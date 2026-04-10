@@ -164,6 +164,9 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     const started = await postJson(serverUrl, "/runs/start", {
       suiteName: "integration",
       testName: "search flow",
+      environment: {
+        tool: "integration-test",
+      },
     });
 
     assert.match(started.runId, /^[0-9a-f-]{36}$/);
@@ -188,6 +191,7 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.equal(bound.run.id, started.runId);
     assert.equal(bound.status, "bound");
     assert.deepEqual(bound.environment, {
+      tool: "integration-test",
       browser: {
         family: "chromium",
         version: "146.0.7680.178",
@@ -201,6 +205,7 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.equal(currentBeforeEnd.run.id, started.runId);
     assert.equal(currentBeforeEnd.status, "bound");
     assert.deepEqual(currentBeforeEnd.environment, {
+      tool: "integration-test",
       browser: {
         family: "chromium",
         version: "146.0.7680.178",
@@ -253,14 +258,16 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     assert.match(rawRuns, /"id":"integration"/);
     assert.match(rawRuns, new RegExp(`"id":"${started.runId}"`));
+    assert.match(rawRuns, /"tool":"integration-test"/);
     assert.match(rawRuns, /"family":"chromium"/);
     assert.match(rawRuns, /"version":"146.0.7680.178"/);
     assert.match(processedRuns, /"canonical":\["NAVIGATE","CLICK","INPUT","SUBMIT"\]/);
+    assert.match(processedRuns, /"tool":"integration-test"/);
     assert.match(processedRuns, /"family":"chromium"/);
 
     const flowsOutput = await runCliFlows(tempDir);
-    assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Browser\s+Flow/m);
-    assert.match(flowsOutput, /1\s+integration\s+search flow\s+chromium 146\.0\.7680\.178\s+NAVIGATE → CLICK → INPUT → SUBMIT/);
+    assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Tool\s+Browser\s+Flow/m);
+    assert.match(flowsOutput, /1\s+integration\s+search flow\s+integration-test\s+chromium 146\.0\.7680\.178\s+NAVIGATE → CLICK → INPUT → SUBMIT/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });

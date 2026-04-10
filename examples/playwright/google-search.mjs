@@ -18,6 +18,9 @@ async function startRun() {
     body: JSON.stringify({
       suiteName: "examples/playwright",
       testName: "google search hello world",
+      environment: {
+        tool: "playwright",
+      },
     }),
   });
 

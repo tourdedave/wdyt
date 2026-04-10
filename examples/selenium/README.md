@@ -21,6 +21,14 @@ On macOS, the simplest setup is:
 brew install --cask chromium
 ```
 
+If macOS blocks Chromium with a message like `"Chromium" is damaged and can't be opened`,
+remove the quarantine attribute and launch it once manually:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Chromium.app
+open -a /Applications/Chromium.app
+```
+
 Run:
 
 ```bash

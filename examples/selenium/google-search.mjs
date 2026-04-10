@@ -19,6 +19,9 @@ async function startRun() {
     body: JSON.stringify({
       suiteName: "examples/selenium",
       testName: "google search hello world",
+      environment: {
+        tool: "selenium",
+      },
     }),
   });
 

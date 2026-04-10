@@ -28,6 +28,10 @@ function formatBrowser(value: ProcessedRunRecord["environment"] | undefined) {
   return `${browser.family} ${browser.version}`;
 }
 
+function formatTool(value: ProcessedRunRecord["environment"] | undefined) {
+  return value?.tool ?? "-";
+}
+
 function pad(value: string, width: number) {
   if (value.length >= width) {
     return value;
@@ -59,6 +63,7 @@ async function printFlows() {
       canonical: string[];
       suites: Set<string>;
       tests: Set<string>;
+      tools: Set<string>;
       browsers: Set<string>;
     }
   >();
@@ -73,6 +78,7 @@ async function printFlows() {
       if (rawRun?.run.testName) {
         current.tests.add(rawRun.run.testName);
       }
+      current.tools.add(formatTool(record.environment));
       current.browsers.add(formatBrowser(record.environment));
       continue;
     }
@@ -82,6 +88,7 @@ async function printFlows() {
       canonical: record.canonical,
       suites: new Set([record.suite.name]),
       tests: new Set(rawRun?.run.testName ? [rawRun.run.testName] : []),
+      tools: new Set([formatTool(record.environment)]),
       browsers: new Set([formatBrowser(record.environment)]),
     });
   }
@@ -97,6 +104,7 @@ async function printFlows() {
     count: "Count",
     suites: "Suites",
     tests: "Tests",
+    tool: "Tool",
     browser: "Browser",
     flow: "Flow",
   };
@@ -106,6 +114,7 @@ async function printFlows() {
       count: String(flow.count),
       suites: summarizeList([...flow.suites].sort()),
       tests: summarizeList([...flow.tests].sort()),
+      tool: summarizeList([...flow.tools].filter((value) => value !== "-").sort()),
       browser: summarizeList([...flow.browsers].filter((value) => value !== "-").sort()),
       flow: formatFlow(flow.canonical),
     };
@@ -115,6 +124,7 @@ async function printFlows() {
     count: Math.max(headers.count.length, ...rows.map((row) => row.count.length)),
     suites: Math.max(headers.suites.length, ...rows.map((row) => row.suites.length)),
     tests: Math.max(headers.tests.length, ...rows.map((row) => row.tests.length)),
+    tool: Math.max(headers.tool.length, ...rows.map((row) => row.tool.length)),
     browser: Math.max(headers.browser.length, ...rows.map((row) => row.browser.length)),
   };
 
@@ -123,6 +133,7 @@ async function printFlows() {
       pad(headers.count, widths.count),
       pad(headers.suites, widths.suites),
       pad(headers.tests, widths.tests),
+      pad(headers.tool, widths.tool),
       pad(headers.browser, widths.browser),
       headers.flow,
     ].join("  ")
@@ -134,6 +145,7 @@ async function printFlows() {
         pad(row.count, widths.count),
         pad(truncate(row.suites, widths.suites), widths.suites),
         pad(truncate(row.tests, widths.tests), widths.tests),
+        pad(truncate(row.tool, widths.tool), widths.tool),
         pad(truncate(row.browser, widths.browser), widths.browser),
         row.flow,
       ].join("  ")
