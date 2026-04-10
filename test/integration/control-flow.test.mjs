@@ -259,7 +259,8 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.match(processedRuns, /"family":"chromium"/);
 
     const flowsOutput = await runCliFlows(tempDir);
-    assert.equal(flowsOutput, "NAVIGATE → CLICK → INPUT → SUBMIT (1)");
+    assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Browser\s+Flow/m);
+    assert.match(flowsOutput, /1\s+integration\s+search flow\s+chromium 146\.0\.7680\.178\s+NAVIGATE → CLICK → INPUT → SUBMIT/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
