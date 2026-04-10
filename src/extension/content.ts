@@ -12,6 +12,7 @@ type PageBridgeMessage =
     };
 
 const BRIDGE_EVENT = "wdit:bridge";
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
 function extractTarget(element: Element) {
   const candidate = element as HTMLElement & { value?: string };
@@ -56,30 +57,7 @@ function emitInitialNavigate() {
 
 function injectBridge() {
   const script = document.createElement("script");
-  script.textContent = `
-    (() => {
-      const EVENT_NAME = ${JSON.stringify(BRIDGE_EVENT)};
-      const emit = (detail) => document.dispatchEvent(new CustomEvent(EVENT_NAME, { detail }));
-      const wrapHistory = () => {
-        const originalPushState = history.pushState;
-        history.pushState = function (...args) {
-          const result = originalPushState.apply(this, args);
-          emit({ kind: "CAPTURE_EVENT", event: { type: "navigate", url: location.href } });
-          return result;
-        };
-      };
-      wrapHistory();
-      window.addEventListener("popstate", () => {
-        emit({ kind: "CAPTURE_EVENT", event: { type: "navigate", url: location.href } });
-      });
-      window.startTest = ({ suite, testName }) => {
-        emit({ kind: "START_RUN", suite, testName });
-      };
-      window.endTest = () => {
-        emit({ kind: "END_RUN" });
-      };
-    })();
-  `;
+  script.src = chrome.runtime.getURL("page-bridge.js");
 
   (document.documentElement || document.head).appendChild(script);
   script.remove();
@@ -121,6 +99,8 @@ function setupCapture() {
 
 injectBridge();
 setupCapture();
+
+console.log(`[WDIT] content script loaded v${EXTENSION_VERSION} on ${window.location.href}`);
 
 chrome.runtime.sendMessage({ kind: "GET_STATE" }, (response) => {
   const state = response as { active?: boolean } | undefined;

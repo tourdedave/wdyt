@@ -7,7 +7,7 @@
     "wdit": "./dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-extension-manifest.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs",
     "dev:server": "node --watch dist/server/index.js",
     "start:server": "node dist/server/index.js",
     "flows": "node dist/cli/index.js flows"

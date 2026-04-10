@@ -1,5 +1,7 @@
 declare namespace chrome {
   namespace runtime {
+    function getManifest(): { version: string };
+    function getURL(path: string): string;
     function sendMessage(
       message: unknown,
       callback?: (response: unknown) => void

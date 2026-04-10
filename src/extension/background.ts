@@ -53,6 +53,7 @@ type ExtensionMessage = StartRunMessage | EndRunMessage | AppendEventMessage | G
 const STORAGE_KEY = "activeRuns";
 const INGEST_URL = "http://127.0.0.1:3876/ingest";
 const TIMEOUT_MS = 60_000;
+const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
 const activeRuns = new Map<number, ActiveRun>();
 
@@ -175,6 +176,8 @@ function handleStartRun(tabId: number, message: StartRunMessage) {
 chrome.runtime.onInstalled.addListener(loadRuns);
 chrome.runtime.onStartup.addListener(loadRuns);
 loadRuns();
+
+console.log(`[WDIT] background loaded v${EXTENSION_VERSION}`);
 
 chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
   const tabId = sender.tab?.id;
