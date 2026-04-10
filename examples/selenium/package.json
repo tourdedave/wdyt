@@ -1,0 +1,11 @@
+{
+  "name": "wdit-example-selenium",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node google-search.mjs"
+  },
+  "devDependencies": {
+    "selenium-webdriver": "^4.35.0"
+  }
+}
