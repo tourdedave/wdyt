@@ -124,8 +124,14 @@ async function stopChildProcess(child) {
   await new Promise((resolve) => child.once("close", resolve));
 }
 
-async function runCliFlows(workdir) {
-  const child = spawn(process.execPath, [cliEntry, "flows"], {
+async function runCliFlows(workdir, options = { verbose: false }) {
+  const args = [cliEntry, "flows"];
+
+  if (options.verbose) {
+    args.push("--verbose");
+  }
+
+  const child = spawn(process.execPath, args, {
     cwd: workdir,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -268,6 +274,10 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     const flowsOutput = await runCliFlows(tempDir);
     assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Tool\s+Browser\s+Flow/m);
     assert.match(flowsOutput, /1\s+integration\s+search flow\s+integration-test\s+chromium 146\.0\.7680\.178\s+NAVIGATE → CLICK → INPUT → SUBMIT/);
+
+    const verboseFlowsOutput = await runCliFlows(tempDir, { verbose: true });
+    assert.match(verboseFlowsOutput, /URLs:\n\s+- https:\/\/www\.google\.com\/ncr/);
+    assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdit testing"\)/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });

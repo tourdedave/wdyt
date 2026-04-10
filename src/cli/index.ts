@@ -18,6 +18,18 @@ function summarizeList(values: string[]) {
   return `${values[0]}, ${values[1]} +${values.length - 2}`;
 }
 
+function summarizeSamples(values: string[], max = 3) {
+  if (values.length === 0) {
+    return [];
+  }
+
+  return values.slice(0, max);
+}
+
+function truncateDetail(value: string, width = 120) {
+  return truncate(value, width);
+}
+
 function formatBrowser(value: ProcessedRunRecord["environment"] | undefined) {
   const browser = value?.browser;
 
@@ -52,7 +64,7 @@ function truncate(value: string, width: number) {
   return `${value.slice(0, width - 1)}…`;
 }
 
-async function printFlows() {
+async function printFlows(options: { verbose: boolean }) {
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
@@ -65,6 +77,8 @@ async function printFlows() {
       tests: Set<string>;
       tools: Set<string>;
       browsers: Set<string>;
+      urls: Set<string>;
+      targets: Set<string>;
     }
   >();
 
@@ -80,7 +94,31 @@ async function printFlows() {
       }
       current.tools.add(formatTool(record.environment));
       current.browsers.add(formatBrowser(record.environment));
+      for (const event of rawRun?.events ?? []) {
+        if (event.type === "navigate" && event.url) {
+          current.urls.add(event.url);
+        }
+
+        if (event.target?.tag) {
+          const label = event.target.text ? `${event.target.tag}("${event.target.text}")` : event.target.tag;
+          current.targets.add(label);
+        }
+      }
       continue;
+    }
+
+    const urls = new Set<string>();
+    const targets = new Set<string>();
+
+    for (const event of rawRun?.events ?? []) {
+      if (event.type === "navigate" && event.url) {
+        urls.add(event.url);
+      }
+
+      if (event.target?.tag) {
+        const label = event.target.text ? `${event.target.tag}("${event.target.text}")` : event.target.tag;
+        targets.add(label);
+      }
     }
 
     groups.set(record.flowId, {
@@ -90,6 +128,8 @@ async function printFlows() {
       tests: new Set(rawRun?.run.testName ? [rawRun.run.testName] : []),
       tools: new Set([formatTool(record.environment)]),
       browsers: new Set([formatBrowser(record.environment)]),
+      urls,
+      targets,
     });
   }
 
@@ -117,6 +157,8 @@ async function printFlows() {
       tool: summarizeList([...flow.tools].filter((value) => value !== "-").sort()),
       browser: summarizeList([...flow.browsers].filter((value) => value !== "-").sort()),
       flow: formatFlow(flow.canonical),
+      urls: summarizeSamples([...flow.urls].sort()),
+      targets: summarizeSamples([...flow.targets].sort()),
     };
   });
 
@@ -150,18 +192,41 @@ async function printFlows() {
         row.flow,
       ].join("  ")
     );
+
+    if (options.verbose) {
+      console.log("  URLs:");
+      if (row.urls.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const url of row.urls) {
+          console.log(`    - ${truncateDetail(url)}`);
+        }
+      }
+
+      console.log("  Targets:");
+      if (row.targets.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const target of row.targets) {
+          console.log(`    - ${truncateDetail(target)}`);
+        }
+      }
+      console.log("");
+    }
   }
 }
 
 async function main() {
-  const [, , command] = process.argv;
+  const [, , command, ...args] = process.argv;
 
   if (command === "flows") {
-    await printFlows();
+    await printFlows({
+      verbose: args.includes("--verbose"),
+    });
     return;
   }
 
-  console.error("Usage: wdit flows");
+  console.error("Usage: wdit flows [--verbose]");
   process.exitCode = 1;
 }
 
