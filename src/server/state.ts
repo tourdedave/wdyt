@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import { createSuiteInfo } from "../shared/naming.js";
-import type { RunInfo, SuiteInfo } from "../shared/types.js";
+import type { RunEnvironment, RunInfo, SuiteInfo } from "../shared/types.js";
 
 export type RunStatus = "created" | "bound" | "ending" | "ingested";
 
 export type RunRecord = {
   suite: SuiteInfo;
+  environment?: RunEnvironment;
   run: {
     id: string;
     testName: string;
@@ -21,12 +22,13 @@ export type RunRecord = {
 const runsById = new Map<string, RunRecord>();
 const runIdByBrowserSessionId = new Map<string, string>();
 
-export function startRun(input: { suiteName: string; testName: string }) {
+export function startRun(input: { suiteName: string; testName: string; environment?: RunEnvironment }) {
   const runId = randomUUID();
   const startedAt = Date.now();
 
   const record: RunRecord = {
     suite: createSuiteInfo(input.suiteName),
+    environment: input.environment,
     run: {
       id: runId,
       testName: input.testName,
@@ -68,6 +70,7 @@ export function bindRun(input: { runId: string; browserSessionId: string }) {
 
   return {
     suite: record.suite,
+    environment: record.environment,
     run: record.run,
     status: record.status,
     endReason: record.endReason,
@@ -90,6 +93,7 @@ export function getBoundRun(browserSessionId: string) {
 
   return {
     suite: record.suite,
+    environment: record.environment,
     run: record.run,
     status: record.status,
     endReason: record.endReason,
@@ -110,6 +114,21 @@ export function requestRunEnd(input: { runId: string; reason: "completed" | "tim
   return {
     ok: true,
   };
+}
+
+export function updateRunEnvironment(runId: string, environment: RunEnvironment) {
+  const record = runsById.get(runId);
+
+  if (!record) {
+    return null;
+  }
+
+  record.environment = {
+    ...record.environment,
+    ...environment,
+  };
+
+  return record.environment;
 }
 
 export function buildRunInfoForIngest(runId: string, fallbackEndedAt: number, fallbackReason: "completed" | "timeout"): RunInfo | null {

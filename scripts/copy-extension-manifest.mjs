@@ -7,9 +7,6 @@ const projectRoot = path.resolve(__dirname, "..");
 const source = path.join(projectRoot, "extension", "manifest.json");
 const targetDir = path.join(projectRoot, "dist", "extension");
 const target = path.join(targetDir, "manifest.json");
-const bootstrapSource = path.join(projectRoot, "extension", "bootstrap.html");
-const bootstrapTarget = path.join(targetDir, "bootstrap.html");
 
 await mkdir(targetDir, { recursive: true });
 await cp(source, target);
-await cp(bootstrapSource, bootstrapTarget);

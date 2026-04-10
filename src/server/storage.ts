@@ -10,6 +10,7 @@ export async function persistRun(payload: IngestPayload) {
   const processed: ProcessedRunRecord = {
     runId: payload.run.id,
     suite: payload.suite,
+    environment: payload.environment,
     reduced,
     canonical: identity.canonical,
     flowId: identity.flowId,

@@ -53,6 +53,32 @@ async function postJson(serverUrl, pathname, payload) {
   return body;
 }
 
+async function postJsonAllowError(serverUrl, pathname, payload) {
+  const response = await fetch(`${serverUrl}${pathname}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  return {
+    status: response.status,
+    body: await response.json(),
+  };
+}
+
+async function getJson(serverUrl, pathname, headers = {}) {
+  const response = await fetch(`${serverUrl}${pathname}`, { headers });
+  const body = await response.json();
+
+  if (!response.ok) {
+    throw new Error(`${pathname} failed with status ${response.status}: ${JSON.stringify(body)}`);
+  }
+
+  return body;
+}
+
 function spawnServer(workdir, port) {
   const child = spawn(process.execPath, [serverEntry], {
     cwd: workdir,
@@ -143,8 +169,15 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.match(started.runId, /^[0-9a-f-]{36}$/);
     assert.equal(
       started.bootstrapUrl,
-      `chrome-extension://mnffaleoplkcmcdhdlknngjlfcickdme/bootstrap.html?serverUrl=${encodeURIComponent(serverUrl)}&runId=${encodeURIComponent(started.runId)}`
+      `${serverUrl}/bootstrap?serverUrl=${encodeURIComponent(serverUrl)}&runId=${encodeURIComponent(started.runId)}`
     );
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
 
     const bound = await postJson(serverUrl, "/bindings/bind", {
       browserSessionId: "browser-session-1",
@@ -154,14 +187,26 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.equal(bound.ok, true);
     assert.equal(bound.run.id, started.runId);
     assert.equal(bound.status, "bound");
+    assert.deepEqual(bound.environment, {
+      browser: {
+        family: "chromium",
+        version: "146.0.7680.178",
+        source: "bootstrap-request",
+      },
+    });
 
-    const currentBeforeEnd = await fetch(
-      `${serverUrl}/bindings/current?browserSessionId=browser-session-1`
-    ).then((response) => response.json());
+    const currentBeforeEnd = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
 
     assert.equal(currentBeforeEnd.bound, true);
     assert.equal(currentBeforeEnd.run.id, started.runId);
     assert.equal(currentBeforeEnd.status, "bound");
+    assert.deepEqual(currentBeforeEnd.environment, {
+      browser: {
+        family: "chromium",
+        version: "146.0.7680.178",
+        source: "bootstrap-request",
+      },
+    });
 
     const ended = await postJson(serverUrl, "/runs/end", {
       runId: started.runId,
@@ -170,9 +215,7 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     assert.equal(ended.ok, true);
 
-    const currentAfterEnd = await fetch(
-      `${serverUrl}/bindings/current?browserSessionId=browser-session-1`
-    ).then((response) => response.json());
+    const currentAfterEnd = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
 
     assert.equal(currentAfterEnd.bound, true);
     assert.equal(currentAfterEnd.run.id, started.runId);
@@ -180,6 +223,7 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     const ingested = await postJson(serverUrl, "/ingest", {
       suite: bound.suite,
+      environment: bound.environment,
       run: {
         id: started.runId,
         testName: "search flow",
@@ -200,9 +244,7 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.equal(ingested.ok, true);
     assert.match(ingested.flowId, /^[0-9a-f]{16}$/);
 
-    const currentAfterIngest = await fetch(
-      `${serverUrl}/bindings/current?browserSessionId=browser-session-1`
-    ).then((response) => response.json());
+    const currentAfterIngest = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
 
     assert.deepEqual(currentAfterIngest, { bound: false });
 
@@ -211,10 +253,71 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     assert.match(rawRuns, /"id":"integration"/);
     assert.match(rawRuns, new RegExp(`"id":"${started.runId}"`));
+    assert.match(rawRuns, /"family":"chromium"/);
+    assert.match(rawRuns, /"version":"146.0.7680.178"/);
     assert.match(processedRuns, /"canonical":\["NAVIGATE","CLICK","INPUT","SUBMIT"\]/);
+    assert.match(processedRuns, /"family":"chromium"/);
 
     const flowsOutput = await runCliFlows(tempDir);
     assert.equal(flowsOutput, "NAVIGATE → CLICK → INPUT → SUBMIT (1)");
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+
+  assert.match(getOutput(), /WDIT server listening/);
+});
+
+test("API validation rejects missing required fields and accepts omitted optional metadata", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-validation-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const { child, getOutput } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const missingSuite = await postJsonAllowError(serverUrl, "/runs/start", {
+      testName: "missing suite",
+    });
+    assert.equal(missingSuite.status, 400);
+    assert.equal(missingSuite.body.error, "Invalid start run payload");
+
+    const missingTestName = await postJsonAllowError(serverUrl, "/runs/start", {
+      suiteName: "integration",
+    });
+    assert.equal(missingTestName.status, 400);
+    assert.equal(missingTestName.body.error, "Invalid start run payload");
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "validation",
+      testName: "optional metadata omitted",
+    });
+    assert.match(started.runId, /^[0-9a-f-]{36}$/);
+
+    const missingBrowserSession = await postJsonAllowError(serverUrl, "/bindings/bind", {
+      runId: started.runId,
+    });
+    assert.equal(missingBrowserSession.status, 400);
+    assert.equal(missingBrowserSession.body.error, "Invalid bind payload");
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "validation-browser",
+      runId: started.runId,
+    });
+
+    assert.equal(bound.ok, true);
+    assert.equal(bound.environment, undefined);
+
+    const missingRunIdOnEnd = await postJsonAllowError(serverUrl, "/runs/end", {
+      reason: "completed",
+    });
+    assert.equal(missingRunIdOnEnd.status, 400);
+    assert.equal(missingRunIdOnEnd.body.error, "Invalid end run payload");
+
+    const current = await getJson(serverUrl, "/bindings/current?browserSessionId=validation-browser");
+    assert.equal(current.bound, true);
+    assert.equal(current.environment, undefined);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });

@@ -1,5 +1,3 @@
-import { DEFAULT_SERVER_URL } from "../shared/constants.js";
-
 type EventType = "click" | "input" | "change" | "submit" | "navigate";
 
 type BufferedEvent = {
@@ -19,6 +17,13 @@ type BoundRun = {
     id: string;
     name: string;
     normalizedName: string;
+  };
+  environment?: {
+    browser?: {
+      family: string;
+      version: string;
+      source: "bootstrap-request";
+    };
   };
   run: {
     id: string;
@@ -58,6 +63,7 @@ const STORAGE_KEY = "backgroundState";
 const TIMEOUT_MS = 60_000;
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 const SYNC_ALARM = "wdit-sync";
+const DEFAULT_SERVER_URL = "http://127.0.0.1:3876";
 let browserSessionId: string = crypto.randomUUID();
 
 let activeRun: BoundRun | null = null;
@@ -115,6 +121,7 @@ async function finalizeRun(reason: "completed" | "timeout") {
   const runToPersist = activeRun;
   const payload = {
     suite: runToPersist.suite,
+    environment: runToPersist.environment,
     run: {
       id: runToPersist.run.id,
       testName: runToPersist.run.testName,
@@ -179,12 +186,14 @@ async function bindRun(message: BindRunMessage) {
 
   const result = (await response.json()) as {
     suite: BoundRun["suite"];
+    environment?: BoundRun["environment"];
     run: BoundRun["run"];
   };
 
   activeRun = {
     serverUrl: message.serverUrl,
     suite: result.suite,
+    environment: result.environment,
     run: result.run,
     events: [],
     nextSeq: 0,

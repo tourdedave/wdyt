@@ -48,6 +48,9 @@ async function endRun(runId) {
 
 async function main() {
   const options = new chrome.Options();
+  options.setBrowserName("chrome");
+  options.setChromeBinaryPath(process.env.CHROMIUM_BINARY ?? "/Applications/Chromium.app/Contents/MacOS/Chromium");
+  options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
 
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();

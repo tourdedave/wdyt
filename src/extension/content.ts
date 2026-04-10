@@ -12,6 +12,10 @@ type PageBridgeMessage =
 const BRIDGE_EVENT = "wdit:bridge";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
+function isBootstrapPage() {
+  return window.location.pathname === "/bootstrap";
+}
+
 function extractTarget(element: Element) {
   const candidate = element as HTMLElement & { value?: string };
   const text = (candidate.innerText || candidate.value || "")
@@ -30,6 +34,10 @@ function sendRuntimeMessage(message: unknown) {
 }
 
 function sendCapturedDomEvent(type: Exclude<PageEventType, "navigate">, target: EventTarget | null) {
+  if (isBootstrapPage()) {
+    return;
+  }
+
   if (!(target instanceof Element)) {
     return;
   }
@@ -44,6 +52,10 @@ function sendCapturedDomEvent(type: Exclude<PageEventType, "navigate">, target: 
 }
 
 function emitInitialNavigate() {
+  if (isBootstrapPage()) {
+    return;
+  }
+
   sendRuntimeMessage({
     kind: "APPEND_EVENT",
     event: {
@@ -82,6 +94,34 @@ function setupCapture() {
       });
     }
   });
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || !event.data || event.data.kind !== "WDIT_BIND_RUN") {
+      return;
+    }
+
+    chrome.runtime.sendMessage(
+      {
+        kind: "BIND_RUN",
+        serverUrl: event.data.serverUrl,
+        runId: event.data.runId,
+      },
+      (response) => {
+        const result =
+          (response as { ok?: boolean; browserSessionId?: string; error?: string } | undefined) ?? {};
+
+        window.postMessage(
+          {
+            kind: "WDIT_BIND_RESULT",
+            ok: Boolean(result.ok),
+            browserSessionId: result.browserSessionId,
+            error: result.error,
+          },
+          "*"
+        );
+      }
+    );
+  });
 }
 
 injectBridge();
@@ -92,7 +132,7 @@ console.log(`[WDIT] content script loaded v${EXTENSION_VERSION} on ${window.loca
 chrome.runtime.sendMessage({ kind: "GET_STATE" }, (response) => {
   const state = response as { bound?: boolean; browserSessionId?: string } | undefined;
 
-  if (state?.bound) {
+  if (state?.bound && !isBootstrapPage()) {
     emitInitialNavigate();
   }
 

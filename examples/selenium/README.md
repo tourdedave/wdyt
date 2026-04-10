@@ -1,6 +1,6 @@
 # Selenium Example
 
-This example launches Chrome with the unpacked WDIT extension and performs a
+This example launches Chromium with the unpacked WDIT extension and performs a
 small Google search flow.
 
 Setup:
@@ -12,8 +12,14 @@ npm install
 
 Requirements:
 
-- Google Chrome installed
-- ChromeDriver available on your PATH, or Selenium Manager able to resolve it
+- Chromium installed locally
+- ChromeDriver available on your PATH, or Selenium Manager able to resolve a compatible driver
+
+On macOS, the simplest setup is:
+
+```bash
+brew install --cask chromium
+```
 
 Run:
 
@@ -34,3 +40,8 @@ This example uses the same control flow as Playwright:
 - perform the Google search
 - `POST /runs/end`
 - wait briefly for background polling to flush the run
+
+Note:
+
+- Branded Google Chrome 137+ no longer reliably supports unpacked extension loading via the
+  command-line flags used by local automation. Use Chromium or Chrome for Testing for this example.

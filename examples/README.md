@@ -6,7 +6,7 @@ different browser automation tools.
 Current examples:
 
 - `playwright/`: Chromium + extension + Google search smoke test
-- `selenium/`: Chrome + extension + Google search smoke test
+- `selenium/`: Chromium + extension + Google search smoke test
 
 Each example is intentionally small and focused on proving the WDIT loop:
 
