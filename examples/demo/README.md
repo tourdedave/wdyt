@@ -28,6 +28,17 @@ npm start
 
 3. Run one of the demo suites.
 
+Current flow set:
+
+- `login-success-dashboard`
+- `login-success-reports`
+- `login-success-settings`
+- `login-invalid`
+- `search-empty`
+- `search-results`
+- `workspace-tabs`
+- `logout-after-login`
+
 After a run, inspect grouped flows from the repo root:
 
 ```bash

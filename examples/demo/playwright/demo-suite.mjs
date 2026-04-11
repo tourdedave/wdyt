@@ -109,6 +109,21 @@ async function main() {
       await page.waitForURL(/\/search\/empty\?q=empty$/);
     });
 
+    await withBoundPage(context, "search-results", async (page) => {
+      await login(page);
+      await page.getByRole("link", { name: "Open search" }).click();
+      await page.waitForURL(`${demoBaseUrl}/search`);
+      await page.locator('input[name="q"]').fill("wdit");
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL(/\/search\/results\?q=wdit$/);
+    });
+
+    await withBoundPage(context, "login-success-settings", async (page) => {
+      await login(page);
+      await page.getByRole("link", { name: "Open settings" }).click();
+      await page.waitForURL(`${demoBaseUrl}/settings`);
+    });
+
     await withBoundPage(context, "workspace-tabs", async (page) => {
       await login(page);
       await page.getByRole("link", { name: "Workspace", exact: true }).click();
@@ -117,6 +132,12 @@ async function main() {
       await page.waitForURL(`${demoBaseUrl}/workspace/activity`);
       await page.locator('button[data-route="/workspace/details"]').click();
       await page.waitForURL(`${demoBaseUrl}/workspace/details`);
+    });
+
+    await withBoundPage(context, "logout-after-login", async (page) => {
+      await login(page);
+      await page.getByRole("link", { name: "Sign out" }).click();
+      await page.waitForURL(`${demoBaseUrl}/login`);
     });
   } finally {
     await context.close();

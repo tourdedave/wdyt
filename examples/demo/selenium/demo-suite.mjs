@@ -122,6 +122,23 @@ async function main() {
       await driver.wait(until.urlIs(`${demoBaseUrl}/search/empty?q=empty`), 15_000);
     });
 
+    await withBoundDriver(driver, "search-results", async () => {
+      await login(driver);
+      await driver.findElement(By.linkText("Open search")).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
+      const searchInput = await driver.findElement(By.css('input[name="q"]'));
+      await searchInput.clear();
+      await searchInput.sendKeys("wdit");
+      await driver.findElement(By.css('button[type="submit"]')).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdit`), 15_000);
+    });
+
+    await withBoundDriver(driver, "login-success-settings", async () => {
+      await login(driver);
+      await driver.findElement(By.linkText("Open settings")).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/settings`), 15_000);
+    });
+
     await withBoundDriver(driver, "workspace-tabs", async () => {
       await login(driver);
       await driver.findElement(By.linkText("Workspace")).click();
@@ -130,6 +147,12 @@ async function main() {
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace/activity`), 15_000);
       await driver.findElement(By.css('button[data-route="/workspace/details"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace/details`), 15_000);
+    });
+
+    await withBoundDriver(driver, "logout-after-login", async () => {
+      await login(driver);
+      await driver.findElement(By.linkText("Sign out")).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/login`), 15_000);
     });
   } finally {
     await driver.quit();
