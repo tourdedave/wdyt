@@ -8,7 +8,7 @@ const PORT = Number(process.env.DEMO_PORT ?? "4010");
 const HOST = process.env.DEMO_HOST ?? "127.0.0.1";
 const SESSION_COOKIE = "wdit_demo_auth=1";
 const USERNAME = "demo";
-const PASSWORD = "password";
+const PASSWORD = "wdit-demo-2026!";
 
 function html(title: string, body: string, extraScripts = "") {
   return `<!doctype html>

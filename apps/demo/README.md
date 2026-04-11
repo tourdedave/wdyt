@@ -26,4 +26,4 @@ http://127.0.0.1:4010
 Demo credentials:
 
 - username: `demo`
-- password: `password`
+- password: `wdit-demo-2026!`

@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
+const demoPassword = "wdit-demo-2026!";
 
 async function startRun(testName) {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -51,7 +52,7 @@ async function endRun(runId) {
   }
 }
 
-async function login(driver, username = "demo", password = "password") {
+async function login(driver, username = "demo", password = demoPassword) {
   await driver.get(`${demoBaseUrl}/login`);
   const usernameInput = await driver.findElement(By.css('input[name="username"]'));
   const passwordInput = await driver.findElement(By.css('input[name="password"]'));
@@ -62,6 +63,10 @@ async function login(driver, username = "demo", password = "password") {
   await passwordInput.clear();
   await passwordInput.sendKeys(password);
   await submitButton.click();
+
+  if (username === "demo" && password === demoPassword) {
+    await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
+  }
 }
 
 async function withBoundDriver(driver, testName, testFn) {
@@ -97,7 +102,7 @@ async function main() {
 
     await withBoundDriver(driver, "login-success-reports", async () => {
       await login(driver);
-      await driver.findElement(By.css('a[href="/reports"]')).click();
+      await driver.findElement(By.linkText("Open reports")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/reports`), 15_000);
     });
 
@@ -108,7 +113,7 @@ async function main() {
 
     await withBoundDriver(driver, "search-empty", async () => {
       await login(driver);
-      await driver.findElement(By.css('a[href="/search"]')).click();
+      await driver.findElement(By.linkText("Open search")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
       const searchInput = await driver.findElement(By.css('input[name="q"]'));
       await searchInput.clear();
@@ -119,7 +124,7 @@ async function main() {
 
     await withBoundDriver(driver, "workspace-tabs", async () => {
       await login(driver);
-      await driver.findElement(By.css('a[href="/workspace"]')).click();
+      await driver.findElement(By.linkText("Workspace")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace`), 15_000);
       await driver.findElement(By.css('button[data-route="/workspace/activity"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace/activity`), 15_000);

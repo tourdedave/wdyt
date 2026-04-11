@@ -10,6 +10,7 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
+const demoPassword = "wdit-demo-2026!";
 
 async function startRun(testName) {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -50,7 +51,7 @@ async function endRun(runId) {
   }
 }
 
-async function login(page, username = "demo", password = "password") {
+async function login(page, username = "demo", password = demoPassword) {
   await page.goto(`${demoBaseUrl}/login`, { waitUntil: "domcontentloaded" });
   await page.locator('input[name="username"]').fill(username);
   await page.locator('input[name="password"]').fill(password);
@@ -90,7 +91,7 @@ async function main() {
 
     await withBoundPage(context, "login-success-reports", async (page) => {
       await login(page);
-      await page.locator('a[href="/reports"]').click();
+      await page.getByRole("link", { name: "Open reports" }).click();
       await page.waitForURL(`${demoBaseUrl}/reports`);
     });
 
@@ -101,7 +102,7 @@ async function main() {
 
     await withBoundPage(context, "search-empty", async (page) => {
       await login(page);
-      await page.locator('a[href="/search"]').click();
+      await page.getByRole("link", { name: "Open search" }).click();
       await page.waitForURL(`${demoBaseUrl}/search`);
       await page.locator('input[name="q"]').fill("empty");
       await page.locator('button[type="submit"]').click();
@@ -110,7 +111,7 @@ async function main() {
 
     await withBoundPage(context, "workspace-tabs", async (page) => {
       await login(page);
-      await page.locator('a[href="/workspace"]').click();
+      await page.getByRole("link", { name: "Workspace", exact: true }).click();
       await page.waitForURL(`${demoBaseUrl}/workspace`);
       await page.locator('button[data-route="/workspace/activity"]').click();
       await page.waitForURL(`${demoBaseUrl}/workspace/activity`);
