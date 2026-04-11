@@ -79,13 +79,14 @@ async function getJson(serverUrl, pathname, headers = {}) {
   return body;
 }
 
-function spawnServer(workdir, port) {
+function spawnServer(workdir, port, extraEnv = {}) {
   const child = spawn(process.execPath, [serverEntry], {
     cwd: workdir,
     env: {
       ...process.env,
       WDIT_HOST: "127.0.0.1",
       WDIT_PORT: String(port),
+      ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -102,6 +103,21 @@ function spawnServer(workdir, port) {
     child,
     getOutput: () => output,
   };
+}
+
+async function waitForCondition(check, timeoutMs = 10_000) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const result = await check();
+    if (result) {
+      return result;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  throw new Error(`Condition not met within ${timeoutMs}ms`);
 }
 
 async function stopChildProcess(child) {
@@ -584,6 +600,98 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
     assert.ok(reviewFile.every((record) => record.reviewId === record.flowId || record.reviewId.startsWith(`${record.flowId}:`)));
   } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("server materializes review units, proposes descriptors in background, and saves review decisions", { timeout: 20_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-review-ui-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort);
+  const { child } = spawnServer(tempDir, port, {
+    WDIT_LLM_BASE_URL: llmUrl,
+    WDIT_LLM_API_KEY: "ollama",
+    WDIT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "ui review flow",
+      environment: {
+        tool: "integration-test",
+      },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: started.runId,
+        testName: "ui review flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    const proposedUnit = await waitForCondition(async () => {
+      const units = await getJson(serverUrl, "/review/units");
+      const first = units[0];
+      return first?.proposalState === "proposed" ? first : null;
+    });
+
+    assert.equal(proposedUnit.proposedDescriptor, "search ends at dashboard");
+    assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
+
+    const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
+    assert.match(reviewPage, /WDIT Review/);
+
+    const updatedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
+      reviewStatus: "approved",
+      approvedDescriptor: "approved search descriptor",
+      notes: "looks good",
+      promoteVocab: ["search"],
+    });
+
+    assert.equal(updatedUnit.reviewStatus, "approved");
+    assert.equal(updatedUnit.approvedDescriptor, "approved search descriptor");
+    assert.deepEqual(updatedUnit.approvedVocabUsed, ["search"]);
+    assert.deepEqual(updatedUnit.proposedVocab, []);
+
+    const vocabulary = await getJson(serverUrl, "/review/vocabulary");
+    assert.equal(vocabulary[0].term, "search");
+    assert.equal(vocabulary[0].status, "approved");
+  } finally {
+    llmServer.close();
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }

@@ -1,9 +1,10 @@
 import http from "node:http";
 
 import { DEFAULT_SERVER_URL } from "../shared/constants.js";
-import { ensureDataDir } from "../shared/fs.js";
+import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js";
 import type { BrowserInfo, EndRunRequest, StartRunRequest } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
+import { loadReviewUnits, refreshReviewUnits, saveReviewDecision, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
@@ -121,6 +122,166 @@ function renderBootstrapPage() {
           finish("error", "WDIT bind failed", event.data.error || "Unknown error");
         });
       }
+    </script>
+  </body>
+</html>`;
+}
+
+function renderReviewPage() {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WDIT Review</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f1e7;
+        --panel: #fffdf8;
+        --line: #d8cfbf;
+        --ink: #1d1a16;
+        --muted: #6d6458;
+        --accent: #1f6f4a;
+        --accent-2: #8a5a18;
+        --danger: #9f1d1d;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
+      header h1 { margin: 0; font-size: 30px; }
+      header p { margin: 6px 0 0; color: var(--muted); }
+      main { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 89px); }
+      aside { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
+      #units { display: grid; gap: 12px; }
+      .unit-card { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 14px; cursor: pointer; }
+      .unit-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(31,111,74,0.15); }
+      .unit-card h2 { margin: 0 0 8px; font-size: 17px; }
+      .meta { color: var(--muted); font-size: 14px; line-height: 1.4; }
+      .status { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #efe6d7; }
+      section { padding: 24px; overflow: auto; }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+      .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; margin-bottom: 8px; }
+      .descriptor { font-size: 28px; margin: 8px 0 6px; }
+      .confidence { color: var(--accent-2); font-size: 14px; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+      .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 120px; }
+      .list-block h3 { font-size: 15px; margin: 0 0 10px; }
+      ul { margin: 0; padding-left: 18px; }
+      li { margin: 4px 0; }
+      .actions { display: grid; gap: 12px; margin-top: 20px; }
+      input, textarea, button { font: inherit; }
+      textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+      .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
+      button { border: none; border-radius: 999px; padding: 10px 16px; cursor: pointer; background: #efe6d7; }
+      button.primary { background: var(--accent); color: white; }
+      button.reject { background: var(--danger); color: white; }
+      #empty { color: var(--muted); }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>WDIT Review</h1>
+      <p>Review flow variants, approve descriptors, and promote vocabulary.</p>
+    </header>
+    <main>
+      <aside><div id="units"></div></aside>
+      <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
+    </main>
+    <script>
+      let state = { units: [], vocabulary: [], selectedId: null };
+      const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
+      const escapeHtml = (value) => String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+
+      async function loadState() {
+        const [unitsRes, vocabRes] = await Promise.all([fetch("/review/units"), fetch("/review/vocabulary")]);
+        state.units = await unitsRes.json();
+        state.vocabulary = await vocabRes.json();
+        if (!state.selectedId && state.units[0]) state.selectedId = state.units[0].reviewId;
+        render();
+      }
+
+      function renderList() {
+        const container = document.getElementById("units");
+        container.innerHTML = state.units.map((unit) => \`
+          <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
+            <h2>\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
+            <div class="meta">Flow: \${escapeHtml(unit.canonical.join(" → "))}</div>
+            <div class="meta">Count: \${unit.count}</div>
+            <div class="meta">Tests: \${escapeHtml(summarize(unit.tests))}</div>
+            <div class="status">\${escapeHtml(unit.reviewStatus)} / \${escapeHtml(unit.proposalState)}</div>
+          </article>\`).join("");
+        container.querySelectorAll(".unit-card").forEach((node) => {
+          node.addEventListener("click", () => { state.selectedId = node.getAttribute("data-id"); render(); });
+        });
+      }
+
+      function renderListBlock(title, values) {
+        const items = Array.isArray(values) && values.length > 0
+          ? values.map((value) => \`<li>\${escapeHtml(value)}</li>\`).join("")
+          : "<li>-</li>";
+        return \`<div class="list-block"><h3>\${escapeHtml(title)}</h3><ul>\${items}</ul></div>\`;
+      }
+
+      function renderDetail() {
+        const detail = document.getElementById("detail");
+        const unit = state.units.find((candidate) => candidate.reviewId === state.selectedId);
+        if (!unit) {
+          detail.innerHTML = '<p id="empty">Select a flow variant to review.</p>';
+          return;
+        }
+        detail.innerHTML = \`
+          <div class="eyebrow">Review Variant</div>
+          <div class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "Pending proposal")}</div>
+          <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
+          <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
+          <p><strong>Flow:</strong> \${escapeHtml(unit.canonical.join(" → "))}</p>
+          <p><strong>Suites:</strong> \${escapeHtml(summarize(unit.suites))}</p>
+          <p><strong>Tests:</strong> \${escapeHtml(summarize(unit.tests))}</p>
+          <p><strong>Tools:</strong> \${escapeHtml(summarize(unit.tools))}</p>
+          <p><strong>Browsers:</strong> \${escapeHtml(summarize(unit.browsers))}</p>
+          <div class="grid">
+            \${renderListBlock("Final URLs", unit.finalUrls)}
+            \${renderListBlock("Headings", unit.headings)}
+            \${renderListBlock("Alerts", unit.alerts)}
+            \${renderListBlock("Targets", unit.targets)}
+            \${renderListBlock("Candidate Vocab", unit.candidateVocab)}
+            \${renderListBlock("Proposed Vocab", unit.proposedVocab)}
+          </div>
+          <div class="actions">
+            <label><div class="eyebrow">Approved Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "")}" /></label>
+            <label><div class="eyebrow">Promote Vocabulary Terms</div><input id="promoteVocab" value="\${escapeHtml(unit.proposedVocab.join(", "))}" /></label>
+            <label><div class="eyebrow">Notes</div><textarea id="reviewNotes" rows="4">\${escapeHtml(unit.notes || "")}</textarea></label>
+            <div class="button-row">
+              <button class="primary" data-action="approved">Approve</button>
+              <button data-action="overridden">Override</button>
+              <button class="reject" data-action="rejected">Reject</button>
+            </div>
+          </div>\`;
+
+        detail.querySelectorAll("button[data-action]").forEach((button) => {
+          button.addEventListener("click", async () => {
+            const reviewStatus = button.getAttribute("data-action");
+            const approvedDescriptor = document.getElementById("approvedDescriptor").value.trim();
+            const promoteVocab = document.getElementById("promoteVocab").value.split(",").map((value) => value.trim()).filter(Boolean);
+            const notes = document.getElementById("reviewNotes").value.trim();
+            await fetch(\`/review/units/\${encodeURIComponent(unit.reviewId)}\`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ reviewStatus, approvedDescriptor, notes, promoteVocab }),
+            });
+            await loadState();
+          });
+        });
+      }
+
+      function render() { renderList(); renderDetail(); }
+      loadState();
+      setInterval(loadState, 4000);
     </script>
   </body>
 </html>`;
@@ -299,6 +460,7 @@ const server = http.createServer(async (req, res) => {
         events: body.events,
       });
       markRunIngested(runInfo.id, runInfo.endedAt, runInfo.reason);
+      await refreshReviewUnits();
 
       writeJson(res, 202, { ok: true, flowId: processed.flowId });
       return;
@@ -326,6 +488,96 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/review") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(renderReviewPage());
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/review/units") {
+    writeJson(res, 200, await loadReviewUnits());
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/review/vocabulary") {
+    writeJson(res, 200, await readJsonFile(getVocabularyPath(), []));
+    return;
+  }
+
+  if (req.method === "POST" && req.url?.startsWith("/review/units/")) {
+    try {
+      const reviewId = decodeURIComponent(req.url.slice("/review/units/".length));
+      const body = (await readJsonBody(req)) as
+        | {
+            reviewStatus?: "approved" | "rejected" | "overridden";
+            approvedDescriptor?: string;
+            notes?: string;
+            promoteVocab?: string[];
+          }
+        | null;
+
+      if (
+        !body ||
+        (body.reviewStatus !== "approved" && body.reviewStatus !== "rejected" && body.reviewStatus !== "overridden")
+      ) {
+        writeJson(res, 400, { error: "Invalid review payload" });
+        return;
+      }
+
+      const updated = await saveReviewDecision({
+        reviewId,
+        reviewStatus: body.reviewStatus,
+        approvedDescriptor: body.approvedDescriptor,
+        notes: body.notes,
+        promoteVocab: Array.isArray(body.promoteVocab) ? body.promoteVocab : [],
+      });
+
+      if (!updated) {
+        writeJson(res, 404, { error: "Review unit not found" });
+        return;
+      }
+
+      writeJson(res, 200, updated);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
+  if (req.method === "POST" && req.url === "/review/vocabulary") {
+    try {
+      const body = (await readJsonBody(req)) as
+        | { term?: string; status?: "approved" | "rejected" | "proposed"; description?: string; aliases?: string[] }
+        | null;
+
+      if (!body || typeof body.term !== "string") {
+        writeJson(res, 400, { error: "Invalid vocabulary payload" });
+        return;
+      }
+
+      const updated = await upsertVocabulary({
+        term: body.term,
+        status: body.status,
+        description: body.description,
+        aliases: Array.isArray(body.aliases) ? body.aliases : undefined,
+      });
+
+      if (!updated) {
+        writeJson(res, 400, { error: "Vocabulary term is required" });
+        return;
+      }
+
+      writeJson(res, 200, updated);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
   if (req.method === "GET" && req.url === "/health") {
     writeJson(res, 200, { ok: true });
     return;
@@ -335,6 +587,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDataDir();
+await refreshReviewUnits();
 
 server.listen(PORT, HOST, () => {
   console.log(`WDIT server listening on http://${HOST}:${PORT}`);

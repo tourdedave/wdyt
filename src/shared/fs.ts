@@ -23,6 +23,10 @@ export function getVocabularyPath() {
   return path.join(DATA_DIR, "vocabulary.json");
 }
 
+export function getReviewUnitsPath() {
+  return path.join(DATA_DIR, "review-units.json");
+}
+
 export async function ensureDataDir() {
   await mkdir(DATA_DIR, { recursive: true });
 }

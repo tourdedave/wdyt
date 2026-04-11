@@ -116,3 +116,39 @@ export type FlowDescriptorProposal = {
   confidence: number;
   rationale: string;
 };
+
+export type ReviewProposalState = "pending" | "processing" | "proposed" | "error";
+
+export type ReviewDecisionStatus = "pending" | "approved" | "rejected" | "overridden";
+
+export type ReviewUnitRecord = {
+  reviewId: string;
+  flowId: string;
+  variantSignature?: string;
+  canonical: ReducedStep[];
+  count: number;
+  suites: string[];
+  tests: string[];
+  tools: string[];
+  browsers: string[];
+  urls: string[];
+  targets: string[];
+  finalUrls: string[];
+  titles: string[];
+  headings: string[];
+  alerts: string[];
+  proposalState: ReviewProposalState;
+  proposedDescriptor?: string;
+  proposedConfidence?: number;
+  proposedRationale?: string;
+  candidateVocab: string[];
+  approvedVocabUsed: string[];
+  proposedVocab: string[];
+  proposalError?: string;
+  reviewStatus: ReviewDecisionStatus;
+  approvedDescriptor?: string;
+  notes?: string;
+  updatedAt: number;
+  proposedAt?: number;
+  reviewedAt?: number;
+};
