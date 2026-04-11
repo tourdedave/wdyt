@@ -165,7 +165,7 @@ async function captureEndState() {
   }
 
   try {
-    const results = await new Promise<Array<{ result: unknown }>>((resolve) => {
+    const results = await new Promise<Array<{ result: unknown }>>((resolve, reject) => {
       chrome.scripting.executeScript(
         {
           target: { tabId },
@@ -182,7 +182,16 @@ async function captureEndState() {
             };
           },
         },
-        resolve
+        (injectionResults) => {
+          const error = chrome.runtime.lastError;
+
+          if (error?.message) {
+            reject(new Error(error.message));
+            return;
+          }
+
+          resolve(injectionResults);
+        }
       );
     });
 
@@ -194,7 +203,8 @@ async function captureEndState() {
           alertText?: string | null;
         }
       | undefined;
-  } catch {
+  } catch (error) {
+    console.warn("WDIT end-state capture failed", error);
     return undefined;
   }
 }

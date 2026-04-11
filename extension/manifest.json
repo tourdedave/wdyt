@@ -3,8 +3,8 @@
   "name": "WDIT",
   "version": "0.1.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnyFjyzxFFsVpFLo/XQMSXP4Cb3ChupOVRIi/TvaUaaKGqBEwojICcmaB39jWtMb9et3ghNoq2L8bRyYN0ig/ZJAiYerRPcUwir/Ddl5gxmwPsZtq9/arzsg2JtV4RboRjanCG6z/LMCvSgaZyT59/DbXTZLwkr0Iu9KLwsSxwzv0V7D3YlA67v4ty7XnpXKxFMfd5HIsy/GoSItm4LXywgC2FldfrpAev6sn6n7nPYTeKPiavJtOz4FdWujDLe3vVMtTDZXmHXdPg87vOKoSwlNzKRUMDeg633pc5M0TfamjKwzlku0ME11wQR4r4/VBOMzdLryMkZvbcw/O67J/xwIDAQAB",
-  "permissions": ["storage", "alarms", "tabs"],
-  "host_permissions": ["http://127.0.0.1:3876/*"],
+  "permissions": ["storage", "alarms", "tabs", "scripting"],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"
   },

@@ -1,5 +1,10 @@
 declare namespace chrome {
   namespace runtime {
+    let lastError:
+      | {
+          message?: string;
+        }
+      | undefined;
     function getManifest(): { version: string };
     function getURL(path: string): string;
     function sendMessage(
