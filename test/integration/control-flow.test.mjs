@@ -125,15 +125,23 @@ async function stopChildProcess(child) {
 }
 
 async function runCliFlows(workdir, options = { verbose: false }) {
-  const args = [cliEntry, "flows"];
+  const args = ["flows"];
 
   if (options.verbose) {
     args.push("--verbose");
   }
 
-  const child = spawn(process.execPath, args, {
+  return runCli(workdir, args);
+}
+
+async function runCli(workdir, args, stdinText = "", env = {}) {
+  const child = spawn(process.execPath, [cliEntry, ...args], {
     cwd: workdir,
-    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...env,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   let stdout = "";
@@ -146,6 +154,44 @@ async function runCliFlows(workdir, options = { verbose: false }) {
     stderr += chunk.toString();
   });
 
+  if (stdinText) {
+    const responses = stdinText.split("\n").filter((value) => value.length > 0);
+    const promptPattern = /Action \[a=approve, e=edit\/override, r=reject, s=skip, q=quit]: $/;
+
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Timed out waiting for review prompt. stdout=${stdout} stderr=${stderr}`));
+      }, 5_000);
+
+      const maybeSend = () => {
+        if (!promptPattern.test(stdout)) {
+          return;
+        }
+
+        const nextResponse = responses.shift();
+        if (nextResponse === undefined) {
+          clearTimeout(timeout);
+          child.stdin.end();
+          resolve(undefined);
+          return;
+        }
+
+        child.stdin.write(`${nextResponse}\n`);
+
+        if (responses.length === 0) {
+          clearTimeout(timeout);
+          child.stdin.end();
+          resolve(undefined);
+        }
+      };
+
+      child.stdout.on("data", maybeSend);
+      maybeSend();
+    });
+  } else {
+    child.stdin.end();
+  }
+
   const exitCode = await new Promise((resolve, reject) => {
     child.on("error", reject);
     child.on("close", resolve);
@@ -156,6 +202,56 @@ async function runCliFlows(workdir, options = { verbose: false }) {
   }
 
   return stdout.trim();
+}
+
+async function startMockLlmServer(port) {
+  const handler = async (req, res) => {
+    if (req.method === "POST" && req.url === "/v1/chat/completions") {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            id: "chatcmpl-test",
+            object: "chat.completion",
+            created: Date.now(),
+            model: "mistral:instruct",
+            choices: [
+              {
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    descriptor: "search ends at dashboard",
+                    usedVocab: ["search"],
+                    confidence: 0.87,
+                    rationale: "The flow ends at Dashboard and includes search interactions.",
+                  }),
+                },
+                finish_reason: "stop",
+              },
+            ],
+          })
+        );
+      });
+      return;
+    }
+
+    res.writeHead(404);
+    res.end();
+  };
+
+  const http = await import("node:http");
+  const server = http.createServer(handler);
+
+  await new Promise((resolve) => {
+    server.listen(port, "127.0.0.1", resolve);
+  });
+
+  return server;
 }
 
 test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
@@ -290,12 +386,207 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.match(verboseFlowsOutput, /Headings:\n\s+- Dashboard/);
     assert.match(verboseFlowsOutput, /Alerts:\n\s+- -/);
     assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdit testing"\)/);
+
+    const reviewOutput = await runCli(tempDir, ["review"], "a\n");
+    assert.match(reviewOutput, /Proposed descriptor:/);
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8");
+    assert.match(reviewFile, /"descriptorStatus": "approved"/);
+    assert.match(reviewFile, /"approvedDescriptor": "Review flow ending at Dashboard/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }
 
   assert.match(getOutput(), /WDIT server listening/);
+});
+
+test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-review-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const { child } = spawnServer(tempDir, port);
+  const llmServer = await startMockLlmServer(llmPort);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "proposal flow",
+      environment: {
+        tool: "integration-test",
+      },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/runs/end", {
+      runId: started.runId,
+      reason: "completed",
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: started.runId,
+        testName: "proposal flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    const reviewOutput = await runCli(
+      tempDir,
+      ["review", "--propose"],
+      "a\n",
+      {
+        WDIT_LLM_BASE_URL: llmUrl,
+        WDIT_LLM_API_KEY: "ollama",
+        WDIT_LLM_MODEL: "mistral:instruct",
+      }
+    );
+
+    assert.match(reviewOutput, /Confidence: 0\.87/);
+    assert.match(reviewOutput, /Rationale: The flow ends at Dashboard and includes search interactions\./);
+    assert.match(reviewOutput, /Proposed vocab: search/);
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8");
+    assert.match(reviewFile, /"proposedDescriptor": "search ends at dashboard"/);
+    assert.match(reviewFile, /"proposedConfidence": 0.87/);
+    assert.match(reviewFile, /"proposedRationale": "The flow ends at Dashboard and includes search interactions\."/);
+    assert.match(reviewFile, /"usedVocab": \[\]/);
+    assert.match(reviewFile, /"proposedVocab": \[\n\s+"search"\n\s+\]/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review splits one canonical flow into separate outcome variants", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-variants-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const startedA = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "login-success-dashboard",
+      environment: { tool: "integration-test" },
+    });
+    const startedB = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "login-invalid",
+      environment: { tool: "integration-test" },
+    });
+
+    await fetch(startedA.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const boundA = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: startedA.runId,
+    });
+    const boundB = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-2",
+      runId: startedB.runId,
+    });
+
+    const sharedEvents = [
+      { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+      { type: "input", ts: 1010, seq: 1, target: { tag: "input", text: "demo" } },
+      { type: "change", ts: 1020, seq: 2, target: { tag: "input", text: "demo" } },
+      { type: "input", ts: 1030, seq: 3, target: { tag: "input", text: "badpass" } },
+      { type: "change", ts: 1040, seq: 4, target: { tag: "input", text: "badpass" } },
+      { type: "click", ts: 1050, seq: 5, target: { tag: "button", text: "Sign in" } },
+      { type: "submit", ts: 1060, seq: 6, target: { tag: "form", text: "Username Password Sign in" } },
+      { type: "navigate", ts: 1070, seq: 7, url: "http://127.0.0.1:4010/dashboard" },
+    ];
+
+    await postJson(serverUrl, "/ingest", {
+      suite: boundA.suite,
+      environment: boundA.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: startedA.runId,
+        testName: "login-success-dashboard",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: sharedEvents,
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: boundB.suite,
+      environment: boundB.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/login",
+        title: "Demo Login",
+        heading: "Sign in",
+        alertText: "Invalid username or password.",
+      },
+      run: {
+        id: startedB.runId,
+        testName: "login-invalid",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: sharedEvents,
+    });
+
+    const reviewOutput = await runCli(tempDir, ["review"], "a\na\n");
+    assert.match(reviewOutput, /Variant:/);
+    assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
+    assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
+
+    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8"));
+    assert.equal(reviewFile.length, 2);
+    assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
+    assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
+    assert.ok(reviewFile.every((record) => record.reviewId === record.flowId || record.reviewId.startsWith(`${record.flowId}:`)));
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 test("API validation rejects missing required fields and accepts omitted optional metadata", { timeout: 15_000 }, async () => {

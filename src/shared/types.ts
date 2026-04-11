@@ -81,3 +81,38 @@ export type ProcessedRunRecord = {
     canonicalSource: "reducer";
   };
 };
+
+export type DescriptorStatus = "pending" | "approved" | "rejected" | "overridden";
+
+export type FlowReviewRecord = {
+  reviewId: string;
+  flowId: string;
+  variantSignature?: string;
+  canonical: ReducedStep[];
+  proposedDescriptor: string;
+  proposedConfidence?: number;
+  proposedRationale?: string;
+  descriptorStatus: DescriptorStatus;
+  approvedDescriptor?: string;
+  notes?: string;
+  usedVocab: string[];
+  proposedVocab: string[];
+  updatedAt: number;
+};
+
+export type VocabularyStatus = "approved" | "rejected" | "proposed";
+
+export type VocabularyEntry = {
+  term: string;
+  status: VocabularyStatus;
+  description?: string;
+  aliases?: string[];
+  updatedAt: number;
+};
+
+export type FlowDescriptorProposal = {
+  descriptor: string;
+  usedVocab: string[];
+  confidence: number;
+  rationale: string;
+};

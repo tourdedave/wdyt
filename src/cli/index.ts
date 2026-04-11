@@ -1,6 +1,70 @@
 #!/usr/bin/env node
-import { getProcessedRunsPath, getRawRunsPath, readJsonLines } from "../shared/fs.js";
-import type { IngestPayload, ProcessedRunRecord } from "../shared/types.js";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
+import { fileURLToPath } from "node:url";
+import {
+  getFlowReviewsPath,
+  getProcessedRunsPath,
+  getRawRunsPath,
+  getVocabularyPath,
+  readJsonFile,
+  readJsonLines,
+  writeJsonFile,
+} from "../shared/fs.js";
+import type {
+  DescriptorStatus,
+  FlowReviewRecord,
+  IngestPayload,
+  FlowDescriptorProposal,
+  ProcessedRunRecord,
+  VocabularyEntry,
+} from "../shared/types.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const reviewSystemPromptPath = path.join(__dirname, "prompts", "review-system-prompt.txt");
+const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
+const DEFAULT_LLM_API_KEY = "ollama";
+const DEFAULT_LLM_MODEL = "mistral:instruct";
+
+type GroupedFlow = {
+  flowId: string;
+  count: number;
+  canonical: string[];
+  suites: Set<string>;
+  tests: Set<string>;
+  tools: Set<string>;
+  browsers: Set<string>;
+  urls: Set<string>;
+  targets: Set<string>;
+  finalUrls: Set<string>;
+  titles: Set<string>;
+  headings: Set<string>;
+  alerts: Set<string>;
+};
+
+type ReviewUnit = GroupedFlow & {
+  reviewId: string;
+  variantSignature?: string;
+};
+
+type FlowRow = {
+  flowId: string;
+  count: string;
+  suites: string;
+  tests: string;
+  tool: string;
+  browser: string;
+  flow: string;
+  urls: string[];
+  targets: string[];
+  finalUrls: string[];
+  titles: string[];
+  headings: string[];
+  alerts: string[];
+};
 
 function formatFlow(steps: string[]) {
   return steps.join(" \u2192 ");
@@ -19,37 +83,7 @@ function summarizeList(values: string[]) {
 }
 
 function summarizeSamples(values: string[], max = 3) {
-  if (values.length === 0) {
-    return [];
-  }
-
   return values.slice(0, max);
-}
-
-function truncateDetail(value: string, width = 120) {
-  return truncate(value, width);
-}
-
-function formatBrowser(value: ProcessedRunRecord["environment"] | undefined) {
-  const browser = value?.browser;
-
-  if (!browser) {
-    return "-";
-  }
-
-  return `${browser.family} ${browser.version}`;
-}
-
-function formatTool(value: ProcessedRunRecord["environment"] | undefined) {
-  return value?.tool ?? "-";
-}
-
-function pad(value: string, width: number) {
-  if (value.length >= width) {
-    return value;
-  }
-
-  return value.padEnd(width, " ");
 }
 
 function truncate(value: string, width: number) {
@@ -64,119 +98,281 @@ function truncate(value: string, width: number) {
   return `${value.slice(0, width - 1)}…`;
 }
 
-async function printFlows(options: { verbose: boolean }) {
+function truncateDetail(value: string, width = 120) {
+  return truncate(value, width);
+}
+
+function pad(value: string, width: number) {
+  if (value.length >= width) {
+    return value;
+  }
+
+  return value.padEnd(width, " ");
+}
+
+function formatBrowser(value: ProcessedRunRecord["environment"] | undefined) {
+  const browser = value?.browser;
+  return browser ? `${browser.family} ${browser.version}` : "-";
+}
+
+function formatTool(value: ProcessedRunRecord["environment"] | undefined) {
+  return value?.tool ?? "-";
+}
+
+function extractTargetLabel(event: IngestPayload["events"][number]) {
+  if (!event.target?.tag) {
+    return null;
+  }
+
+  return event.target.text ? `${event.target.tag}("${event.target.text}")` : event.target.tag;
+}
+
+function buildProposedDescriptor(flow: GroupedFlow) {
+  const alert = [...flow.alerts][0];
+  if (alert) {
+    return `Review login flow ending with alert: ${alert}`;
+  }
+
+  const heading = [...flow.headings][0];
+  const finalUrl = [...flow.finalUrls][0];
+  if (heading && finalUrl) {
+    return `Review flow ending at ${heading} (${finalUrl})`;
+  }
+
+  if (heading) {
+    return `Review flow ending at ${heading}`;
+  }
+
+  if (finalUrl) {
+    return `Review flow ending at ${finalUrl}`;
+  }
+
+  return `Review flow: ${formatFlow(flow.canonical)}`;
+}
+
+function getVariantSignature(record: ProcessedRunRecord) {
+  return JSON.stringify({
+    finalUrl: record.endState?.finalUrl ?? null,
+    title: record.endState?.title ?? null,
+    heading: record.endState?.heading ?? null,
+    alertText: record.endState?.alertText ?? null,
+  });
+}
+
+function hashVariantSignature(signature: string) {
+  return createHash("sha256").update(signature).digest("hex").slice(0, 12);
+}
+
+function clampConfidence(value: unknown) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizeStringList(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((entry) => String(entry).trim()).filter(Boolean);
+}
+
+function normalizeFlowDescriptorProposal(value: unknown): FlowDescriptorProposal | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const descriptor = typeof candidate.descriptor === "string" ? candidate.descriptor.trim() : "";
+  const rationale = typeof candidate.rationale === "string" ? candidate.rationale.trim() : "";
+  const usedVocab = normalizeStringList(candidate.usedVocab);
+  const confidence = clampConfidence(
+    typeof candidate.confidence === "number" ? candidate.confidence : Number(candidate.confidence)
+  );
+
+  if (!descriptor || !rationale) {
+    return null;
+  }
+
+  return {
+    descriptor,
+    usedVocab,
+    confidence,
+    rationale,
+  };
+}
+
+async function loadGroupedFlows() {
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
-  const groups = new Map<
-    string,
-    {
-      count: number;
-      canonical: string[];
-      suites: Set<string>;
-      tests: Set<string>;
-      tools: Set<string>;
-      browsers: Set<string>;
-      urls: Set<string>;
-      targets: Set<string>;
-      finalUrls: Set<string>;
-      titles: Set<string>;
-      headings: Set<string>;
-      alerts: Set<string>;
-    }
-  >();
+  const groups = new Map<string, GroupedFlow>();
 
   for (const record of records) {
     const rawRun = rawRunById.get(record.runId);
-    const current = groups.get(record.flowId);
+    const current = groups.get(record.flowId) ?? {
+      flowId: record.flowId,
+      count: 0,
+      canonical: record.canonical,
+      suites: new Set<string>(),
+      tests: new Set<string>(),
+      tools: new Set<string>(),
+      browsers: new Set<string>(),
+      urls: new Set<string>(),
+      targets: new Set<string>(),
+      finalUrls: new Set<string>(),
+      titles: new Set<string>(),
+      headings: new Set<string>(),
+      alerts: new Set<string>(),
+    };
 
-    if (current) {
-      current.count += 1;
-      current.suites.add(record.suite.name);
-      if (rawRun?.run.testName) {
-        current.tests.add(rawRun.run.testName);
-      }
-      current.tools.add(formatTool(record.environment));
-      current.browsers.add(formatBrowser(record.environment));
-      for (const event of rawRun?.events ?? []) {
-        if (event.type === "navigate" && event.url) {
-          current.urls.add(event.url);
-        }
-
-        if (event.target?.tag) {
-          const label = event.target.text ? `${event.target.tag}("${event.target.text}")` : event.target.tag;
-          current.targets.add(label);
-        }
-      }
-      if (record.endState?.finalUrl) {
-        current.finalUrls.add(record.endState.finalUrl);
-      }
-      if (record.endState?.title) {
-        current.titles.add(record.endState.title);
-      }
-      if (record.endState?.heading) {
-        current.headings.add(record.endState.heading);
-      }
-      if (record.endState?.alertText) {
-        current.alerts.add(record.endState.alertText);
-      }
-      continue;
+    current.count += 1;
+    current.suites.add(record.suite.name);
+    if (rawRun?.run.testName) {
+      current.tests.add(rawRun.run.testName);
     }
-
-    const urls = new Set<string>();
-    const targets = new Set<string>();
-    const finalUrls = new Set<string>();
-    const titles = new Set<string>();
-    const headings = new Set<string>();
-    const alerts = new Set<string>();
+    current.tools.add(formatTool(record.environment));
+    current.browsers.add(formatBrowser(record.environment));
 
     for (const event of rawRun?.events ?? []) {
       if (event.type === "navigate" && event.url) {
-        urls.add(event.url);
+        current.urls.add(event.url);
       }
 
-      if (event.target?.tag) {
-        const label = event.target.text ? `${event.target.tag}("${event.target.text}")` : event.target.tag;
-        targets.add(label);
+      const targetLabel = extractTargetLabel(event);
+      if (targetLabel) {
+        current.targets.add(targetLabel);
       }
     }
 
     if (record.endState?.finalUrl) {
-      finalUrls.add(record.endState.finalUrl);
+      current.finalUrls.add(record.endState.finalUrl);
     }
     if (record.endState?.title) {
-      titles.add(record.endState.title);
+      current.titles.add(record.endState.title);
     }
     if (record.endState?.heading) {
-      headings.add(record.endState.heading);
+      current.headings.add(record.endState.heading);
     }
     if (record.endState?.alertText) {
-      alerts.add(record.endState.alertText);
+      current.alerts.add(record.endState.alertText);
     }
 
-    groups.set(record.flowId, {
-      count: 1,
-      canonical: record.canonical,
-      suites: new Set([record.suite.name]),
-      tests: new Set(rawRun?.run.testName ? [rawRun.run.testName] : []),
-      tools: new Set([formatTool(record.environment)]),
-      browsers: new Set([formatBrowser(record.environment)]),
-      urls,
-      targets,
-      finalUrls,
-      titles,
-      headings,
-      alerts,
-    });
+    groups.set(record.flowId, current);
   }
 
-  const sorted = [...groups.values()].sort((a, b) => b.count - a.count);
+  return [...groups.values()].sort((a, b) => b.count - a.count);
+}
 
-  if (sorted.length === 0) {
-    console.log("No flows found.");
-    return;
+async function loadReviewUnits() {
+  const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
+  const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
+  const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
+  const recordsByFlow = new Map<string, ProcessedRunRecord[]>();
+
+  for (const record of records) {
+    const current = recordsByFlow.get(record.flowId) ?? [];
+    current.push(record);
+    recordsByFlow.set(record.flowId, current);
   }
 
+  const reviewUnits: ReviewUnit[] = [];
+
+  for (const [flowId, flowRecords] of recordsByFlow) {
+    const variantGroups = new Map<string, ProcessedRunRecord[]>();
+
+    for (const record of flowRecords) {
+      const variantSignature = getVariantSignature(record);
+      const current = variantGroups.get(variantSignature) ?? [];
+      current.push(record);
+      variantGroups.set(variantSignature, current);
+    }
+
+    const hasMultipleVariants = variantGroups.size > 1;
+
+    for (const [variantSignature, variantRecords] of variantGroups) {
+      const firstRecord = variantRecords[0];
+      const unit: ReviewUnit = {
+        reviewId: hasMultipleVariants ? `${flowId}:${hashVariantSignature(variantSignature)}` : flowId,
+        flowId,
+        variantSignature: hasMultipleVariants ? variantSignature : undefined,
+        count: 0,
+        canonical: firstRecord.canonical,
+        suites: new Set<string>(),
+        tests: new Set<string>(),
+        tools: new Set<string>(),
+        browsers: new Set<string>(),
+        urls: new Set<string>(),
+        targets: new Set<string>(),
+        finalUrls: new Set<string>(),
+        titles: new Set<string>(),
+        headings: new Set<string>(),
+        alerts: new Set<string>(),
+      };
+
+      for (const record of variantRecords) {
+        const rawRun = rawRunById.get(record.runId);
+        unit.count += 1;
+        unit.suites.add(record.suite.name);
+        if (rawRun?.run.testName) {
+          unit.tests.add(rawRun.run.testName);
+        }
+        unit.tools.add(formatTool(record.environment));
+        unit.browsers.add(formatBrowser(record.environment));
+
+        for (const event of rawRun?.events ?? []) {
+          if (event.type === "navigate" && event.url) {
+            unit.urls.add(event.url);
+          }
+
+          const targetLabel = extractTargetLabel(event);
+          if (targetLabel) {
+            unit.targets.add(targetLabel);
+          }
+        }
+
+        if (record.endState?.finalUrl) {
+          unit.finalUrls.add(record.endState.finalUrl);
+        }
+        if (record.endState?.title) {
+          unit.titles.add(record.endState.title);
+        }
+        if (record.endState?.heading) {
+          unit.headings.add(record.endState.heading);
+        }
+        if (record.endState?.alertText) {
+          unit.alerts.add(record.endState.alertText);
+        }
+      }
+
+      reviewUnits.push(unit);
+    }
+  }
+
+  return reviewUnits.sort((a, b) => b.count - a.count || a.reviewId.localeCompare(b.reviewId));
+}
+
+function toFlowRows(groupedFlows: GroupedFlow[]): FlowRow[] {
+  return groupedFlows.map((flow) => ({
+    flowId: flow.flowId,
+    count: String(flow.count),
+    suites: summarizeList([...flow.suites].sort()),
+    tests: summarizeList([...flow.tests].sort()),
+    tool: summarizeList([...flow.tools].filter((value) => value !== "-").sort()),
+    browser: summarizeList([...flow.browsers].filter((value) => value !== "-").sort()),
+    flow: formatFlow(flow.canonical),
+    urls: summarizeSamples([...flow.urls].sort()),
+    targets: summarizeSamples([...flow.targets].sort()),
+    finalUrls: summarizeSamples([...flow.finalUrls].sort()),
+    titles: summarizeSamples([...flow.titles].sort()),
+    headings: summarizeSamples([...flow.headings].sort()),
+    alerts: summarizeSamples([...flow.alerts].sort()),
+  }));
+}
+
+function printFlowTable(rows: FlowRow[], options: { verbose: boolean }) {
   const headers = {
     count: "Count",
     suites: "Suites",
@@ -185,23 +381,6 @@ async function printFlows(options: { verbose: boolean }) {
     browser: "Browser",
     flow: "Flow",
   };
-
-  const rows = sorted.map((flow) => {
-    return {
-      count: String(flow.count),
-      suites: summarizeList([...flow.suites].sort()),
-      tests: summarizeList([...flow.tests].sort()),
-      tool: summarizeList([...flow.tools].filter((value) => value !== "-").sort()),
-      browser: summarizeList([...flow.browsers].filter((value) => value !== "-").sort()),
-      flow: formatFlow(flow.canonical),
-      urls: summarizeSamples([...flow.urls].sort()),
-      targets: summarizeSamples([...flow.targets].sort()),
-      finalUrls: summarizeSamples([...flow.finalUrls].sort()),
-      titles: summarizeSamples([...flow.titles].sort()),
-      headings: summarizeSamples([...flow.headings].sort()),
-      alerts: summarizeSamples([...flow.alerts].sort()),
-    };
-  });
 
   const widths = {
     count: Math.max(headers.count.length, ...rows.map((row) => row.count.length)),
@@ -234,62 +413,333 @@ async function printFlows(options: { verbose: boolean }) {
       ].join("  ")
     );
 
-    if (options.verbose) {
-      console.log("  URLs:");
-      if (row.urls.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const url of row.urls) {
-          console.log(`    - ${truncateDetail(url)}`);
-        }
-      }
-
-      console.log("  Final URLs:");
-      if (row.finalUrls.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const url of row.finalUrls) {
-          console.log(`    - ${truncateDetail(url)}`);
-        }
-      }
-
-      console.log("  Titles:");
-      if (row.titles.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const title of row.titles) {
-          console.log(`    - ${truncateDetail(title)}`);
-        }
-      }
-
-      console.log("  Headings:");
-      if (row.headings.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const heading of row.headings) {
-          console.log(`    - ${truncateDetail(heading)}`);
-        }
-      }
-
-      console.log("  Alerts:");
-      if (row.alerts.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const alert of row.alerts) {
-          console.log(`    - ${truncateDetail(alert)}`);
-        }
-      }
-
-      console.log("  Targets:");
-      if (row.targets.length === 0) {
-        console.log("    - -");
-      } else {
-        for (const target of row.targets) {
-          console.log(`    - ${truncateDetail(target)}`);
-        }
-      }
-      console.log("");
+    if (!options.verbose) {
+      continue;
     }
+
+    printDetailList("URLs", row.urls);
+    printDetailList("Final URLs", row.finalUrls);
+    printDetailList("Titles", row.titles);
+    printDetailList("Headings", row.headings);
+    printDetailList("Alerts", row.alerts);
+    printDetailList("Targets", row.targets);
+    console.log("");
+  }
+}
+
+function printDetailList(label: string, values: string[]) {
+  console.log(`  ${label}:`);
+  if (values.length === 0) {
+    console.log("    - -");
+    return;
+  }
+
+  for (const value of values) {
+    console.log(`    - ${truncateDetail(value)}`);
+  }
+}
+
+async function printFlows(options: { verbose: boolean }) {
+  const groupedFlows = await loadGroupedFlows();
+
+  if (groupedFlows.length === 0) {
+    console.log("No flows found.");
+    return;
+  }
+
+  printFlowTable(toFlowRows(groupedFlows), options);
+}
+
+async function loadReviews() {
+  const records = await readJsonFile<FlowReviewRecord[]>(getFlowReviewsPath(), []);
+  return new Map(records.map((record) => [record.reviewId, record]));
+}
+
+async function saveReviews(reviews: Map<string, FlowReviewRecord>) {
+  await writeJsonFile(getFlowReviewsPath(), [...reviews.values()].sort((a, b) => a.reviewId.localeCompare(b.reviewId)));
+}
+
+async function loadVocabulary() {
+  const entries = await readJsonFile<VocabularyEntry[]>(getVocabularyPath(), []);
+  return new Map(entries.map((entry) => [entry.term, entry]));
+}
+
+async function saveVocabulary(vocabulary: Map<string, VocabularyEntry>) {
+  await writeJsonFile(getVocabularyPath(), [...vocabulary.values()].sort((a, b) => a.term.localeCompare(b.term)));
+}
+
+function collectUsedVocab(descriptor: string, vocabulary: Map<string, VocabularyEntry>) {
+  const normalizedDescriptor = descriptor.toLowerCase();
+  return [...vocabulary.keys()]
+    .filter((term) => normalizedDescriptor.includes(term.toLowerCase()))
+    .sort();
+}
+
+function partitionVocabularyTerms(candidateTerms: string[], vocabulary: Map<string, VocabularyEntry>) {
+  const approvedTerms = new Set(
+    [...vocabulary.values()]
+      .filter((entry) => entry.status === "approved")
+      .map((entry) => entry.term.toLowerCase())
+  );
+
+  const usedVocab = new Set<string>();
+  const proposedVocab = new Set<string>();
+
+  for (const term of candidateTerms) {
+    if (approvedTerms.has(term.toLowerCase())) {
+      usedVocab.add(term);
+    } else {
+      proposedVocab.add(term);
+    }
+  }
+
+  return {
+    usedVocab: [...usedVocab].sort(),
+    proposedVocab: [...proposedVocab].sort(),
+  };
+}
+
+async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>) {
+  const baseUrl = process.env.WDIT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
+  const model = process.env.WDIT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
+  const apiKey = process.env.WDIT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+
+  const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
+  const approvedVocabulary = [...vocabulary.values()]
+    .filter((entry) => entry.status === "approved")
+    .map((entry) => ({
+      term: entry.term,
+      description: entry.description ?? null,
+      aliases: entry.aliases ?? [],
+    }));
+
+  const userPrompt = JSON.stringify(
+    {
+      reviewId: flow.reviewId,
+      flowId: flow.flowId,
+      variantSignature: flow.variantSignature ?? null,
+      canonical: flow.canonical,
+      count: flow.count,
+      suites: [...flow.suites].sort(),
+      tests: [...flow.tests].sort(),
+      tools: [...flow.tools].filter((value) => value !== "-").sort(),
+      browsers: [...flow.browsers].filter((value) => value !== "-").sort(),
+      urls: summarizeSamples([...flow.urls].sort(), 5),
+      finalUrls: summarizeSamples([...flow.finalUrls].sort(), 5),
+      titles: summarizeSamples([...flow.titles].sort(), 5),
+      headings: summarizeSamples([...flow.headings].sort(), 5),
+      alerts: summarizeSamples([...flow.alerts].sort(), 5),
+      targets: summarizeSamples([...flow.targets].sort(), 5),
+      approvedVocabulary,
+    },
+    null,
+    2
+  );
+
+  const response = await fetch(new URL("chat/completions", `${baseUrl.replace(/\/?$/, "/")}`).toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      stream: false,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM proposal failed with status ${response.status}: ${errorText}`);
+  }
+
+  const body = (await response.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string;
+      };
+    }>;
+  };
+
+  const content = body.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("LLM response did not include message content");
+  }
+
+  const parsed = normalizeFlowDescriptorProposal(JSON.parse(content) as unknown);
+  if (!parsed) {
+    throw new Error(`LLM response did not match expected schema: ${content}`);
+  }
+
+  return parsed;
+}
+
+async function reviewFlows(options: { propose: boolean }) {
+  const reviewUnits = await loadReviewUnits();
+  if (reviewUnits.length === 0) {
+    console.log("No flows found.");
+    return;
+  }
+
+  const reviews = await loadReviews();
+  const vocabulary = await loadVocabulary();
+  const pendingFlows = reviewUnits.filter((flow) => {
+    const review = reviews.get(flow.reviewId);
+    return !review || review.descriptorStatus === "pending";
+  });
+
+  if (pendingFlows.length === 0) {
+    console.log("No pending flows to review.");
+    return;
+  }
+
+  const rl = createInterface({ input, output });
+
+  try {
+    for (const flow of pendingFlows) {
+      const existing = reviews.get(flow.reviewId);
+      const proposal =
+        options.propose && !existing
+          ? await proposeDescriptor(flow, vocabulary)
+          : {
+              descriptor: existing?.proposedDescriptor ?? buildProposedDescriptor(flow),
+              usedVocab: existing?.usedVocab ?? [],
+              confidence: existing?.proposedConfidence ?? 0,
+              rationale: existing?.proposedRationale ?? "No LLM proposal.",
+            };
+      const vocabPartition = partitionVocabularyTerms(proposal.usedVocab, vocabulary);
+      const row = toFlowRows([flow])[0];
+
+      console.log("");
+      console.log(`Flow: ${row.flow}`);
+      if (flow.variantSignature) {
+        console.log(`Variant: ${flow.reviewId}`);
+      }
+      console.log(`Count: ${row.count}`);
+      console.log(`Suites: ${row.suites}`);
+      console.log(`Tests: ${row.tests}`);
+      console.log(`Tool: ${row.tool}`);
+      console.log(`Browser: ${row.browser}`);
+      printDetailList("Final URLs", row.finalUrls);
+      printDetailList("Headings", row.headings);
+      printDetailList("Alerts", row.alerts);
+      printDetailList("Targets", row.targets);
+      console.log(`  Proposed descriptor: ${proposal.descriptor}`);
+      console.log(`  Confidence: ${proposal.confidence.toFixed(2)}`);
+      console.log(`  Rationale: ${proposal.rationale}`);
+      console.log(`  Used vocab: ${vocabPartition.usedVocab.join(", ") || "-"}`);
+      console.log(`  Proposed vocab: ${vocabPartition.proposedVocab.join(", ") || "-"}`);
+      console.log(`  Approved vocabulary: ${[...vocabulary.keys()].sort().join(", ") || "-"}`);
+
+      const action = (
+        await rl.question("Action [a=approve, e=edit/override, r=reject, s=skip, q=quit]: ")
+      ).trim().toLowerCase();
+
+      if (action === "q") {
+        break;
+      }
+
+      if (action === "s" || action === "") {
+        continue;
+      }
+
+      const now = Date.now();
+
+      if (action === "a") {
+        reviews.set(flow.reviewId, {
+          reviewId: flow.reviewId,
+          flowId: flow.flowId,
+          variantSignature: flow.variantSignature,
+          canonical: flow.canonical as FlowReviewRecord["canonical"],
+          proposedDescriptor: proposal.descriptor,
+          proposedConfidence: proposal.confidence,
+          proposedRationale: proposal.rationale,
+          descriptorStatus: "approved",
+          approvedDescriptor: proposal.descriptor,
+          usedVocab:
+            vocabPartition.usedVocab.length > 0
+              ? vocabPartition.usedVocab
+              : collectUsedVocab(proposal.descriptor, vocabulary),
+          proposedVocab: vocabPartition.proposedVocab,
+          updatedAt: now,
+        });
+        await saveReviews(reviews);
+        continue;
+      }
+
+      if (action === "r") {
+        const notes = (await rl.question("Rejection notes (optional): ")).trim();
+        reviews.set(flow.reviewId, {
+          flowId: flow.flowId,
+          reviewId: flow.reviewId,
+          variantSignature: flow.variantSignature,
+          canonical: flow.canonical as FlowReviewRecord["canonical"],
+          proposedDescriptor: proposal.descriptor,
+          proposedConfidence: proposal.confidence,
+          proposedRationale: proposal.rationale,
+          descriptorStatus: "rejected",
+          notes: notes || undefined,
+          usedVocab: vocabPartition.usedVocab,
+          proposedVocab: vocabPartition.proposedVocab,
+          updatedAt: now,
+        });
+        await saveReviews(reviews);
+        continue;
+      }
+
+      if (action === "e") {
+        const approvedDescriptor = (await rl.question("Approved descriptor: ")).trim();
+        if (!approvedDescriptor) {
+          console.log("Descriptor cannot be empty. Skipping.");
+          continue;
+        }
+
+        const promotedTermsInput = (await rl.question("Promote vocab terms (comma-separated, optional): ")).trim();
+        const promotedTerms = promotedTermsInput
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean);
+
+        for (const term of promotedTerms) {
+          vocabulary.set(term, {
+            term,
+            status: "approved",
+            updatedAt: now,
+          });
+        }
+
+        const notes = (await rl.question("Notes (optional): ")).trim();
+        const usedVocab = collectUsedVocab(approvedDescriptor, vocabulary);
+        reviews.set(flow.reviewId, {
+          flowId: flow.flowId,
+          reviewId: flow.reviewId,
+          variantSignature: flow.variantSignature,
+          canonical: flow.canonical as FlowReviewRecord["canonical"],
+          proposedDescriptor: proposal.descriptor,
+          proposedConfidence: proposal.confidence,
+          proposedRationale: proposal.rationale,
+          descriptorStatus: proposal.descriptor === approvedDescriptor ? "approved" : "overridden",
+          approvedDescriptor,
+          notes: notes || undefined,
+          usedVocab,
+          proposedVocab: [...new Set([...vocabPartition.proposedVocab, ...promotedTerms])],
+          updatedAt: now,
+        });
+        await saveVocabulary(vocabulary);
+        await saveReviews(reviews);
+        continue;
+      }
+
+      console.log("Unknown action. Skipping.");
+    }
+  } finally {
+    rl.close();
   }
 }
 
@@ -303,7 +753,14 @@ async function main() {
     return;
   }
 
-  console.error("Usage: wdit flows [--verbose]");
+  if (command === "review") {
+    await reviewFlows({
+      propose: args.includes("--propose"),
+    });
+    return;
+  }
+
+  console.error("Usage: wdit flows [--verbose] | wdit review [--propose]");
   process.exitCode = 1;
 }
 
