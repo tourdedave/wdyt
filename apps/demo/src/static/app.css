@@ -1,0 +1,110 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #1a1c22;
+  background:
+    radial-gradient(circle at top left, rgba(79, 145, 255, 0.18), transparent 30%),
+    linear-gradient(180deg, #f2f6ff 0%, #eef1f7 100%);
+}
+
+.shell {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+.nav {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.nav a,
+.button,
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: inherit;
+  text-decoration: none;
+  color: #0d2346;
+  background: #dce8ff;
+  cursor: pointer;
+}
+
+.nav a[aria-current="page"] {
+  background: #0d2346;
+  color: white;
+}
+
+.button.secondary {
+  background: #f0f2f7;
+  color: #333949;
+}
+
+.card {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(13, 35, 70, 0.08);
+  border-radius: 24px;
+  padding: 28px;
+  box-shadow: 0 18px 48px rgba(18, 40, 76, 0.08);
+}
+
+.card h1 {
+  margin-top: 0;
+  font-size: 2rem;
+}
+
+.form {
+  display: grid;
+  gap: 16px;
+  max-width: 420px;
+}
+
+.form label {
+  display: grid;
+  gap: 8px;
+}
+
+.form input {
+  border: 1px solid #c3cfdf;
+  border-radius: 12px;
+  padding: 12px 14px;
+  font: inherit;
+  background: white;
+}
+
+.actions,
+.tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.error {
+  color: #a12618;
+  font-weight: 600;
+}
+
+.hint {
+  color: #4e5669;
+}
+
+.workspace-panel {
+  margin-top: 20px;
+  min-height: 160px;
+  border: 1px dashed #b7c6de;
+  border-radius: 18px;
+  padding: 18px;
+  background: #fbfcff;
+}
+
+.workspace-panel h2 {
+  margin-top: 0;
+}
