@@ -3,12 +3,14 @@
 This directory contains end-to-end example tests that exercise WDIT with
 different browser automation tools.
 
-Current examples:
+Current suites:
 
-- `playwright/`: Chromium + extension + Google search smoke test
-- `selenium/`: Chromium + extension + Google search smoke test
+- `smoke/playwright/`: Chromium + extension + Google search smoke test
+- `smoke/selenium/`: Chromium + extension + Google search smoke test
+- `demo/playwright/`: hook-based suite against the controlled demo app
+- `demo/selenium/`: hook-based suite against the controlled demo app
 
-Each example is intentionally small and focused on proving the WDIT loop:
+Smoke examples are intentionally small and focused on proving the WDIT loop:
 
 1. launch a browser with the built WDIT extension loaded
 2. call `POST /runs/start`
@@ -30,5 +32,6 @@ Notes:
 - Google may present locale-specific consent or anti-bot UI. The examples use
   `https://www.google.com/ncr` to reduce redirects, but some environments may
   still need minor adjustments.
-- The Chrome/Chromium extension ID is fixed to
-  `mnffaleoplkcmcdhdlknngjlfcickdme` for bootstrap navigation.
+
+The `demo/` suites are the recommended structure for evaluating reducer quality
+and future semantic descriptions against the controlled app in `apps/demo`.

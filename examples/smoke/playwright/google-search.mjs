@@ -3,10 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { chromium } from "playwright";
 
-import { DEFAULT_SERVER_URL } from "../../dist/shared/constants.js";
+import { DEFAULT_SERVER_URL } from "../../../dist/shared/constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../..");
+const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 
 async function startRun() {
@@ -16,7 +16,7 @@ async function startRun() {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      suiteName: "examples/playwright",
+      suiteName: "examples/smoke/playwright",
       testName: "google search hello world",
       environment: {
         tool: "playwright",

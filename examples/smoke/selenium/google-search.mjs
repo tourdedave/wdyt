@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { Builder, By, Key, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 
-import { DEFAULT_SERVER_URL } from "../../dist/shared/constants.js";
+import { DEFAULT_SERVER_URL } from "../../../dist/shared/constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../..");
+const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 
 async function startRun() {
@@ -17,7 +17,7 @@ async function startRun() {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      suiteName: "examples/selenium",
+      suiteName: "examples/smoke/selenium",
       testName: "google search hello world",
       environment: {
         tool: "selenium",
