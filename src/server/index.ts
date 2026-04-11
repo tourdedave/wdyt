@@ -344,25 +344,39 @@ function renderReviewSummaryPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>WDIT Summary</title>
+    <title>What Did I Test?</title>
     <style>
-      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: #f6f1e7; color: #1d1a16; }
+      :root {
+        color-scheme: light;
+        --bg: #f6f1e7;
+        --panel: #fffdf8;
+        --line: #d8cfbf;
+        --ink: #1d1a16;
+        --muted: #6d6458;
+        --accent: #1f6f4a;
+      }
+      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
+      header h1 { margin: 0; font-size: 30px; }
+      header h1 a { color: inherit; text-decoration: none; }
+      header h1 a:hover { text-decoration: underline; }
+      header p { margin: 6px 0 0; color: var(--muted); }
       main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
-      h1 { margin-top: 0; font-size: 34px; }
-      p { color: #6d6458; }
-      .card { background: #fffdf8; border: 1px solid #d8cfbf; border-radius: 16px; padding: 18px; margin: 14px 0; cursor: pointer; }
+      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin: 14px 0; cursor: pointer; }
       .descriptor { font-size: 24px; margin: 0 0 8px; }
-      .meta { color: #6d6458; margin: 4px 0; }
-      .back { color: #1f6f4a; text-decoration: none; font-weight: 600; }
+      .meta { color: var(--muted); margin: 4px 0; }
+      .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       .details { display: none; margin-top: 10px; }
       .card.expanded .details { display: block; }
-      .review-link { color: #1f6f4a; text-decoration: none; font-weight: 600; }
+      .review-link { color: var(--accent); text-decoration: none; font-weight: 600; }
     </style>
   </head>
   <body>
+    <header>
+      <h1><a href="/review/summary">What Did I Test?</a></h1>
+      <p>Summary</p>
+    </header>
     <main>
-      <h1>WDIT Summary</h1>
-      <p>Approved descriptors and flow variants.</p>
       <div id="summary">Loading…</div>
       <p><a class="back" href="/review">Back to review</a></p>
     </main>
