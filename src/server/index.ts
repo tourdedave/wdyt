@@ -162,7 +162,6 @@ function renderReviewPage() {
       .status { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #efe6d7; }
       section { padding: 24px; overflow: auto; }
       .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
-      .eyebrow { color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; margin-bottom: 8px; }
       .descriptor { font-size: 28px; margin: 8px 0 6px; }
       .confidence { color: var(--accent-2); font-size: 14px; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
@@ -179,6 +178,8 @@ function renderReviewPage() {
       button.reject { background: var(--danger); color: white; }
       #empty { color: var(--muted); }
       .summary-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+      .decision-editor { display: none; }
+      .decision-editor.open { display: grid; }
       @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -192,7 +193,7 @@ function renderReviewPage() {
       <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
     </main>
     <script>
-      let state = { units: [], vocabulary: [], selectedId: null };
+      let state = { units: [], vocabulary: [], selectedId: null, editingId: null };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -213,8 +214,14 @@ function renderReviewPage() {
       async function loadState() {
         const initialReviewId = new URLSearchParams(window.location.search).get("reviewId");
         const [unitsRes, vocabRes] = await Promise.all([fetch("/review/units"), fetch("/review/vocabulary")]);
-        state.units = await unitsRes.json();
+        const nextUnits = await unitsRes.json();
         state.vocabulary = await vocabRes.json();
+        if (state.editingId && nextUnits.some((unit) => unit.reviewId === state.editingId)) {
+          state.units = nextUnits;
+          renderList();
+          return;
+        }
+        state.units = nextUnits;
         const reviewableUnits = getReviewableUnits();
         if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
           state.selectedId = initialReviewId;
@@ -231,9 +238,6 @@ function renderReviewPage() {
         container.innerHTML = state.units.map((unit) => \`
           <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
             <h2>\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
-            <div class="meta">Flow: \${escapeHtml(unit.canonical.join(" → "))}</div>
-            <div class="meta">Count: \${unit.count}</div>
-            <div class="meta">Tests: \${escapeHtml(summarize(unit.tests))}</div>
             <div class="status">\${escapeHtml(getDisplayStatus(unit))}</div>
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
@@ -255,7 +259,7 @@ function renderReviewPage() {
 
         if (!unit) {
           if (reviewableUnits.length === 0) {
-            detail.innerHTML = '<div class="eyebrow">Review Complete</div><p id="empty">Nothing left to review.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
+          detail.innerHTML = '<p id="empty">Nothing left to review.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
           } else {
             state.selectedId = reviewableUnits[0].reviewId;
             render();
@@ -265,7 +269,6 @@ function renderReviewPage() {
 
         const isPending = unit.reviewStatus === "pending";
         detail.innerHTML = \`
-          <div class="eyebrow">Review Variant</div>
           <div class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "Pending proposal")}</div>
           <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
           <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
@@ -283,21 +286,30 @@ function renderReviewPage() {
             \${renderListBlock("Candidate Vocab", unit.candidateVocab)}
             \${renderListBlock("Proposed Vocab", unit.proposedVocab)}
           </div>
-          \${isPending ? \`
-          <div class="actions">
-            <label><div class="eyebrow">Approved Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "")}" /></label>
-            <label><div class="eyebrow">Promote Vocabulary Terms</div><input id="promoteVocab" value="\${escapeHtml(unit.proposedVocab.join(", "))}" /></label>
-            <label><div class="eyebrow">Notes</div><textarea id="reviewNotes" rows="4">\${escapeHtml(unit.notes || "")}</textarea></label>
+          \${!isPending ? '<div class="actions"><div class="button-row"><button id="editDecision">Edit Decision</button></div></div>' : ''}
+          <div class="actions decision-editor \${isPending ? "open" : ""}" id="decisionEditor">
+            <label><div>Approved Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "")}" /></label>
+            <label><div>Promote Vocabulary Terms</div><input id="promoteVocab" value="\${escapeHtml(unit.proposedVocab.join(", "))}" /></label>
+            <label><div>Notes</div><textarea id="reviewNotes" rows="4">\${escapeHtml(unit.notes || "")}</textarea></label>
             <div class="button-row">
               <button class="primary" data-action="approved">Approve</button>
               <button data-action="overridden">Override</button>
               <button class="reject" data-action="rejected">Reject</button>
+              <button type="button" id="cancelDecision">Cancel</button>
             </div>
-          </div>\` : '<p class="meta">This review unit is read-only because it has already been decided.</p>'}\`;
+          </div>\`;
 
         if (!isPending) {
-          return;
+          detail.querySelector("#editDecision")?.addEventListener("click", () => {
+            state.editingId = unit.reviewId;
+            detail.querySelector("#decisionEditor")?.classList.add("open");
+          });
         }
+
+        detail.querySelector("#cancelDecision")?.addEventListener("click", () => {
+          state.editingId = null;
+          render();
+        });
 
         detail.querySelectorAll("button[data-action]").forEach((button) => {
           button.addEventListener("click", async () => {
@@ -312,6 +324,7 @@ function renderReviewPage() {
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ reviewStatus, approvedDescriptor, notes, promoteVocab }),
             });
+            state.editingId = null;
             state.selectedId = nextUnit ? nextUnit.reviewId : null;
             await loadState();
           });
@@ -375,6 +388,7 @@ function renderReviewSummaryPage() {
             <h2 class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
             <p class="meta">Count: \${unit.count}</p>
             <div class="details">
+              <p class="meta">Suites: \${escapeHtml((unit.suites || []).join(", ") || "-")}</p>
               <p class="meta">Tests: \${escapeHtml((unit.tests || []).join(", ") || "-")}</p>
               <p class="meta">Flow: \${escapeHtml((unit.canonical || []).join(" → "))}</p>
               <p class="meta">Final URLs: \${escapeHtml((unit.finalUrls || []).join(", ") || "-")}</p>
