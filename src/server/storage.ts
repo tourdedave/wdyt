@@ -11,6 +11,7 @@ export async function persistRun(payload: IngestPayload) {
     runId: payload.run.id,
     suite: payload.suite,
     environment: payload.environment,
+    endState: payload.endState,
     reduced,
     canonical: identity.canonical,
     flowId: identity.flowId,

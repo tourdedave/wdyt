@@ -36,6 +36,13 @@ export type RunEnvironment = {
   tool?: string;
 };
 
+export type RunEndState = {
+  finalUrl?: string;
+  title?: string | null;
+  heading?: string | null;
+  alertText?: string | null;
+};
+
 export type StartRunRequest = {
   suiteName: string;
   testName: string;
@@ -56,6 +63,7 @@ export type IngestPayload = {
   suite: SuiteInfo;
   run: RunInfo;
   environment?: RunEnvironment;
+  endState?: RunEndState;
   events: WditEvent[];
 };
 
@@ -65,6 +73,7 @@ export type ProcessedRunRecord = {
   runId: string;
   suite: SuiteInfo;
   environment?: RunEnvironment;
+  endState?: RunEndState;
   reduced: ReducedStep[];
   canonical: ReducedStep[];
   flowId: string;

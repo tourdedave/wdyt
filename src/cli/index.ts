@@ -79,6 +79,10 @@ async function printFlows(options: { verbose: boolean }) {
       browsers: Set<string>;
       urls: Set<string>;
       targets: Set<string>;
+      finalUrls: Set<string>;
+      titles: Set<string>;
+      headings: Set<string>;
+      alerts: Set<string>;
     }
   >();
 
@@ -104,11 +108,27 @@ async function printFlows(options: { verbose: boolean }) {
           current.targets.add(label);
         }
       }
+      if (record.endState?.finalUrl) {
+        current.finalUrls.add(record.endState.finalUrl);
+      }
+      if (record.endState?.title) {
+        current.titles.add(record.endState.title);
+      }
+      if (record.endState?.heading) {
+        current.headings.add(record.endState.heading);
+      }
+      if (record.endState?.alertText) {
+        current.alerts.add(record.endState.alertText);
+      }
       continue;
     }
 
     const urls = new Set<string>();
     const targets = new Set<string>();
+    const finalUrls = new Set<string>();
+    const titles = new Set<string>();
+    const headings = new Set<string>();
+    const alerts = new Set<string>();
 
     for (const event of rawRun?.events ?? []) {
       if (event.type === "navigate" && event.url) {
@@ -121,6 +141,19 @@ async function printFlows(options: { verbose: boolean }) {
       }
     }
 
+    if (record.endState?.finalUrl) {
+      finalUrls.add(record.endState.finalUrl);
+    }
+    if (record.endState?.title) {
+      titles.add(record.endState.title);
+    }
+    if (record.endState?.heading) {
+      headings.add(record.endState.heading);
+    }
+    if (record.endState?.alertText) {
+      alerts.add(record.endState.alertText);
+    }
+
     groups.set(record.flowId, {
       count: 1,
       canonical: record.canonical,
@@ -130,6 +163,10 @@ async function printFlows(options: { verbose: boolean }) {
       browsers: new Set([formatBrowser(record.environment)]),
       urls,
       targets,
+      finalUrls,
+      titles,
+      headings,
+      alerts,
     });
   }
 
@@ -159,6 +196,10 @@ async function printFlows(options: { verbose: boolean }) {
       flow: formatFlow(flow.canonical),
       urls: summarizeSamples([...flow.urls].sort()),
       targets: summarizeSamples([...flow.targets].sort()),
+      finalUrls: summarizeSamples([...flow.finalUrls].sort()),
+      titles: summarizeSamples([...flow.titles].sort()),
+      headings: summarizeSamples([...flow.headings].sort()),
+      alerts: summarizeSamples([...flow.alerts].sort()),
     };
   });
 
@@ -200,6 +241,42 @@ async function printFlows(options: { verbose: boolean }) {
       } else {
         for (const url of row.urls) {
           console.log(`    - ${truncateDetail(url)}`);
+        }
+      }
+
+      console.log("  Final URLs:");
+      if (row.finalUrls.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const url of row.finalUrls) {
+          console.log(`    - ${truncateDetail(url)}`);
+        }
+      }
+
+      console.log("  Titles:");
+      if (row.titles.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const title of row.titles) {
+          console.log(`    - ${truncateDetail(title)}`);
+        }
+      }
+
+      console.log("  Headings:");
+      if (row.headings.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const heading of row.headings) {
+          console.log(`    - ${truncateDetail(heading)}`);
+        }
+      }
+
+      console.log("  Alerts:");
+      if (row.alerts.length === 0) {
+        console.log("    - -");
+      } else {
+        for (const alert of row.alerts) {
+          console.log(`    - ${truncateDetail(alert)}`);
         }
       }
 

@@ -295,6 +295,7 @@ const server = http.createServer(async (req, res) => {
         suite: body.suite,
         run: runInfo,
         environment: body.environment,
+        endState: body.endState,
         events: body.events,
       });
       markRunIngested(runInfo.id, runInfo.endedAt, runInfo.reason);

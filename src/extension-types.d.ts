@@ -20,7 +20,21 @@ declare namespace chrome {
   }
 
   namespace tabs {
+    function query(
+      queryInfo: { active?: boolean; currentWindow?: boolean },
+      callback: (tabs: Array<{ id?: number; url?: string }>) => void
+    ): void;
     const onRemoved: { addListener(callback: (tabId: number) => void): void };
+  }
+
+  namespace scripting {
+    function executeScript(
+      injection: {
+        target: { tabId: number };
+        func: () => unknown;
+      },
+      callback: (results: Array<{ result: unknown }>) => void
+    ): void;
   }
 
   namespace alarms {

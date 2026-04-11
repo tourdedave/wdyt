@@ -235,6 +235,12 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     const ingested = await postJson(serverUrl, "/ingest", {
       suite: bound.suite,
       environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
       run: {
         id: started.runId,
         testName: "search flow",
@@ -267,9 +273,11 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.match(rawRuns, /"tool":"integration-test"/);
     assert.match(rawRuns, /"family":"chromium"/);
     assert.match(rawRuns, /"version":"146.0.7680.178"/);
+    assert.match(rawRuns, /"finalUrl":"http:\/\/127\.0\.0\.1:4010\/dashboard"/);
     assert.match(processedRuns, /"canonical":\["NAVIGATE","CLICK","INPUT","SUBMIT"\]/);
     assert.match(processedRuns, /"tool":"integration-test"/);
     assert.match(processedRuns, /"family":"chromium"/);
+    assert.match(processedRuns, /"heading":"Dashboard"/);
 
     const flowsOutput = await runCliFlows(tempDir);
     assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Tool\s+Browser\s+Flow/m);
@@ -277,6 +285,10 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     const verboseFlowsOutput = await runCliFlows(tempDir, { verbose: true });
     assert.match(verboseFlowsOutput, /URLs:\n\s+- https:\/\/www\.google\.com\/ncr/);
+    assert.match(verboseFlowsOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
+    assert.match(verboseFlowsOutput, /Titles:\n\s+- Dashboard/);
+    assert.match(verboseFlowsOutput, /Headings:\n\s+- Dashboard/);
+    assert.match(verboseFlowsOutput, /Alerts:\n\s+- -/);
     assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdit testing"\)/);
   } finally {
     await stopChildProcess(child);

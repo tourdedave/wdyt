@@ -24,6 +24,7 @@ type BoundRun = {
       version: string;
       source: "bootstrap-request";
     };
+    tool?: string;
   };
   run: {
     id: string;
@@ -119,9 +120,11 @@ async function finalizeRun(reason: "completed" | "timeout") {
   }
 
   const runToPersist = activeRun;
+  const endState = await captureEndState();
   const payload = {
     suite: runToPersist.suite,
     environment: runToPersist.environment,
+    endState,
     run: {
       id: runToPersist.run.id,
       testName: runToPersist.run.testName,
@@ -147,6 +150,52 @@ async function finalizeRun(reason: "completed" | "timeout") {
     });
   } catch (error) {
     console.warn("WDIT ingest failed", error);
+  }
+}
+
+async function captureEndState() {
+  const tabs = await new Promise<Array<{ id?: number; url?: string }>>((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, resolve);
+  });
+
+  const tabId = tabs[0]?.id;
+
+  if (typeof tabId !== "number") {
+    return undefined;
+  }
+
+  try {
+    const results = await new Promise<Array<{ result: unknown }>>((resolve) => {
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          func: () => {
+            const heading = document.querySelector("h1")?.textContent?.trim() ?? null;
+            const alertText =
+              document.querySelector('[role="alert"]')?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+
+            return {
+              finalUrl: window.location.href,
+              title: document.title || null,
+              heading: heading || null,
+              alertText: alertText || null,
+            };
+          },
+        },
+        resolve
+      );
+    });
+
+    return results[0]?.result as
+      | {
+          finalUrl?: string;
+          title?: string | null;
+          heading?: string | null;
+          alertText?: string | null;
+        }
+      | undefined;
+  } catch {
+    return undefined;
   }
 }
 
