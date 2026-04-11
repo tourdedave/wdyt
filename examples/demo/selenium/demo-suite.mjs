@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const demoBaseUrl = "http://127.0.0.1:4010";
+const headless = process.env.HEADLESS === "1";
 
 async function startRun(testName) {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -82,6 +83,9 @@ async function main() {
   options.setChromeBinaryPath(process.env.CHROMIUM_BINARY ?? "/Applications/Chromium.app/Contents/MacOS/Chromium");
   options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
+  if (headless) {
+    options.addArguments("--headless=new");
+  }
 
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
 

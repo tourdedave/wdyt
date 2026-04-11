@@ -16,6 +16,12 @@ Run:
 npm test
 ```
 
+Optional headless mode:
+
+```bash
+HEADLESS=1 npm test
+```
+
 Expected WDIT behavior:
 
 - `POST /runs/start` creates a run and returns a bootstrap URL

@@ -8,6 +8,7 @@ import { DEFAULT_SERVER_URL } from "../../../dist/shared/constants.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
+const headless = process.env.HEADLESS === "1";
 
 async function startRun() {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -56,7 +57,7 @@ async function bootstrapBind(page, bootstrapUrl) {
 async function main() {
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
-    headless: false,
+    headless,
     args: [
       `--disable-extensions-except=${extensionPath}`,
       `--load-extension=${extensionPath}`,

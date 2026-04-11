@@ -29,3 +29,9 @@ Run:
 ```bash
 npm test
 ```
+
+Optional headless mode:
+
+```bash
+HEADLESS=1 npm test
+```

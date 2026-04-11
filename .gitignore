@@ -16,4 +16,4 @@ pnpm-debug.log*
 .coverage
 coverage/
 
-examples/**/package-lock.json
+**/package-lock.json

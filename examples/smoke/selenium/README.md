@@ -35,6 +35,12 @@ Run:
 npm test
 ```
 
+Optional headless mode:
+
+```bash
+HEADLESS=1 npm test
+```
+
 After running the example, inspect flows from the repo root:
 
 ```bash
