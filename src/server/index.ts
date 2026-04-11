@@ -149,6 +149,8 @@ function renderReviewPage() {
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
       header h1 { margin: 0; font-size: 30px; }
+      header h1 a { color: inherit; text-decoration: none; }
+      header h1 a:hover { text-decoration: underline; }
       header p { margin: 6px 0 0; color: var(--muted); }
       main { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 89px); }
       aside { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
@@ -176,12 +178,13 @@ function renderReviewPage() {
       button.primary { background: var(--accent); color: white; }
       button.reject { background: var(--danger); color: white; }
       #empty { color: var(--muted); }
+      .summary-link { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
   <body>
     <header>
-      <h1>WDIT Review</h1>
+      <h1><a href="/review/summary">What Did I Test?</a></h1>
       <p>Review flow variants, approve descriptors, and promote vocabulary.</p>
     </header>
     <main>
@@ -196,12 +199,30 @@ function renderReviewPage() {
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
+      const getReviewableUnits = () => state.units.filter((unit) => unit.reviewStatus === "pending");
+      const getDisplayStatus = (unit) => {
+        if (unit.reviewStatus === "approved") return "approved";
+        if (unit.reviewStatus === "rejected") return "rejected";
+        if (unit.reviewStatus === "overridden") return "overridden";
+        if (unit.proposalState === "proposed") return "ready for review";
+        if (unit.proposalState === "processing") return "generating proposal";
+        if (unit.proposalState === "error") return "proposal failed";
+        return "pending";
+      };
 
       async function loadState() {
+        const initialReviewId = new URLSearchParams(window.location.search).get("reviewId");
         const [unitsRes, vocabRes] = await Promise.all([fetch("/review/units"), fetch("/review/vocabulary")]);
         state.units = await unitsRes.json();
         state.vocabulary = await vocabRes.json();
-        if (!state.selectedId && state.units[0]) state.selectedId = state.units[0].reviewId;
+        const reviewableUnits = getReviewableUnits();
+        if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
+          state.selectedId = initialReviewId;
+        }
+        if (!state.selectedId && reviewableUnits[0]) state.selectedId = reviewableUnits[0].reviewId;
+        if (state.selectedId && !state.units.some((unit) => unit.reviewId === state.selectedId)) {
+          state.selectedId = reviewableUnits[0]?.reviewId ?? null;
+        }
         render();
       }
 
@@ -213,7 +234,7 @@ function renderReviewPage() {
             <div class="meta">Flow: \${escapeHtml(unit.canonical.join(" → "))}</div>
             <div class="meta">Count: \${unit.count}</div>
             <div class="meta">Tests: \${escapeHtml(summarize(unit.tests))}</div>
-            <div class="status">\${escapeHtml(unit.reviewStatus)} / \${escapeHtml(unit.proposalState)}</div>
+            <div class="status">\${escapeHtml(getDisplayStatus(unit))}</div>
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
           node.addEventListener("click", () => { state.selectedId = node.getAttribute("data-id"); render(); });
@@ -229,15 +250,25 @@ function renderReviewPage() {
 
       function renderDetail() {
         const detail = document.getElementById("detail");
+        const reviewableUnits = getReviewableUnits();
         const unit = state.units.find((candidate) => candidate.reviewId === state.selectedId);
+
         if (!unit) {
-          detail.innerHTML = '<p id="empty">Select a flow variant to review.</p>';
+          if (reviewableUnits.length === 0) {
+            detail.innerHTML = '<div class="eyebrow">Review Complete</div><p id="empty">Nothing left to review.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
+          } else {
+            state.selectedId = reviewableUnits[0].reviewId;
+            render();
+          }
           return;
         }
+
+        const isPending = unit.reviewStatus === "pending";
         detail.innerHTML = \`
           <div class="eyebrow">Review Variant</div>
           <div class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "Pending proposal")}</div>
           <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
+          <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
           <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
           <p><strong>Flow:</strong> \${escapeHtml(unit.canonical.join(" → "))}</p>
           <p><strong>Suites:</strong> \${escapeHtml(summarize(unit.suites))}</p>
@@ -252,6 +283,7 @@ function renderReviewPage() {
             \${renderListBlock("Candidate Vocab", unit.candidateVocab)}
             \${renderListBlock("Proposed Vocab", unit.proposedVocab)}
           </div>
+          \${isPending ? \`
           <div class="actions">
             <label><div class="eyebrow">Approved Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "")}" /></label>
             <label><div class="eyebrow">Promote Vocabulary Terms</div><input id="promoteVocab" value="\${escapeHtml(unit.proposedVocab.join(", "))}" /></label>
@@ -261,10 +293,16 @@ function renderReviewPage() {
               <button data-action="overridden">Override</button>
               <button class="reject" data-action="rejected">Reject</button>
             </div>
-          </div>\`;
+          </div>\` : '<p class="meta">This review unit is read-only because it has already been decided.</p>'}\`;
+
+        if (!isPending) {
+          return;
+        }
 
         detail.querySelectorAll("button[data-action]").forEach((button) => {
           button.addEventListener("click", async () => {
+            const currentIndex = reviewableUnits.findIndex((candidate) => candidate.reviewId === unit.reviewId);
+            const nextUnit = reviewableUnits[currentIndex + 1] ?? reviewableUnits[currentIndex - 1] ?? null;
             const reviewStatus = button.getAttribute("data-action");
             const approvedDescriptor = document.getElementById("approvedDescriptor").value.trim();
             const promoteVocab = document.getElementById("promoteVocab").value.split(",").map((value) => value.trim()).filter(Boolean);
@@ -274,6 +312,7 @@ function renderReviewPage() {
               headers: { "content-type": "application/json" },
               body: JSON.stringify({ reviewStatus, approvedDescriptor, notes, promoteVocab }),
             });
+            state.selectedId = nextUnit ? nextUnit.reviewId : null;
             await loadState();
           });
         });
@@ -282,6 +321,81 @@ function renderReviewPage() {
       function render() { renderList(); renderDetail(); }
       loadState();
       setInterval(loadState, 4000);
+    </script>
+  </body>
+</html>`;
+}
+
+function renderReviewSummaryPage() {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>WDIT Summary</title>
+    <style>
+      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: #f6f1e7; color: #1d1a16; }
+      main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
+      h1 { margin-top: 0; font-size: 34px; }
+      p { color: #6d6458; }
+      .card { background: #fffdf8; border: 1px solid #d8cfbf; border-radius: 16px; padding: 18px; margin: 14px 0; cursor: pointer; }
+      .descriptor { font-size: 24px; margin: 0 0 8px; }
+      .meta { color: #6d6458; margin: 4px 0; }
+      .back { color: #1f6f4a; text-decoration: none; font-weight: 600; }
+      .details { display: none; margin-top: 10px; }
+      .card.expanded .details { display: block; }
+      .review-link { color: #1f6f4a; text-decoration: none; font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>WDIT Summary</h1>
+      <p>Approved descriptors and flow variants.</p>
+      <div id="summary">Loading…</div>
+      <p><a class="back" href="/review">Back to review</a></p>
+    </main>
+    <script>
+      const escapeHtml = (value) => String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
+
+      async function loadSummary() {
+        const units = await fetch("/review/units").then((response) => response.json());
+        const approved = units.filter((unit) => unit.reviewStatus === "approved" || unit.reviewStatus === "overridden");
+        const target = document.getElementById("summary");
+
+        if (approved.length === 0) {
+          target.innerHTML = "<p>No approved descriptors yet.</p>";
+          return;
+        }
+
+        target.innerHTML = approved.map((unit) => \`
+          <article class="card" data-review-id="\${escapeHtml(unit.reviewId)}">
+            <h2 class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
+            <p class="meta">Count: \${unit.count}</p>
+            <div class="details">
+              <p class="meta">Tests: \${escapeHtml((unit.tests || []).join(", ") || "-")}</p>
+              <p class="meta">Flow: \${escapeHtml((unit.canonical || []).join(" → "))}</p>
+              <p class="meta">Final URLs: \${escapeHtml((unit.finalUrls || []).join(", ") || "-")}</p>
+              <p class="meta">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</p>
+              <p class="meta">Rationale: \${escapeHtml(unit.proposedRationale || "-")}</p>
+              <p><a class="review-link" href="/review?reviewId=\${encodeURIComponent(unit.reviewId)}">Open full review detail</a></p>
+            </div>
+          </article>\`).join("");
+
+        target.querySelectorAll(".card").forEach((card) => {
+          card.addEventListener("click", (event) => {
+            if (event.target.closest("a")) {
+              return;
+            }
+
+            card.classList.toggle("expanded");
+          });
+        });
+      }
+
+      loadSummary();
     </script>
   </body>
 </html>`;
@@ -330,6 +444,7 @@ function inferBrowserInfo(req: http.IncomingMessage): BrowserInfo | undefined {
 const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
+  const requestPath = req.url ? new URL(req.url, getServerUrl(req)).pathname : null;
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -337,7 +452,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && req.url === "/runs/start") {
+  if (req.method === "POST" && requestPath === "/runs/start") {
     try {
       const body = (await readJsonBody(req)) as StartRunRequest | null;
 
@@ -365,7 +480,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "POST" && req.url === "/bindings/bind") {
+  if (req.method === "POST" && requestPath === "/bindings/bind") {
     try {
       const body = (await readJsonBody(req)) as { runId?: string; browserSessionId?: string } | null;
 
@@ -393,8 +508,8 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && req.url?.startsWith("/bindings/current")) {
-    const requestUrl = new URL(req.url, getServerUrl(req));
+  if (req.method === "GET" && requestPath === "/bindings/current") {
+    const requestUrl = new URL(req.url ?? "/bindings/current", getServerUrl(req));
     const browserSessionId = requestUrl.searchParams.get("browserSessionId");
 
     if (!browserSessionId) {
@@ -407,7 +522,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && req.url === "/runs/end") {
+  if (req.method === "POST" && requestPath === "/runs/end") {
     try {
       const body = (await readJsonBody(req)) as EndRunRequest | null;
       const reason = body?.reason ?? "completed";
@@ -436,7 +551,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "POST" && req.url === "/ingest") {
+  if (req.method === "POST" && requestPath === "/ingest") {
     try {
       const body = await readJsonBody(req);
 
@@ -471,8 +586,8 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && req.url?.startsWith("/bootstrap")) {
-    const requestUrl = new URL(req.url, getServerUrl(req));
+  if (req.method === "GET" && requestPath === "/bootstrap") {
+    const requestUrl = new URL(req.url ?? "/bootstrap", getServerUrl(req));
     const runId = requestUrl.searchParams.get("runId");
 
     if (runId) {
@@ -488,25 +603,31 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && req.url === "/review") {
+  if (req.method === "GET" && requestPath === "/review") {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderReviewPage());
     return;
   }
 
-  if (req.method === "GET" && req.url === "/review/units") {
+  if (req.method === "GET" && requestPath === "/review/summary") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(renderReviewSummaryPage());
+    return;
+  }
+
+  if (req.method === "GET" && requestPath === "/review/units") {
     writeJson(res, 200, await loadReviewUnits());
     return;
   }
 
-  if (req.method === "GET" && req.url === "/review/vocabulary") {
+  if (req.method === "GET" && requestPath === "/review/vocabulary") {
     writeJson(res, 200, await readJsonFile(getVocabularyPath(), []));
     return;
   }
 
-  if (req.method === "POST" && req.url?.startsWith("/review/units/")) {
+  if (req.method === "POST" && requestPath?.startsWith("/review/units/")) {
     try {
-      const reviewId = decodeURIComponent(req.url.slice("/review/units/".length));
+      const reviewId = decodeURIComponent(requestPath.slice("/review/units/".length));
       const body = (await readJsonBody(req)) as
         | {
             reviewStatus?: "approved" | "rejected" | "overridden";
@@ -546,7 +667,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "POST" && req.url === "/review/vocabulary") {
+  if (req.method === "POST" && requestPath === "/review/vocabulary") {
     try {
       const body = (await readJsonBody(req)) as
         | { term?: string; status?: "approved" | "rejected" | "proposed"; description?: string; aliases?: string[] }
@@ -578,7 +699,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && req.url === "/health") {
+  if (req.method === "GET" && requestPath === "/health") {
     writeJson(res, 200, { ok: true });
     return;
   }
