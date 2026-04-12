@@ -707,6 +707,9 @@ test("review downweights confidence when validator flags literal input and step 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
 
     assert.equal(requests.length, 1);
+    assert.match(requests[0].messages[0].content, /If `approvedVocab` is empty but the evidence still supports recognizable product, task, or outcome concepts, return 1 to 3 items in `proposedVocab`/);
+    assert.match(requests[0].messages[0].content, /Empty `proposedVocab` is acceptable only when the evidence is too sparse or ambiguous/);
+    assert.match(requests[0].messages[0].content, /If you return no vocabulary terms, explain briefly in the rationale why the evidence was insufficient/);
     assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
     assert.match(reviewOutput, /Confidence: 0\.05/);
     assert.match(reviewOutput, /Proposed vocab: -/);

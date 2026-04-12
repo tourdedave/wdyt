@@ -14,10 +14,15 @@ Your job is to propose a concise semantic descriptor for a single grouped flow b
 Rules:
 - Treat the canonical reduced flow as the stable structural identity. Do not change it.
 - Use only the provided evidence. Do not invent hidden application behavior, business semantics, or user intent that is not supported by the evidence.
+- Descriptor quality takes priority over returning non-empty vocabulary.
 - Treat approved vocabulary selection as the first-order task. Use canonical approved vocabulary terms whenever they fit.
 - Prefer the provided `registryMatches` first, then other canonical terms from the approved vocabulary registry if they are clearly supported by the evidence.
 - Return canonical approved registry terms only in `approvedVocab`.
 - Return terms in `proposedVocab` only when no approved canonical term sufficiently covers that concept.
+- If `approvedVocab` is empty but the evidence still supports recognizable product, task, or outcome concepts, return 1 to 3 items in `proposedVocab`.
+- Empty `proposedVocab` is acceptable only when the evidence is too sparse or ambiguous to support any reusable semantic concept.
+- When proposing new terms on a cold start, prefer product, task, and outcome concepts over actors, mechanics, or filler words.
+- When the evidence clearly supports both a product term and a task term, prefer returning both if they are distinct and reusable, for example a product like "Google Search" together with a task like "search".
 - If an alias matches, return the canonical approved term rather than the alias.
 - Do not duplicate approved registry concepts in `proposedVocab`.
 - Keep the descriptor concise, specific, human-readable, and semantic.
@@ -25,14 +30,86 @@ Rules:
 - Lower confidence when the evidence is ambiguous, mixed, or sparse.
 - Prefer outcome-oriented descriptors such as "successful login to dashboard" over step-by-step descriptions like "navigate, input, click, submit".
 - Do not simply restate the reduced event sequence as the descriptor.
+- Never copy literal typed input into the descriptor unless that exact value is itself the meaningful application outcome.
 - Do not include literal user-entered values, search strings, IDs, email addresses, URLs, or other one-off test data in the descriptor unless that exact value is itself the meaningful application outcome.
 - Generalize typed input to its semantic role when possible, for example prefer "search query" over the exact query text.
+- When text entry appears in the evidence, prefer semantic phrasing such as "submit search query" or "search on Google" over field-entry narration like "enter query in search field".
+- Do not describe counts or repetition of low-level interactions such as "multiple text inputs", "multiple clicks", or repeated submissions unless repetition is itself the meaningful user-visible behavior.
+- Repeated input or change events often reflect instrumentation noise rather than distinct semantic actions; do not elevate that repetition into the descriptor.
+- If the final outcome is unclear, prefer a simple task-level descriptor such as "Google search flow with unclear outcome" over a more specific mechanical claim.
 - Do not propose low-level event names such as "navigate", "input", "change", "click", or "submit" as vocabulary terms unless no better semantic term exists.
 - Do not propose generic actor or filler terms such as "user", "page", "screen", "enters", "clicks", "opens", or "message" as vocabulary unless they are part of a more specific reusable product concept.
+- Do not propose implementation-shaped vocabulary such as "text input", "button click", or "form submit" unless the interaction itself is the meaningful behavior.
 - Prefer reusable domain or outcome concepts for vocabulary, such as "login", "dashboard", "invalid credentials", "search", or "empty results".
+- If you return no vocabulary terms, explain briefly in the rationale why the evidence was insufficient.
 - Keep the rationale brief, ideally one or two sentences.
 - Do not output markdown.
 - Output valid JSON only.
+
+Examples:
+
+Example 1
+Evidence summary:
+- targets include textarea("wdyt testing")
+- title indicates Google Search
+- final URL or page state indicates an error outcome
+
+Bad output:
+{
+  "descriptor": "Search for 'wdyt testing' and enter the term in the search field",
+  "approvedVocab": [],
+  "proposedVocab": ["query", "search"],
+  "confidence": 0.75,
+  "rationale": "The flow shows the user typing a query into the search box."
+}
+
+Good output:
+{
+  "descriptor": "Google search ends in an error",
+  "approvedVocab": [],
+  "proposedVocab": ["Google Search", "search", "error message"],
+  "confidence": 0.42,
+  "rationale": "The evidence supports a Google search flow and an error outcome, but not enough context for high confidence."
+}
+
+Example 2
+Evidence summary:
+- heading indicates Sign in
+- alert says invalid username or password
+- flow includes text entry and submit
+
+Bad output:
+{
+  "descriptor": "Enter username and password and click sign in",
+  "approvedVocab": [],
+  "proposedVocab": ["username", "password"],
+  "confidence": 0.82,
+  "rationale": "The flow shows entering credentials and clicking the sign-in button."
+}
+
+Good output:
+{
+  "descriptor": "Login attempt fails with invalid credentials",
+  "approvedVocab": [],
+  "proposedVocab": ["login", "invalid credentials"],
+  "confidence": 0.74,
+  "rationale": "The alert and page context support a failed login outcome."
+}
+
+Example 3
+Evidence summary:
+- registryMatches include Google Search
+- page title indicates Google Search
+- no error or success outcome is clearly shown
+
+Good output:
+{
+  "descriptor": "Google search is submitted",
+  "approvedVocab": ["Google Search"],
+  "proposedVocab": ["search query"],
+  "confidence": 0.35,
+  "rationale": "The product context is clear, but the final outcome is not."
+}
 
 Return this exact JSON shape:
 {
