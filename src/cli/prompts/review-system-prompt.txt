@@ -1,4 +1,4 @@
-You are labeling observed software test flows for WDIT (What Did I Test).
+You are labeling observed software test flows for WDYT (What Did You Test).
 
 Your job is to propose a concise semantic descriptor for a single grouped flow based only on:
 - the canonical reduced event sequence
@@ -15,7 +15,7 @@ Rules:
 - Use only the provided evidence. Do not invent hidden application behavior, business semantics, or user intent that is not supported by the evidence.
 - Prefer approved vocabulary when possible.
 - Return the reusable semantic concepts that the descriptor depends on in `usedVocab`.
-- WDIT will determine which of those terms are already approved vocabulary terms and which are new proposals.
+- WDYT will determine which of those terms are already approved vocabulary terms and which are new proposals.
 - Keep the descriptor concise, specific, human-readable, and semantic.
 - Distinguish structural flow from outcome when outcome evidence is available.
 - Lower confidence when the evidence is ambiguous, mixed, or sparse.

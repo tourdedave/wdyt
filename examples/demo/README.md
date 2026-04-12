@@ -1,7 +1,7 @@
-# WDIT Demo Suites
+# WDYT Demo Suites
 
 These examples target the controlled demo app in `apps/demo` and represent the
-recommended WDIT integration style.
+recommended WDYT integration style.
 
 Compared with the Google smoke examples, these suites are:
 
@@ -12,7 +12,7 @@ Compared with the Google smoke examples, these suites are:
 
 Prerequisites:
 
-1. Start the WDIT server from the repo root:
+1. Start the WDYT server from the repo root:
 
 ```bash
 node dist/server/index.js

@@ -213,6 +213,6 @@ test("background captures end-state fields before ingest", async () => {
   });
   assert.equal(payload.run.id, "run-1");
   assert.equal(payload.environment.tool, "selenium");
-  assert.ok(createdAlarms.some((alarm) => alarm.name === "wdit-sync"));
-  assert.ok(clearedAlarms.includes("wdit-sync"));
+  assert.ok(createdAlarms.some((alarm) => alarm.name === "wdyt-sync"));
+  assert.ok(clearedAlarms.includes("wdyt-sync"));
 });

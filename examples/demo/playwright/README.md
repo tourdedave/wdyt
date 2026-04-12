@@ -1,6 +1,6 @@
 # Playwright Demo Suite
 
-This suite exercises the controlled demo app using Playwright with WDIT
+This suite exercises the controlled demo app using Playwright with WDYT
 integration managed through setup/teardown hooks.
 
 Setup:

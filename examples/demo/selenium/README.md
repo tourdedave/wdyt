@@ -1,7 +1,7 @@
 # Selenium Demo Suite
 
 This suite exercises the controlled demo app using Selenium + Chromium with
-WDIT integration managed through setup/teardown hooks.
+WDYT integration managed through setup/teardown hooks.
 
 Setup:
 

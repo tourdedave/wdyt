@@ -84,8 +84,8 @@ function spawnServer(workdir, port, extraEnv = {}) {
     cwd: workdir,
     env: {
       ...process.env,
-      WDIT_HOST: "127.0.0.1",
-      WDIT_PORT: String(port),
+      WDYT_HOST: "127.0.0.1",
+      WDYT_PORT: String(port),
       ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -271,7 +271,7 @@ async function startMockLlmServer(port) {
 }
 
 test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-integration-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-integration-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const { child, getOutput } = spawnServer(tempDir, port);
@@ -364,8 +364,8 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
         { type: "navigate", ts: 1000, seq: 0, url: "https://www.google.com/ncr" },
         { type: "click", ts: 1010, seq: 1, target: { tag: "textarea", text: "Search" } },
         { type: "click", ts: 1020, seq: 2, target: { tag: "textarea", text: "Search" } },
-        { type: "input", ts: 1030, seq: 3, target: { tag: "textarea", text: "wdit testing" } },
-        { type: "input", ts: 1040, seq: 4, target: { tag: "textarea", text: "wdit testing" } },
+        { type: "input", ts: 1030, seq: 3, target: { tag: "textarea", text: "wdyt testing" } },
+        { type: "input", ts: 1040, seq: 4, target: { tag: "textarea", text: "wdyt testing" } },
         { type: "submit", ts: 1050, seq: 5, target: { tag: "form", text: null } },
       ],
     });
@@ -377,8 +377,8 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
 
     assert.deepEqual(currentAfterIngest, { bound: false });
 
-    const rawRuns = await readFile(path.join(tempDir, ".wdit", "runs.raw.jsonl"), "utf8");
-    const processedRuns = await readFile(path.join(tempDir, ".wdit", "runs.processed.jsonl"), "utf8");
+    const rawRuns = await readFile(path.join(tempDir, ".wdyt", "runs.raw.jsonl"), "utf8");
+    const processedRuns = await readFile(path.join(tempDir, ".wdyt", "runs.processed.jsonl"), "utf8");
 
     assert.match(rawRuns, /"id":"integration"/);
     assert.match(rawRuns, new RegExp(`"id":"${started.runId}"`));
@@ -401,12 +401,12 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.match(verboseFlowsOutput, /Titles:\n\s+- Dashboard/);
     assert.match(verboseFlowsOutput, /Headings:\n\s+- Dashboard/);
     assert.match(verboseFlowsOutput, /Alerts:\n\s+- -/);
-    assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdit testing"\)/);
+    assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdyt testing"\)/);
 
     const reviewOutput = await runCli(tempDir, ["review"], "a\n");
     assert.match(reviewOutput, /Proposed descriptor:/);
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8");
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
     assert.match(reviewFile, /"descriptorStatus": "approved"/);
     assert.match(reviewFile, /"approvedDescriptor": "Review flow ending at Dashboard/);
   } finally {
@@ -414,11 +414,11 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     await rm(tempDir, { recursive: true, force: true });
   }
 
-  assert.match(getOutput(), /WDIT server listening/);
+  assert.match(getOutput(), /WDYT server listening/);
 });
 
 test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-review-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-"));
   const port = randomPort();
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -481,9 +481,9 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
       ["review", "--propose"],
       "a\n",
       {
-        WDIT_LLM_BASE_URL: llmUrl,
-        WDIT_LLM_API_KEY: "ollama",
-        WDIT_LLM_MODEL: "mistral:instruct",
+        WDYT_LLM_BASE_URL: llmUrl,
+        WDYT_LLM_API_KEY: "ollama",
+        WDYT_LLM_MODEL: "mistral:instruct",
       }
     );
 
@@ -491,7 +491,7 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
     assert.match(reviewOutput, /Rationale: The flow ends at Dashboard and includes search interactions\./);
     assert.match(reviewOutput, /Proposed vocab: search/);
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8");
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
     assert.match(reviewFile, /"proposedDescriptor": "search ends at dashboard"/);
     assert.match(reviewFile, /"proposedConfidence": 0.87/);
     assert.match(reviewFile, /"proposedRationale": "The flow ends at Dashboard and includes search interactions\."/);
@@ -505,7 +505,7 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
 });
 
 test("review splits one canonical flow into separate outcome variants", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-variants-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-variants-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const { child } = spawnServer(tempDir, port);
@@ -594,7 +594,7 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
 
-    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdit", "flow-reviews.json"), "utf8"));
+    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8"));
     assert.equal(reviewFile.length, 2);
     assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
@@ -606,16 +606,16 @@ test("review splits one canonical flow into separate outcome variants", { timeou
 });
 
 test("server materializes review units, proposes descriptors in background, and saves review decisions", { timeout: 20_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-review-ui-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-ui-"));
   const port = randomPort();
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
   const llmServer = await startMockLlmServer(llmPort);
   const { child } = spawnServer(tempDir, port, {
-    WDIT_LLM_BASE_URL: llmUrl,
-    WDIT_LLM_API_KEY: "ollama",
-    WDIT_LLM_MODEL: "mistral:instruct",
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
   });
 
   try {
@@ -673,7 +673,7 @@ test("server materializes review units, proposes descriptors in background, and 
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
     const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
-    assert.match(reviewPage, /WDIT Review/);
+    assert.match(reviewPage, /WDYT Review/);
 
     const updatedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
       reviewStatus: "approved",
@@ -698,7 +698,7 @@ test("server materializes review units, proposes descriptors in background, and 
 });
 
 test("API validation rejects missing required fields and accepts omitted optional metadata", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdit-validation-"));
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-validation-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const { child, getOutput } = spawnServer(tempDir, port);
@@ -752,5 +752,5 @@ test("API validation rejects missing required fields and accepts omitted optiona
     await rm(tempDir, { recursive: true, force: true });
   }
 
-  assert.match(getOutput(), /WDIT server listening/);
+  assert.match(getOutput(), /WDYT server listening/);
 });

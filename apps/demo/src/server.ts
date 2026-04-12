@@ -8,7 +8,7 @@ const PORT = Number(process.env.DEMO_PORT ?? "4010");
 const HOST = process.env.DEMO_HOST ?? "127.0.0.1";
 const SESSION_COOKIE = "wdit_demo_auth=1";
 const USERNAME = "demo";
-const PASSWORD = "wdit-demo-2026!";
+const PASSWORD = "wdyt-demo-2026!";
 
 function html(title: string, body: string, extraScripts = "") {
   return `<!doctype html>
@@ -334,5 +334,5 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`WDIT demo app listening on http://${HOST}:${PORT}`);
+  console.log(`WDYT demo app listening on http://${HOST}:${PORT}`);
 });

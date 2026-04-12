@@ -63,7 +63,7 @@ type ExtensionMessage = AppendEventMessage | GetStateMessage | BindRunMessage | 
 const STORAGE_KEY = "backgroundState";
 const TIMEOUT_MS = 60_000;
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
-const SYNC_ALARM = "wdit-sync";
+const SYNC_ALARM = "wdyt-sync";
 const DEFAULT_SERVER_URL = "http://127.0.0.1:3876";
 let browserSessionId: string = crypto.randomUUID();
 
@@ -98,16 +98,16 @@ function loadState() {
     }
 
     saveState();
-    console.log(`[WDIT] background loaded v${EXTENSION_VERSION} session=${browserSessionId}`);
+    console.log(`[WDYT] background loaded v${EXTENSION_VERSION} session=${browserSessionId}`);
   });
 }
 
 function scheduleTimeout(fromTs: number) {
-  chrome.alarms.create("wdit-timeout", { when: fromTs + TIMEOUT_MS });
+  chrome.alarms.create("wdyt-timeout", { when: fromTs + TIMEOUT_MS });
 }
 
 function clearTimeoutAlarm() {
-  chrome.alarms.clear("wdit-timeout");
+  chrome.alarms.clear("wdyt-timeout");
 }
 
 function scheduleSync() {
@@ -149,7 +149,7 @@ async function finalizeRun(reason: "completed" | "timeout") {
       body: JSON.stringify(payload),
     });
   } catch (error) {
-    console.warn("WDIT ingest failed", error);
+    console.warn("WDYT ingest failed", error);
   }
 }
 
@@ -204,7 +204,7 @@ async function captureEndState() {
         }
       | undefined;
   } catch (error) {
-    console.warn("WDIT end-state capture failed", error);
+    console.warn("WDYT end-state capture failed", error);
     return undefined;
   }
 }
@@ -378,7 +378,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     return;
   }
 
-  if (alarm.name !== "wdit-timeout") {
+  if (alarm.name !== "wdyt-timeout") {
     return;
   }
 

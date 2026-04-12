@@ -11,7 +11,7 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
-const demoPassword = "wdit-demo-2026!";
+const demoPassword = "wdyt-demo-2026!";
 
 async function startRun(testName) {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -128,9 +128,9 @@ async function main() {
       await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
       const searchInput = await driver.findElement(By.css('input[name="q"]'));
       await searchInput.clear();
-      await searchInput.sendKeys("wdit");
+      await searchInput.sendKeys("wdyt");
       await driver.findElement(By.css('button[type="submit"]')).click();
-      await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdit`), 15_000);
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdyt`), 15_000);
     });
 
     await withBoundDriver(driver, "login-success-settings", async () => {

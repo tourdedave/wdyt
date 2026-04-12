@@ -1,10 +1,10 @@
 {
-  "name": "wdit",
+  "name": "wdyt",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "wdit": "./dist/cli/index.js"
+    "wdyt": "./dist/cli/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs && node scripts/copy-cli-assets.mjs",

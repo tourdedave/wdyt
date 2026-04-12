@@ -1,6 +1,6 @@
-# WDIT Example Tests
+# WDYT Example Tests
 
-This directory contains end-to-end example tests that exercise WDIT with
+This directory contains end-to-end example tests that exercise WDYT with
 different browser automation tools.
 
 Current suites:
@@ -10,20 +10,20 @@ Current suites:
 - `demo/playwright/`: hook-based suite against the controlled demo app
 - `demo/selenium/`: hook-based suite against the controlled demo app
 
-Smoke examples are intentionally small and focused on proving the WDIT loop:
+Smoke examples are intentionally small and focused on proving the WDYT loop:
 
-1. launch a browser with the built WDIT extension loaded
+1. launch a browser with the built WDYT extension loaded
 2. call `POST /runs/start`
-3. open the WDIT extension bootstrap page returned by the server to bind the browser to that run
+3. open the WDYT extension bootstrap page returned by the server to bind the browser to that run
 4. perform a small interaction flow on a real page
 5. call `POST /runs/end`
 6. let the extension background poll for the ending state and flush the buffered run
-7. inspect `wdit flows` on the server side
+7. inspect `wdyt flows` on the server side
 
 Prerequisites:
 
 - run `npm run build` in the repo root so `dist/extension/` exists
-- start the WDIT server with `node dist/server/index.js`
+- start the WDYT server with `node dist/server/index.js`
 - install the dependencies in the specific example directory you want to run
 
 Notes:

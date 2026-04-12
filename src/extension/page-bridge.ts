@@ -7,7 +7,7 @@ type BridgeDetail =
       };
     };
 
-const BRIDGE_EVENT = "wdit:bridge";
+const BRIDGE_EVENT = "wdyt:bridge";
 
 function emit(detail: BridgeDetail) {
   document.dispatchEvent(new CustomEvent(BRIDGE_EVENT, { detail }));

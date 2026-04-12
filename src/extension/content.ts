@@ -9,7 +9,7 @@ type PageBridgeMessage =
       };
     };
 
-const BRIDGE_EVENT = "wdit:bridge";
+const BRIDGE_EVENT = "wdyt:bridge";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
 function isBootstrapPage() {
@@ -96,7 +96,7 @@ function setupCapture() {
   });
 
   window.addEventListener("message", (event) => {
-    if (event.source !== window || !event.data || event.data.kind !== "WDIT_BIND_RUN") {
+    if (event.source !== window || !event.data || event.data.kind !== "WDYT_BIND_RUN") {
       return;
     }
 
@@ -112,7 +112,7 @@ function setupCapture() {
 
         window.postMessage(
           {
-            kind: "WDIT_BIND_RESULT",
+            kind: "WDYT_BIND_RESULT",
             ok: Boolean(result.ok),
             browserSessionId: result.browserSessionId,
             error: result.error,
@@ -127,7 +127,7 @@ function setupCapture() {
 injectBridge();
 setupCapture();
 
-console.log(`[WDIT] content script loaded v${EXTENSION_VERSION} on ${window.location.href}`);
+console.log(`[WDYT] content script loaded v${EXTENSION_VERSION} on ${window.location.href}`);
 
 chrome.runtime.sendMessage({ kind: "GET_STATE" }, (response) => {
   const state = response as { bound?: boolean; browserSessionId?: string } | undefined;
@@ -137,6 +137,6 @@ chrome.runtime.sendMessage({ kind: "GET_STATE" }, (response) => {
   }
 
   if (state?.browserSessionId) {
-    console.log(`[WDIT] browser session ${state.browserSessionId}`);
+    console.log(`[WDYT] browser session ${state.browserSessionId}`);
   }
 });

@@ -77,7 +77,7 @@ async function main() {
 
     await searchBox.click();
     await searchBox.clear();
-    await searchBox.sendKeys("wdit testing", Key.ENTER);
+    await searchBox.sendKeys("wdyt testing", Key.ENTER);
 
     await driver.wait(until.urlContains("/search"), 15_000);
     await driver.sleep(2_000);

@@ -8,8 +8,8 @@ import { loadReviewUnits, refreshReviewUnits, saveReviewDecision, upsertVocabula
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
-const HOST = process.env.WDIT_HOST ?? "127.0.0.1";
-const PORT = Number(process.env.WDIT_PORT ?? "3876");
+const HOST = process.env.WDYT_HOST ?? process.env.WDIT_HOST ?? "127.0.0.1";
+const PORT = Number(process.env.WDYT_PORT ?? process.env.WDIT_PORT ?? "3876");
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -37,7 +37,7 @@ function renderBootstrapPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>WDIT Bootstrap</title>
+    <title>WDYT Bootstrap</title>
     <style>
       body {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -52,7 +52,7 @@ function renderBootstrapPage() {
     </style>
   </head>
   <body>
-    <h1 id="status">WDIT initializing</h1>
+    <h1 id="status">WDYT initializing</h1>
     <pre id="details"></pre>
     <script>
       const statusEl = document.getElementById("status");
@@ -85,7 +85,7 @@ function renderBootstrapPage() {
       } else {
         const timeoutId = setTimeout(() => {
           if (!resolved) {
-            finish("error", "WDIT bind timed out", "No response from content script bridge");
+            finish("error", "WDYT bind timed out", "No response from content script bridge");
           }
         }, 5000);
 
@@ -97,7 +97,7 @@ function renderBootstrapPage() {
 
           window.postMessage(
             {
-              kind: "WDIT_BIND_RUN",
+              kind: "WDYT_BIND_RUN",
               runId,
               serverUrl
             },
@@ -106,20 +106,20 @@ function renderBootstrapPage() {
         }, 250);
 
         window.addEventListener("message", (event) => {
-          if (event.source !== window || !event.data || event.data.kind !== "WDIT_BIND_RESULT") {
+          if (event.source !== window || !event.data || event.data.kind !== "WDYT_BIND_RESULT") {
             return;
           }
 
           if (event.data.ok) {
             clearTimeout(timeoutId);
             clearInterval(bindIntervalId);
-            finish("ok", "WDIT bound", \`runId=\${runId} browserSessionId=\${event.data.browserSessionId}\`);
+            finish("ok", "WDYT bound", \`runId=\${runId} browserSessionId=\${event.data.browserSessionId}\`);
             return;
           }
 
           clearTimeout(timeoutId);
           clearInterval(bindIntervalId);
-          finish("error", "WDIT bind failed", event.data.error || "Unknown error");
+          finish("error", "WDYT bind failed", event.data.error || "Unknown error");
         });
       }
     </script>
@@ -132,7 +132,7 @@ function renderReviewPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>WDIT Review</title>
+    <title>WDYT Review</title>
     <style>
       :root {
         color-scheme: light;
@@ -185,7 +185,7 @@ function renderReviewPage() {
   </head>
   <body>
     <header>
-      <h1><a href="/review/summary">What Did I Test?</a></h1>
+      <h1><a href="/review/summary">What Did You Test?</a></h1>
       <p>Review flow variants, approve descriptors, and promote vocabulary.</p>
     </header>
     <main>
@@ -344,7 +344,7 @@ function renderReviewSummaryPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>What Did I Test?</title>
+    <title>What Did You Test?</title>
     <style>
       :root {
         color-scheme: light;
@@ -373,7 +373,7 @@ function renderReviewSummaryPage() {
   </head>
   <body>
     <header>
-      <h1><a href="/review/summary">What Did I Test?</a></h1>
+      <h1><a href="/review/summary">What Did You Test?</a></h1>
       <p>Summary</p>
     </header>
     <main>
@@ -400,7 +400,6 @@ function renderReviewSummaryPage() {
         target.innerHTML = approved.map((unit) => \`
           <article class="card" data-review-id="\${escapeHtml(unit.reviewId)}">
             <h2 class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
-            <p class="meta">Count: \${unit.count}</p>
             <div class="details">
               <p class="meta">Suites: \${escapeHtml((unit.suites || []).join(", ") || "-")}</p>
               <p class="meta">Tests: \${escapeHtml((unit.tests || []).join(", ") || "-")}</p>
@@ -739,5 +738,5 @@ await ensureDataDir();
 await refreshReviewUnits();
 
 server.listen(PORT, HOST, () => {
-  console.log(`WDIT server listening on http://${HOST}:${PORT}`);
+  console.log(`WDYT server listening on http://${HOST}:${PORT}`);
 });

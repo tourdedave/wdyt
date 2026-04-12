@@ -1,6 +1,6 @@
-# WDIT Demo App
+# WDYT Demo App
 
-Controlled demo target for WDIT.
+Controlled demo target for WDYT.
 
 Included flows:
 
@@ -26,4 +26,4 @@ http://127.0.0.1:4010
 Demo credentials:
 
 - username: `demo`
-- password: `wdit-demo-2026!`
+- password: `wdyt-demo-2026!`

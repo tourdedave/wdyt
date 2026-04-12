@@ -153,7 +153,7 @@ export async function loadReviewUnits() {
 }
 
 export async function buildReviewUnits() {
-  console.log("[WDIT] rebuilding review units from persisted runs");
+  console.log("[WDYT] rebuilding review units from persisted runs");
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
@@ -280,14 +280,14 @@ export async function buildReviewUnits() {
     });
 
   await saveReviewUnits(materialized);
-  console.log(`[WDIT] review units ready count=${materialized.length}`);
+  console.log(`[WDYT] review units ready count=${materialized.length}`);
   return materialized;
 }
 
 async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[]) {
-  const baseUrl = process.env.WDIT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
-  const model = process.env.WDIT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
-  const apiKey = process.env.WDIT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? process.env.WDIT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
+  const model = process.env.WDYT_LLM_MODEL ?? process.env.WDIT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
+  const apiKey = process.env.WDYT_LLM_API_KEY ?? process.env.WDIT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const approvedVocabulary = vocabulary
     .filter((entry) => entry.status === "approved")
@@ -375,12 +375,12 @@ async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyE
 
 export async function queueProposalProcessing() {
   if (processingQueue) {
-    console.log("[WDIT] proposal worker already running");
+    console.log("[WDYT] proposal worker already running");
     return;
   }
 
   processingQueue = true;
-  console.log("[WDIT] proposal worker started");
+  console.log("[WDYT] proposal worker started");
 
   try {
     while (true) {
@@ -391,11 +391,11 @@ export async function queueProposalProcessing() {
       );
 
       if (!nextUnit) {
-        console.log("[WDIT] proposal worker idle");
+        console.log("[WDYT] proposal worker idle");
         break;
       }
 
-      console.log(`[WDIT] proposing descriptor reviewId=${nextUnit.reviewId}`);
+      console.log(`[WDYT] proposing descriptor reviewId=${nextUnit.reviewId}`);
       nextUnit.proposalState = "processing";
       nextUnit.proposalError = undefined;
       nextUnit.updatedAt = Date.now();
@@ -414,25 +414,25 @@ export async function queueProposalProcessing() {
         nextUnit.proposedAt = Date.now();
         nextUnit.updatedAt = nextUnit.proposedAt;
         console.log(
-          `[WDIT] proposal ready reviewId=${nextUnit.reviewId} descriptor=${JSON.stringify(nextUnit.proposedDescriptor)}`
+          `[WDYT] proposal ready reviewId=${nextUnit.reviewId} descriptor=${JSON.stringify(nextUnit.proposedDescriptor)}`
         );
       } catch (error) {
         nextUnit.proposalState = "error";
         nextUnit.proposalError = error instanceof Error ? error.message : "Unknown proposal error";
         nextUnit.updatedAt = Date.now();
-        console.warn(`[WDIT] proposal failed reviewId=${nextUnit.reviewId}`, nextUnit.proposalError);
+        console.warn(`[WDYT] proposal failed reviewId=${nextUnit.reviewId}`, nextUnit.proposalError);
       }
 
       await saveReviewUnits(reviewUnits);
     }
   } finally {
     processingQueue = false;
-    console.log("[WDIT] proposal worker stopped");
+    console.log("[WDYT] proposal worker stopped");
   }
 }
 
 export async function refreshReviewUnits() {
-  console.log("[WDIT] refreshing review units");
+  console.log("[WDYT] refreshing review units");
   await buildReviewUnits();
   void queueProposalProcessing();
 }
@@ -444,7 +444,7 @@ export async function saveReviewDecision(input: {
   notes?: string;
   promoteVocab?: string[];
 }) {
-  console.log(`[WDIT] saving review decision reviewId=${input.reviewId} status=${input.reviewStatus}`);
+  console.log(`[WDYT] saving review decision reviewId=${input.reviewId} status=${input.reviewStatus}`);
   const reviewUnits = await loadReviewUnits();
   const reviewUnit = reviewUnits.find((unit) => unit.reviewId === input.reviewId);
 
@@ -485,7 +485,7 @@ export async function saveReviewDecision(input: {
 
   await writeJsonFile(getVocabularyPath(), vocabulary.sort((a, b) => a.term.localeCompare(b.term)));
   await saveReviewUnits(reviewUnits);
-  console.log(`[WDIT] review decision saved reviewId=${input.reviewId}`);
+  console.log(`[WDYT] review decision saved reviewId=${input.reviewId}`);
   return reviewUnit;
 }
 
@@ -500,7 +500,7 @@ export async function upsertVocabulary(input: {
     return null;
   }
 
-  console.log(`[WDIT] upserting vocabulary term=${term} status=${input.status ?? "approved"}`);
+  console.log(`[WDYT] upserting vocabulary term=${term} status=${input.status ?? "approved"}`);
 
   const vocabulary = await loadVocabulary();
   const now = Date.now();

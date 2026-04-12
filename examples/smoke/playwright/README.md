@@ -1,6 +1,6 @@
 # Playwright Example
 
-This example launches Chromium with the unpacked WDIT extension and performs a
+This example launches Chromium with the unpacked WDYT extension and performs a
 small Google search flow.
 
 Setup:
@@ -22,7 +22,7 @@ Optional headless mode:
 HEADLESS=1 npm test
 ```
 
-Expected WDIT behavior:
+Expected WDYT behavior:
 
 - `POST /runs/start` creates a run and returns a bootstrap URL
 - the bootstrap page binds this browser instance to that run
@@ -33,5 +33,5 @@ Expected WDIT behavior:
 After running the example, inspect flows from the repo root:
 
 ```bash
-wdit flows
+wdyt flows
 ```

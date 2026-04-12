@@ -74,7 +74,7 @@ async function main() {
     const searchBox = page.locator('textarea[name="q"], input[name="q"]').first();
     await searchBox.waitFor({ state: "visible", timeout: 15_000 });
     await searchBox.click();
-    await searchBox.fill("wdit testing");
+    await searchBox.fill("wdyt testing");
     await searchBox.press("Enter");
 
     await page.waitForLoadState("domcontentloaded");

@@ -1,6 +1,6 @@
 # Selenium Example
 
-This example launches Chromium with the unpacked WDIT extension and performs a
+This example launches Chromium with the unpacked WDYT extension and performs a
 small Google search flow.
 
 Setup:
@@ -44,13 +44,13 @@ HEADLESS=1 npm test
 After running the example, inspect flows from the repo root:
 
 ```bash
-wdit flows
+wdyt flows
 ```
 
 This example uses the same control flow as Playwright:
 
 - `POST /runs/start`
-- navigate to the returned WDIT bootstrap page
+- navigate to the returned WDYT bootstrap page
 - perform the Google search
 - `POST /runs/end`
 - wait briefly for background polling to flush the run
