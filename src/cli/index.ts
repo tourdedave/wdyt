@@ -500,9 +500,9 @@ function partitionVocabularyTerms(candidateTerms: string[], vocabulary: Map<stri
 }
 
 async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>) {
-  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? process.env.WDIT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
-  const model = process.env.WDYT_LLM_MODEL ?? process.env.WDIT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
-  const apiKey = process.env.WDYT_LLM_API_KEY ?? process.env.WDIT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
+  const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
+  const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
 
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const approvedVocabulary = [...vocabulary.values()]

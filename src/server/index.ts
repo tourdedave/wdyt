@@ -8,8 +8,8 @@ import { loadReviewUnits, refreshReviewUnits, saveReviewDecision, upsertVocabula
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
-const HOST = process.env.WDYT_HOST ?? process.env.WDIT_HOST ?? "127.0.0.1";
-const PORT = Number(process.env.WDYT_PORT ?? process.env.WDIT_PORT ?? "3876");
+const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
+const PORT = Number(process.env.WDYT_PORT ?? "3876");
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];

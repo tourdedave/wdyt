@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.DEMO_PORT ?? "4010");
 const HOST = process.env.DEMO_HOST ?? "127.0.0.1";
-const SESSION_COOKIE = "wdit_demo_auth=1";
+const SESSION_COOKIE = "wdyt_demo_auth=1";
 const USERNAME = "demo";
 const PASSWORD = "wdyt-demo-2026!";
 
@@ -64,7 +64,7 @@ function getCookies(req: IncomingMessage) {
 }
 
 function isAuthenticated(req: IncomingMessage) {
-  return getCookies(req)["wdit_demo_auth"] === "1";
+  return getCookies(req)["wdyt_demo_auth"] === "1";
 }
 
 function parseForm(body: string) {
@@ -268,7 +268,7 @@ const server = createServer(async (req, res) => {
 
   if (method === "GET" && pathname === "/logout") {
     redirect(res, "/login", {
-      "set-cookie": "wdit_demo_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
+      "set-cookie": "wdyt_demo_auth=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax",
     });
     return;
   }

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 
-import type { ReducedStep, WditEvent } from "./types.js";
+import type { ReducedStep, WdytEvent } from "./types.js";
 
-const EVENT_TO_STEP: Record<WditEvent["type"], ReducedStep> = {
+const EVENT_TO_STEP: Record<WdytEvent["type"], ReducedStep> = {
   click: "CLICK",
   input: "INPUT",
   change: "CHANGE",
@@ -10,7 +10,7 @@ const EVENT_TO_STEP: Record<WditEvent["type"], ReducedStep> = {
   navigate: "NAVIGATE",
 };
 
-export function reduceEvents(events: WditEvent[]): ReducedStep[] {
+export function reduceEvents(events: WdytEvent[]): ReducedStep[] {
   const reduced: ReducedStep[] = [];
 
   for (const event of events) {

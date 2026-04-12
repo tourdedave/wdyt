@@ -1,10 +1,10 @@
-import type { IngestPayload, WditEvent } from "./types.js";
+import type { IngestPayload, WdytEvent } from "./types.js";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isValidEvent(event: unknown): event is WditEvent {
+function isValidEvent(event: unknown): event is WdytEvent {
   if (!isPlainObject(event)) {
     return false;
   }

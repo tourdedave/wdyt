@@ -1,25 +1,14 @@
-import { existsSync } from "node:fs";
 import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 function resolveDataDir() {
-  const configuredDir = process.env.WDYT_DATA_DIR ?? process.env.WDIT_DATA_DIR;
+  const configuredDir = process.env.WDYT_DATA_DIR;
 
   if (configuredDir) {
     return path.resolve(process.cwd(), configuredDir);
   }
 
-  const nextDataDir = path.resolve(process.cwd(), ".wdyt");
-  if (existsSync(nextDataDir)) {
-    return nextDataDir;
-  }
-
-  const legacyDataDir = path.resolve(process.cwd(), ".wdit");
-  if (existsSync(legacyDataDir)) {
-    return legacyDataDir;
-  }
-
-  return nextDataDir;
+  return path.resolve(process.cwd(), ".wdyt");
 }
 
 const DATA_DIR = resolveDataDir();

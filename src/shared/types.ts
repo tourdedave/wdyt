@@ -1,7 +1,7 @@
-export type WditEventType = "click" | "input" | "change" | "submit" | "navigate";
+export type WdytEventType = "click" | "input" | "change" | "submit" | "navigate";
 
-export type WditEvent = {
-  type: WditEventType;
+export type WdytEvent = {
+  type: WdytEventType;
   ts: number;
   seq: number;
   url?: string;
@@ -64,7 +64,7 @@ export type IngestPayload = {
   run: RunInfo;
   environment?: RunEnvironment;
   endState?: RunEndState;
-  events: WditEvent[];
+  events: WdytEvent[];
 };
 
 export type ReducedStep = "CLICK" | "INPUT" | "CHANGE" | "SUBMIT" | "NAVIGATE";

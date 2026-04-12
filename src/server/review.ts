@@ -285,9 +285,9 @@ export async function buildReviewUnits() {
 }
 
 async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[]) {
-  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? process.env.WDIT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
-  const model = process.env.WDYT_LLM_MODEL ?? process.env.WDIT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
-  const apiKey = process.env.WDYT_LLM_API_KEY ?? process.env.WDIT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
+  const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
+  const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const approvedVocabulary = vocabulary
     .filter((entry) => entry.status === "approved")
