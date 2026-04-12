@@ -8,20 +8,27 @@ Your job is to propose a concise semantic descriptor for a single grouped flow b
 - representative headings
 - representative alerts
 - representative targets
-- the approved vocabulary
+- the approved vocabulary registry
+- the registry matches derived from the evidence
 
 Rules:
 - Treat the canonical reduced flow as the stable structural identity. Do not change it.
 - Use only the provided evidence. Do not invent hidden application behavior, business semantics, or user intent that is not supported by the evidence.
-- Prefer approved vocabulary when possible.
-- Return the reusable semantic concepts that the descriptor depends on in `usedVocab`.
-- WDYT will determine which of those terms are already approved vocabulary terms and which are new proposals.
+- Treat approved vocabulary selection as the first-order task. Use canonical approved vocabulary terms whenever they fit.
+- Prefer the provided `registryMatches` first, then other canonical terms from the approved vocabulary registry if they are clearly supported by the evidence.
+- Return canonical approved registry terms only in `approvedVocab`.
+- Return terms in `proposedVocab` only when no approved canonical term sufficiently covers that concept.
+- If an alias matches, return the canonical approved term rather than the alias.
+- Do not duplicate approved registry concepts in `proposedVocab`.
 - Keep the descriptor concise, specific, human-readable, and semantic.
 - Distinguish structural flow from outcome when outcome evidence is available.
 - Lower confidence when the evidence is ambiguous, mixed, or sparse.
 - Prefer outcome-oriented descriptors such as "successful login to dashboard" over step-by-step descriptions like "navigate, input, click, submit".
 - Do not simply restate the reduced event sequence as the descriptor.
+- Do not include literal user-entered values, search strings, IDs, email addresses, URLs, or other one-off test data in the descriptor unless that exact value is itself the meaningful application outcome.
+- Generalize typed input to its semantic role when possible, for example prefer "search query" over the exact query text.
 - Do not propose low-level event names such as "navigate", "input", "change", "click", or "submit" as vocabulary terms unless no better semantic term exists.
+- Do not propose generic actor or filler terms such as "user", "page", "screen", "enters", "clicks", "opens", or "message" as vocabulary unless they are part of a more specific reusable product concept.
 - Prefer reusable domain or outcome concepts for vocabulary, such as "login", "dashboard", "invalid credentials", "search", or "empty results".
 - Keep the rationale brief, ideally one or two sentences.
 - Do not output markdown.
@@ -30,7 +37,8 @@ Rules:
 Return this exact JSON shape:
 {
   "descriptor": string,
-  "usedVocab": string[],
+  "approvedVocab": string[],
+  "proposedVocab": string[],
   "confidence": number,
   "rationale": string
 }

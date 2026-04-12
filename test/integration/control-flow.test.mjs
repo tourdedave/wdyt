@@ -220,7 +220,17 @@ async function runCli(workdir, args, stdinText = "", env = {}) {
   return stdout.trim();
 }
 
-async function startMockLlmServer(port) {
+async function startMockLlmServer(port, options = {}) {
+  const responseContent = options.responseContent ?? {
+    descriptor: "search ends at dashboard",
+    approvedVocab: [],
+    proposedVocab: ["search"],
+    confidence: 0.87,
+    rationale: "The flow ends at Dashboard and includes search interactions.",
+  };
+  const responseSequence = [...(options.responseSequence ?? [])];
+  const onRequest = options.onRequest ?? (() => {});
+
   const handler = async (req, res) => {
     if (req.method === "POST" && req.url === "/v1/chat/completions") {
       let body = "";
@@ -228,6 +238,9 @@ async function startMockLlmServer(port) {
         body += chunk.toString();
       });
       req.on("end", () => {
+        const parsedBody = JSON.parse(body);
+        onRequest(parsedBody);
+        const nextContent = responseSequence.shift() ?? responseContent;
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
@@ -240,12 +253,7 @@ async function startMockLlmServer(port) {
                 index: 0,
                 message: {
                   role: "assistant",
-                  content: JSON.stringify({
-                    descriptor: "search ends at dashboard",
-                    usedVocab: ["search"],
-                    confidence: 0.87,
-                    rationale: "The flow ends at Dashboard and includes search interactions.",
-                  }),
+                  content: JSON.stringify(nextContent),
                 },
                 finish_reason: "stop",
               },
@@ -489,14 +497,224 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
 
     assert.match(reviewOutput, /Confidence: 0\.87/);
     assert.match(reviewOutput, /Rationale: The flow ends at Dashboard and includes search interactions\./);
+    assert.match(reviewOutput, /Approved vocab: -/);
     assert.match(reviewOutput, /Proposed vocab: search/);
 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
     assert.match(reviewFile, /"proposedDescriptor": "search ends at dashboard"/);
     assert.match(reviewFile, /"proposedConfidence": 0.87/);
     assert.match(reviewFile, /"proposedRationale": "The flow ends at Dashboard and includes search interactions\."/);
-    assert.match(reviewFile, /"usedVocab": \[\]/);
+    assert.match(reviewFile, /"approvedVocabUsed": \[\]/);
     assert.match(reviewFile, /"proposedVocab": \[\n\s+"search"\n\s+\]/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review proposal prompt uses registry matches and canonical approved vocabulary", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-sanitize-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const { child } = spawnServer(tempDir, port);
+  let capturedRequest = null;
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      descriptor: "User enters search query 'wdyt testing' and receives an error message on Google Search",
+      approvedVocab: ["google search"],
+      proposedVocab: ["error message", "search query"],
+      confidence: 0.8,
+      rationale: "The flow shows a search followed by an error page.",
+    },
+    onRequest: (body) => {
+      capturedRequest ??= body;
+    },
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    await postJson(serverUrl, "/review/vocabulary", {
+      term: "Google Search",
+      status: "approved",
+      aliases: ["google search", "google"],
+    });
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "search error flow",
+      environment: { tool: "integration-test" },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/runs/end", {
+      runId: started.runId,
+      reason: "completed",
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dwdyt%2Btesting",
+        title: "Google Search",
+        heading: null,
+        alertText: "There was an error",
+      },
+      run: {
+        id: started.runId,
+        testName: "search error flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "https://www.google.com/ncr" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "textarea", text: "Search" } },
+        { type: "input", ts: 1020, seq: 2, target: { tag: "textarea", text: "wdyt testing" } },
+        { type: "submit", ts: 1030, seq: 3, target: { tag: "form", text: null } },
+      ],
+    });
+
+    const reviewOutput = await runCli(
+      tempDir,
+      ["review", "--propose"],
+      "a\n",
+      {
+        WDYT_LLM_BASE_URL: llmUrl,
+        WDYT_LLM_API_KEY: "ollama",
+        WDYT_LLM_MODEL: "mistral:instruct",
+      }
+    );
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+
+    assert.ok(capturedRequest);
+    assert.match(capturedRequest.messages[0].content, /Treat approved vocabulary selection as the first-order task/);
+    assert.match(capturedRequest.messages[0].content, /Return canonical approved registry terms only in `approvedVocab`/);
+    assert.match(capturedRequest.messages[1].content, /"registryMatches": \[\n\s+"Google Search"\n\s+\]/);
+    assert.match(reviewOutput, /Approved vocab: Google Search/);
+    assert.match(reviewOutput, /Proposed vocab: error message, search query/);
+    assert.match(
+      reviewFile,
+      /"proposedDescriptor": "User enters search query 'wdyt testing' and receives an error message on Google Search"/
+    );
+    assert.match(reviewFile, /"approvedVocabUsed": \[\n\s+"Google Search"\n\s+\]/);
+    assert.match(reviewFile, /"proposedVocab": \[\n\s+"error message",\n\s+"search query"\n\s+\]/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review downweights confidence when validator flags literal input and step narration", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-confidence-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const { child } = spawnServer(tempDir, port);
+  const requests = [];
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      descriptor: "User enters search query 'wdyt testing' and clicks submit on Google Search",
+      approvedVocab: [],
+      proposedVocab: [],
+      confidence: 0.62,
+      rationale: "The flow includes entering a query and submitting it on Google.",
+    },
+    onRequest: (body) => {
+      requests.push(body);
+    },
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "retry proposal flow",
+      environment: { tool: "integration-test" },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/runs/end", {
+      runId: started.runId,
+      reason: "completed",
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "https://www.google.com/sorry/index",
+        title: "Google Search",
+        heading: null,
+        alertText: "There was an error",
+      },
+      run: {
+        id: started.runId,
+        testName: "retry proposal flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "https://www.google.com/ncr" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "textarea", text: "Search" } },
+        { type: "input", ts: 1020, seq: 2, target: { tag: "textarea", text: "wdyt testing" } },
+        { type: "submit", ts: 1030, seq: 3, target: { tag: "form", text: null } },
+      ],
+    });
+
+    const reviewOutput = await runCli(
+      tempDir,
+      ["review", "--propose"],
+      "a\n",
+      {
+        WDYT_LLM_BASE_URL: llmUrl,
+        WDYT_LLM_API_KEY: "ollama",
+        WDYT_LLM_MODEL: "mistral:instruct",
+      }
+    );
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+
+    assert.equal(requests.length, 1);
+    assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
+    assert.match(reviewOutput, /Confidence: 0\.05/);
+    assert.match(reviewOutput, /Proposed vocab: -/);
+    assert.match(
+      reviewFile,
+      /"proposedDescriptor": "User enters search query 'wdyt testing' and clicks submit on Google Search"/
+    );
+    assert.match(reviewFile, /"proposedConfidence": 0\.05/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -670,10 +888,13 @@ test("server materializes review units, proposes descriptors in background, and 
     });
 
     assert.equal(proposedUnit.proposedDescriptor, "search ends at dashboard");
+    assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
     const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
     assert.match(reviewPage, /WDYT Review/);
+    assert.match(reviewPage, /overflow-wrap: anywhere;/);
+    assert.match(reviewPage, /word-break: break-word;/);
 
     const updatedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
       reviewStatus: "approved",

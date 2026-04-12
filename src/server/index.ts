@@ -165,10 +165,10 @@ function renderReviewPage() {
       .descriptor { font-size: 28px; margin: 8px 0 6px; }
       .confidence { color: var(--accent-2); font-size: 14px; }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
-      .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 120px; }
+      .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 120px; min-width: 0; }
       .list-block h3 { font-size: 15px; margin: 0 0 10px; }
       ul { margin: 0; padding-left: 18px; }
-      li { margin: 4px 0; }
+      li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; }
       .actions { display: grid; gap: 12px; margin-top: 20px; }
       input, textarea, button { font: inherit; }
       textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
@@ -283,7 +283,7 @@ function renderReviewPage() {
             \${renderListBlock("Headings", unit.headings)}
             \${renderListBlock("Alerts", unit.alerts)}
             \${renderListBlock("Targets", unit.targets)}
-            \${renderListBlock("Candidate Vocab", unit.candidateVocab)}
+            \${renderListBlock("Approved Vocab", unit.approvedVocabUsed)}
             \${renderListBlock("Proposed Vocab", unit.proposedVocab)}
           </div>
           \${!isPending ? '<div class="actions"><div class="button-row"><button id="editDecision">Edit Decision</button></div></div>' : ''}

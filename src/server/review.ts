@@ -20,6 +20,13 @@ import type {
   ReviewUnitRecord,
   VocabularyEntry,
 } from "../shared/types.js";
+import {
+  findApprovedVocabularyMatches,
+  getApprovedVocabulary,
+  normalizeProposedVocabulary,
+  resolveApprovedVocabularyTerm,
+} from "../shared/vocabulary.js";
+import { adjustProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../cli/prompts/review-system-prompt.txt");
@@ -96,7 +103,53 @@ function clampConfidence(value: unknown) {
   return Math.max(0, Math.min(1, value));
 }
 
-function normalizeFlowDescriptorProposal(value: unknown): FlowDescriptorProposal | null {
+async function requestJsonCompletion(input: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  systemPrompt: string;
+  userPrompt: string;
+}) {
+  const response = await fetch(new URL("chat/completions", `${input.baseUrl.replace(/\/?$/, "/")}`).toString(), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${input.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: input.model,
+      response_format: { type: "json_object" },
+      temperature: 0.2,
+      stream: false,
+      messages: [
+        { role: "system", content: input.systemPrompt },
+        { role: "user", content: input.userPrompt },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`LLM proposal failed with status ${response.status}: ${errorText}`);
+  }
+
+  const body = (await response.json()) as {
+    choices?: Array<{
+      message?: {
+        content?: string;
+      };
+    }>;
+  };
+  const content = body.choices?.[0]?.message?.content;
+
+  if (!content) {
+    throw new Error("LLM response did not include message content");
+  }
+
+  return JSON.parse(content) as unknown;
+}
+
+function normalizeFlowDescriptorProposal(value: unknown, vocabulary: VocabularyEntry[]): FlowDescriptorProposal | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -104,7 +157,8 @@ function normalizeFlowDescriptorProposal(value: unknown): FlowDescriptorProposal
   const candidate = value as Record<string, unknown>;
   const descriptor = typeof candidate.descriptor === "string" ? candidate.descriptor.trim() : "";
   const rationale = typeof candidate.rationale === "string" ? candidate.rationale.trim() : "";
-  const usedVocab = normalizeStringList(candidate.usedVocab);
+  const approvedVocab = normalizeStringList(candidate.approvedVocab);
+  const proposedVocab = normalizeStringList(candidate.proposedVocab);
   const confidence = clampConfidence(
     typeof candidate.confidence === "number" ? candidate.confidence : Number(candidate.confidence)
   );
@@ -113,30 +167,25 @@ function normalizeFlowDescriptorProposal(value: unknown): FlowDescriptorProposal
     return null;
   }
 
-  return {
-    descriptor,
-    usedVocab,
-    confidence,
-    rationale,
-  };
-}
-
-function partitionVocabularyTerms(candidateTerms: string[], vocabulary: VocabularyEntry[]) {
-  const approvedTerms = new Set(vocabulary.filter((entry) => entry.status === "approved").map((entry) => entry.term.toLowerCase()));
-  const approvedVocabUsed = new Set<string>();
-  const proposedVocab = new Set<string>();
-
-  for (const term of candidateTerms) {
-    if (approvedTerms.has(term.toLowerCase())) {
-      approvedVocabUsed.add(term);
-    } else {
-      proposedVocab.add(term);
+  const approvedTerms = new Set<string>();
+  for (const term of approvedVocab) {
+    const canonicalTerm = resolveApprovedVocabularyTerm(term, vocabulary);
+    if (canonicalTerm) {
+      approvedTerms.add(canonicalTerm);
     }
   }
 
+  const normalizedProposals = normalizeProposedVocabulary(proposedVocab, vocabulary);
+  for (const term of normalizedProposals.approvedVocab) {
+    approvedTerms.add(term);
+  }
+
   return {
-    approvedVocabUsed: [...approvedVocabUsed].sort(),
-    proposedVocab: [...proposedVocab].sort(),
+    descriptor,
+    approvedVocab: [...approvedTerms].sort((a, b) => a.localeCompare(b)),
+    proposedVocab: normalizedProposals.proposedVocab,
+    confidence,
+    rationale,
   };
 }
 
@@ -266,7 +315,7 @@ export async function buildReviewUnits() {
         proposedDescriptor: previous?.proposedDescriptor,
         proposedConfidence: previous?.proposedConfidence,
         proposedRationale: previous?.proposedRationale,
-        candidateVocab: previous?.candidateVocab ?? [],
+        candidateVocab: previous?.candidateVocab,
         approvedVocabUsed: previous?.approvedVocabUsed ?? [],
         proposedVocab: previous?.proposedVocab ?? [],
         proposalError: previous?.proposalError,
@@ -289,87 +338,75 @@ async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyE
   const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
-  const approvedVocabulary = vocabulary
-    .filter((entry) => entry.status === "approved")
+  const approvedVocabulary = getApprovedVocabulary(vocabulary)
     .map((entry) => ({
       term: entry.term,
       description: entry.description ?? null,
       aliases: entry.aliases ?? [],
     }));
-
-  const userPrompt = JSON.stringify(
-    {
-      reviewId: unit.reviewId,
-      flowId: unit.flowId,
-      variantSignature: unit.variantSignature ?? null,
-      canonical: unit.canonical,
-      count: unit.count,
-      suites: unit.suites,
-      tests: unit.tests,
-      tools: unit.tools,
-      browsers: unit.browsers,
-      urls: unit.urls.slice(0, 5),
-      finalUrls: unit.finalUrls.slice(0, 5),
-      titles: unit.titles.slice(0, 5),
-      headings: unit.headings.slice(0, 5),
-      alerts: unit.alerts.slice(0, 5),
-      targets: unit.targets.slice(0, 5),
-      approvedVocabulary,
-    },
-    null,
-    2
+  const registryMatches = findApprovedVocabularyMatches(
+    [
+      ...unit.urls,
+      ...unit.finalUrls,
+      ...unit.titles,
+      ...unit.headings,
+      ...unit.alerts,
+      ...unit.targets,
+      ...unit.tests,
+    ],
+    vocabulary
   );
 
-  const response = await fetch(new URL("chat/completions", `${baseUrl.replace(/\/?$/, "/")}`).toString(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      stream: false,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM proposal failed with status ${response.status}: ${errorText}`);
-  }
-
-  const body = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
+  const evidence = {
+    reviewId: unit.reviewId,
+    flowId: unit.flowId,
+    variantSignature: unit.variantSignature ?? null,
+    canonical: unit.canonical,
+    count: unit.count,
+    suites: unit.suites,
+    tests: unit.tests,
+    tools: unit.tools,
+    browsers: unit.browsers,
+    urls: unit.urls.slice(0, 5),
+    finalUrls: unit.finalUrls.slice(0, 5),
+    titles: unit.titles.slice(0, 5),
+    headings: unit.headings.slice(0, 5),
+    alerts: unit.alerts.slice(0, 5),
+    targets: unit.targets.slice(0, 5),
+    approvedVocabularyRegistry: approvedVocabulary,
+    registryMatches,
   };
-  const content = body.choices?.[0]?.message?.content;
+  const userPrompt = JSON.stringify(evidence, null, 2);
 
-  if (!content) {
-    throw new Error("LLM response did not include message content");
+  async function generateProposal() {
+    const parsed = normalizeFlowDescriptorProposal(
+      await requestJsonCompletion({
+        baseUrl,
+        apiKey,
+        model,
+        systemPrompt,
+        userPrompt,
+      }),
+      vocabulary
+    );
+
+    if (!parsed) {
+      throw new Error("LLM response did not match expected proposal schema");
+    }
+
+    return parsed;
   }
 
-  const parsed = normalizeFlowDescriptorProposal(JSON.parse(content) as unknown);
-  if (!parsed) {
-    throw new Error(`LLM response did not match expected schema: ${content}`);
-  }
-
-  const vocabPartition = partitionVocabularyTerms(parsed.usedVocab, vocabulary);
+  const parsed = await generateProposal();
+  const validation = validateProposal(evidence, parsed, vocabulary);
+  const adjustedConfidence = adjustProposalConfidence(parsed.confidence, validation.issues);
 
   return {
     proposedDescriptor: parsed.descriptor,
-    proposedConfidence: parsed.confidence,
+    proposedConfidence: adjustedConfidence,
     proposedRationale: parsed.rationale,
-    candidateVocab: parsed.usedVocab,
-    approvedVocabUsed: vocabPartition.approvedVocabUsed,
-    proposedVocab: vocabPartition.proposedVocab,
+    approvedVocabUsed: parsed.approvedVocab,
+    proposedVocab: parsed.proposedVocab,
   };
 }
 
@@ -407,7 +444,6 @@ export async function queueProposalProcessing() {
         nextUnit.proposedDescriptor = proposal.proposedDescriptor;
         nextUnit.proposedConfidence = proposal.proposedConfidence;
         nextUnit.proposedRationale = proposal.proposedRationale;
-        nextUnit.candidateVocab = proposal.candidateVocab;
         nextUnit.approvedVocabUsed = proposal.approvedVocabUsed;
         nextUnit.proposedVocab = proposal.proposedVocab;
         nextUnit.proposalError = undefined;
@@ -477,10 +513,14 @@ export async function saveReviewDecision(input: {
   reviewUnit.updatedAt = now;
 
   if (promotedTerms.length > 0) {
-    const combined = [...new Set([...reviewUnit.proposedVocab, ...promotedTerms])];
-    const vocabPartition = partitionVocabularyTerms(combined, vocabulary);
-    reviewUnit.approvedVocabUsed = [...new Set([...reviewUnit.approvedVocabUsed, ...vocabPartition.approvedVocabUsed])].sort();
-    reviewUnit.proposedVocab = vocabPartition.proposedVocab;
+    const normalizedProposals = normalizeProposedVocabulary(
+      [...new Set([...reviewUnit.proposedVocab, ...promotedTerms])],
+      vocabulary
+    );
+    reviewUnit.approvedVocabUsed = [
+      ...new Set([...reviewUnit.approvedVocabUsed, ...normalizedProposals.approvedVocab, ...promotedTerms]),
+    ].sort((a, b) => a.localeCompare(b));
+    reviewUnit.proposedVocab = normalizedProposals.proposedVocab;
   }
 
   await writeJsonFile(getVocabularyPath(), vocabulary.sort((a, b) => a.term.localeCompare(b.term)));

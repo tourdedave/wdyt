@@ -95,7 +95,8 @@ export type FlowReviewRecord = {
   descriptorStatus: DescriptorStatus;
   approvedDescriptor?: string;
   notes?: string;
-  usedVocab: string[];
+  approvedVocabUsed: string[];
+  usedVocab?: string[];
   proposedVocab: string[];
   updatedAt: number;
 };
@@ -112,7 +113,8 @@ export type VocabularyEntry = {
 
 export type FlowDescriptorProposal = {
   descriptor: string;
-  usedVocab: string[];
+  approvedVocab: string[];
+  proposedVocab: string[];
   confidence: number;
   rationale: string;
 };
@@ -141,7 +143,7 @@ export type ReviewUnitRecord = {
   proposedDescriptor?: string;
   proposedConfidence?: number;
   proposedRationale?: string;
-  candidateVocab: string[];
+  candidateVocab?: string[];
   approvedVocabUsed: string[];
   proposedVocab: string[];
   proposalError?: string;

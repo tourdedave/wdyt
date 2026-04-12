@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .wdit/
+.wdyt/
 
 .DS_Store
 Thumbs.db
@@ -16,4 +17,5 @@ pnpm-debug.log*
 .coverage
 coverage/
 
+package-lock.json
 **/package-lock.json
