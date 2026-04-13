@@ -31,7 +31,7 @@ import {
 import { adjustProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const reviewSystemPromptPath = path.join(__dirname, "prompts", "review-system-prompt.txt");
+const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_LLM_API_KEY = "ollama";
 const DEFAULT_LLM_MODEL = "mistral:instruct";

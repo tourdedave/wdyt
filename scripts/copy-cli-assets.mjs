@@ -4,8 +4,8 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const sourceDir = path.join(projectRoot, "src", "cli", "prompts");
-const targetDir = path.join(projectRoot, "dist", "cli", "prompts");
+const sourceDir = path.join(projectRoot, "src", "prompts");
+const targetDir = path.join(projectRoot, "dist", "prompts");
 
 await mkdir(targetDir, { recursive: true });
 await cp(sourceDir, targetDir, { recursive: true });

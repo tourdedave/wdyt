@@ -37,7 +37,7 @@ function renderBootstrapPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>WDYT Bootstrap</title>
+    <title>What Did You Test? | Bootstrap</title>
     <style>
       body {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -132,7 +132,7 @@ function renderReviewPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>WDYT Review</title>
+    <title>What Did You Test? | Review</title>
     <style>
       :root {
         color-scheme: light;

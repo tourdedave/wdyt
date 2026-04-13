@@ -604,8 +604,9 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
 
     assert.ok(capturedRequest);
-    assert.match(capturedRequest.messages[0].content, /Treat approved vocabulary selection as the first-order task/);
-    assert.match(capturedRequest.messages[0].content, /Return canonical approved registry terms only in `approvedVocab`/);
+    assert.match(capturedRequest.messages[0].content, /Step 1 — Extract signals/);
+    assert.match(capturedRequest.messages[0].content, /Use registryMatches if clearly relevant/);
+    assert.match(capturedRequest.messages[0].content, /approvedVocab contains only canonical terms/);
     assert.match(capturedRequest.messages[1].content, /"registryMatches": \[\n\s+"Google Search"\n\s+\]/);
     assert.match(reviewOutput, /Approved vocab: Google Search/);
     assert.match(reviewOutput, /Proposed vocab: error message, search query/);
@@ -707,9 +708,9 @@ test("review downweights confidence when validator flags literal input and step 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
 
     assert.equal(requests.length, 1);
-    assert.match(requests[0].messages[0].content, /If `approvedVocab` is empty but the evidence still supports recognizable product, task, or outcome concepts, return 1 to 3 items in `proposedVocab`/);
-    assert.match(requests[0].messages[0].content, /Empty `proposedVocab` is acceptable only when the evidence is too sparse or ambiguous/);
-    assert.match(requests[0].messages[0].content, /If you return no vocabulary terms, explain briefly in the rationale why the evidence was insufficient/);
+    assert.match(requests[0].messages[0].content, /Else propose new terms \(only if needed\)/);
+    assert.match(requests[0].messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
+    assert.match(requests[0].messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
     assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
     assert.match(reviewOutput, /Confidence: 0\.05/);
     assert.match(reviewOutput, /Proposed vocab: -/);
@@ -895,7 +896,7 @@ test("server materializes review units, proposes descriptors in background, and 
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
     const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
-    assert.match(reviewPage, /WDYT Review/);
+    assert.match(reviewPage, /What Did You Test\? \| Review/);
     assert.match(reviewPage, /overflow-wrap: anywhere;/);
     assert.match(reviewPage, /word-break: break-word;/);
 
