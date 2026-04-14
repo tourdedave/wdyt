@@ -3,7 +3,7 @@ import { resolveApprovedVocabularyTerm } from "./vocabulary.js";
 
 const LOW_LEVEL_TERMS = new Set(["navigate", "input", "change", "click", "submit"]);
 
-type ProposalEvidence = {
+export type ProposalEvidence = {
   canonical: string[];
   urls: string[];
   finalUrls: string[];
@@ -40,6 +40,119 @@ function extractTypedValues(targets: string[]) {
 function hasLowLevelNarration(descriptor: string) {
   const normalized = normalizeText(descriptor);
   return [...LOW_LEVEL_TERMS].some((term) => normalized.includes(term));
+}
+
+function clampConfidence(value: number) {
+  if (Number.isNaN(value)) {
+    return 0;
+  }
+
+  return Math.max(0.05, Math.min(1, value));
+}
+
+function includesSequence(canonical: string[], sequence: string[]) {
+  let index = 0;
+
+  for (const step of canonical) {
+    if (step === sequence[index]) {
+      index += 1;
+      if (index === sequence.length) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function extractPathSegments(urls: string[]) {
+  const segments = new Set<string>();
+
+  for (const value of urls) {
+    try {
+      const pathname = new URL(value).pathname;
+      for (const segment of pathname.split("/")) {
+        const trimmed = segment.trim().toLowerCase();
+        if (trimmed) {
+          segments.add(trimmed);
+        }
+      }
+    } catch {
+      // Ignore malformed URLs in evidence.
+    }
+  }
+
+  return [...segments];
+}
+
+function hasAnyKeyword(values: string[], keywords: string[]) {
+  return values.some((value) => {
+    const normalizedValue = normalizeText(value);
+    return keywords.some((keyword) => normalizedValue.includes(keyword));
+  });
+}
+
+function inferDeterministicConfidence(evidence: ProposalEvidence) {
+  const finalPathSegments = extractPathSegments(evidence.finalUrls);
+  const finalLabels = [...evidence.titles, ...evidence.headings, ...finalPathSegments];
+  const targetLabels = evidence.targets.map((target) => normalizeText(target));
+  const hasSubmit = evidence.canonical.includes("SUBMIT");
+  const hasPostSubmitNavigation = includesSequence(evidence.canonical, ["SUBMIT", "NAVIGATE"]);
+  const hasNavigation = evidence.canonical.includes("NAVIGATE");
+  const hasAlert = evidence.alerts.length > 0;
+  const returnsToLogin = hasAnyKeyword(finalLabels, ["login", "sign in"]);
+  const signsOut = targetLabels.some(
+    (target) => target.includes("sign out") || target.includes("logout") || target.includes("log out")
+  );
+  const hasCaptchaTerminal = finalPathSegments.includes("sorry");
+  const hasTerminalIdentity = finalLabels.length > 0;
+  const hasNamedDestination = hasAnyKeyword(finalPathSegments, [
+    "dashboard",
+    "settings",
+    "reports",
+    "workspace",
+    "search",
+  ]);
+
+  if (signsOut && returnsToLogin && hasNavigation) {
+    return 0.78;
+  }
+
+  if (hasAlert || hasCaptchaTerminal) {
+    return 0.82;
+  }
+
+  if (hasSubmit && hasPostSubmitNavigation && hasTerminalIdentity && !returnsToLogin) {
+    return hasNamedDestination ? 0.7 : 0.66;
+  }
+
+  if (hasNavigation && hasTerminalIdentity) {
+    return hasNamedDestination ? 0.62 : 0.55;
+  }
+
+  if (hasSubmit) {
+    return 0.45;
+  }
+
+  return 0.3;
+}
+
+function applyValidationCaps(confidence: number, issues: string[]) {
+  let capped = confidence;
+
+  for (const issue of issues) {
+    if (issue.includes("literal typed value")) {
+      capped = Math.min(capped, 0.2);
+      continue;
+    }
+
+    if (issue.includes("raw URL")) {
+      capped = Math.min(capped, 0.35);
+      continue;
+    }
+  }
+
+  return capped;
 }
 
 function includesAnySubstring(haystack: string, needles: string[]) {
@@ -113,31 +226,16 @@ export function validateProposal(
 }
 
 export function adjustProposalConfidence(baseConfidence: number, issues: string[]) {
-  let adjusted = baseConfidence;
+  return clampConfidence(applyValidationCaps(baseConfidence, issues));
+}
 
-  for (const issue of issues) {
-    if (issue.includes("literal typed value")) {
-      adjusted -= 0.4;
-      continue;
-    }
-
-    if (issue.includes("low-level UI mechanics")) {
-      adjusted -= 0.25;
-      continue;
-    }
-
-    if (issue.includes("does not include any approved or proposed semantic vocabulary")) {
-      adjusted -= 0.2;
-      continue;
-    }
-
-    if (issue.includes("raw URL")) {
-      adjusted -= 0.2;
-      continue;
-    }
-
-    adjusted -= 0.15;
-  }
-
-  return Math.max(0.05, Math.min(1, adjusted));
+export function scoreProposalConfidence(
+  evidence: ProposalEvidence,
+  proposal: FlowDescriptorProposal,
+  issues: string[]
+) {
+  const baseConfidence = typeof proposal.confidence === "number" ? proposal.confidence : Number(proposal.confidence);
+  const deterministicConfidence = inferDeterministicConfidence(evidence);
+  const blendedConfidence = Math.max(baseConfidence, deterministicConfidence);
+  return clampConfidence(applyValidationCaps(blendedConfidence, issues));
 }

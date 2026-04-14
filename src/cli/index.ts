@@ -28,7 +28,7 @@ import {
   normalizeProposedVocabulary,
   resolveApprovedVocabularyTerm,
 } from "../shared/vocabulary.js";
-import { adjustProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
+import { scoreProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
@@ -618,7 +618,7 @@ async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, Vocab
     descriptor: parsed.descriptor,
     approvedVocab: parsed.approvedVocab,
     proposedVocab: parsed.proposedVocab,
-    confidence: adjustProposalConfidence(parsed.confidence, validation.issues),
+    confidence: scoreProposalConfidence(evidence, parsed, validation.issues),
     rationale: parsed.rationale,
   };
 }

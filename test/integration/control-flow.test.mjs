@@ -623,7 +623,7 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
   }
 });
 
-test("review downweights confidence when validator flags literal input and step narration", { timeout: 15_000 }, async () => {
+test("review caps confidence for literal typed values even when descriptor is mechanical", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-confidence-"));
   const port = randomPort();
   const llmPort = randomPort();
@@ -712,13 +712,206 @@ test("review downweights confidence when validator flags literal input and step 
     assert.match(requests[0].messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
     assert.match(requests[0].messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
     assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
-    assert.match(reviewOutput, /Confidence: 0\.05/);
+    assert.match(reviewOutput, /Confidence: 0\.20/);
     assert.match(reviewOutput, /Proposed vocab: -/);
     assert.match(
       reviewFile,
       /"proposedDescriptor": "User enters search query 'wdyt testing' and clicks submit on Google Search"/
     );
-    assert.match(reviewFile, /"proposedConfidence": 0\.05/);
+    assert.match(reviewFile, /"proposedConfidence": 0\.2/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review raises confidence for explicit successful terminal states", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-success-floor-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const { child } = spawnServer(tempDir, port);
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      descriptor: "Search query is submitted and results are displayed",
+      approvedVocab: [],
+      proposedVocab: ["search", "search results"],
+      confidence: 0.35,
+      rationale: "The flow ends on a search results page after the search form is submitted.",
+    },
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "search-results",
+      environment: { tool: "integration-test" },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/runs/end", {
+      runId: started.runId,
+      reason: "completed",
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/search/results?q=wdyt",
+        title: "Search Results",
+        heading: "Search Results",
+        alertText: null,
+      },
+      run: {
+        id: started.runId,
+        testName: "search-results",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "input", ts: 1010, seq: 1, target: { tag: "input", text: "demo" } },
+        { type: "change", ts: 1020, seq: 2, target: { tag: "input", text: "demo" } },
+        { type: "input", ts: 1030, seq: 3, target: { tag: "input", text: "wdyt-demo-2026" } },
+        { type: "change", ts: 1040, seq: 4, target: { tag: "input", text: "wdyt-demo-2026" } },
+        { type: "click", ts: 1050, seq: 5, target: { tag: "button", text: "Sign in" } },
+        { type: "submit", ts: 1060, seq: 6, target: { tag: "form", text: "Username Password Sign in" } },
+        { type: "navigate", ts: 1070, seq: 7, url: "http://127.0.0.1:4010/dashboard" },
+        { type: "click", ts: 1080, seq: 8, target: { tag: "a", text: "Open search" } },
+        { type: "navigate", ts: 1090, seq: 9, url: "http://127.0.0.1:4010/search" },
+        { type: "input", ts: 1100, seq: 10, target: { tag: "input", text: "wdyt" } },
+        { type: "change", ts: 1110, seq: 11, target: { tag: "input", text: "wdyt" } },
+        { type: "click", ts: 1120, seq: 12, target: { tag: "button", text: "Search" } },
+        { type: "submit", ts: 1130, seq: 13, target: { tag: "form", text: "Search query Search" } },
+        { type: "navigate", ts: 1140, seq: 14, url: "http://127.0.0.1:4010/search/results?q=wdyt" },
+      ],
+    });
+
+    const reviewOutput = await runCli(
+      tempDir,
+      ["review", "--propose"],
+      "a\n",
+      {
+        WDYT_LLM_BASE_URL: llmUrl,
+        WDYT_LLM_API_KEY: "ollama",
+        WDYT_LLM_MODEL: "mistral:instruct",
+      }
+    );
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+
+    assert.match(reviewOutput, /Confidence: 0\.70/);
+    assert.match(reviewFile, /"proposedConfidence": 0\.7/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review keeps deterministic confidence for successful login despite mechanical phrasing", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-login-floor-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const { child } = spawnServer(tempDir, port);
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      descriptor: "Login succeeds and navigates to dashboard",
+      approvedVocab: [],
+      proposedVocab: ["dashboard", "login", "success"],
+      confidence: 0.55,
+      rationale: "The flow ends on the dashboard after sign-in with no error alerts.",
+    },
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "login-success-dashboard",
+      environment: { tool: "integration-test" },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-1",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/runs/end", {
+      runId: started.runId,
+      reason: "completed",
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: started.runId,
+        testName: "login-success-dashboard",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "input", ts: 1010, seq: 1, target: { tag: "input", text: "demo" } },
+        { type: "change", ts: 1020, seq: 2, target: { tag: "input", text: "demo" } },
+        { type: "input", ts: 1030, seq: 3, target: { tag: "input", text: "wdyt-demo-2026" } },
+        { type: "change", ts: 1040, seq: 4, target: { tag: "input", text: "wdyt-demo-2026" } },
+        { type: "click", ts: 1050, seq: 5, target: { tag: "button", text: "Sign in" } },
+        { type: "submit", ts: 1060, seq: 6, target: { tag: "form", text: "Username Password Sign in" } },
+        { type: "navigate", ts: 1070, seq: 7, url: "http://127.0.0.1:4010/dashboard" },
+      ],
+    });
+
+    const reviewOutput = await runCli(
+      tempDir,
+      ["review", "--propose"],
+      "a\n",
+      {
+        WDYT_LLM_BASE_URL: llmUrl,
+        WDYT_LLM_API_KEY: "ollama",
+        WDYT_LLM_MODEL: "mistral:instruct",
+      }
+    );
+
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+
+    assert.match(reviewOutput, /Confidence: 0\.70/);
+    assert.match(reviewFile, /"proposedConfidence": 0\.7/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
