@@ -119,6 +119,14 @@ Use registryMatches if clearly relevant
 Else use approved vocabulary registry terms
 Else propose new terms (only if needed)
 
+Vocabulary quality rubric:
+
+Prefer vocabulary terms that help a human reviewer recognize the product, task, or user-visible outcome of similar future flows.
+Prefer stable, reusable domain concepts over interaction mechanics or implementation details.
+Prefer the most specific reusable concept supported by the evidence.
+If a concrete domain term exists, do not substitute a generic meta term.
+Prefer nouns or short noun phrases that remain meaningful across many runs.
+
 Constraints:
 
 approvedVocab:
