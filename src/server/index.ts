@@ -529,6 +529,11 @@ function renderCriticalFlowsPage() {
       button.ghost-link { background: transparent; padding: 0; color: var(--accent); text-decoration: underline; }
       button:disabled { opacity: 0.6; cursor: wait; }
       .interpretation, .callout, .detail-block, .suggestions { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .duplicate-warning { border: 1px solid rgba(183,110,27,0.35); background: rgba(183,110,27,0.08); border-radius: 12px; padding: 14px; }
+      .duplicate-warning h3 { margin: 0 0 8px; font-size: 18px; }
+      .duplicate-match { border-top: 1px solid rgba(216,207,191,0.8); padding-top: 12px; margin-top: 12px; }
+      .duplicate-match:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
+      .duplicate-label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
       .callout { background: #f9f4ea; }
       .error { color: var(--danger); }
       .add-flow-bar { display: flex; justify-content: flex-start; margin-bottom: 18px; }
@@ -578,6 +583,48 @@ function renderCriticalFlowsPage() {
       const summarizeItems = (values) => Array.isArray(values) && values.length > 0
         ? values.map((value) => \`<li>\${escapeHtml(value.name || value)}</li>\`).join("")
         : "<li>-</li>";
+      const normalizeCompareValue = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const computeOverlapScore = (leftValues, rightValues) => {
+        const left = [...new Set((leftValues || []).map(normalizeCompareValue).filter(Boolean))];
+        const right = new Set((rightValues || []).map(normalizeCompareValue).filter(Boolean));
+        if (left.length === 0 || right.size === 0) {
+          return 0;
+        }
+
+        const shared = left.filter((value) => right.has(value));
+        return shared.length / Math.max(left.length, right.size);
+      };
+      const getLikelyDuplicates = (draft) => {
+        if (!draft) {
+          return [];
+        }
+
+        return state.flows
+          .filter((flow) => flow.id !== state.editingFlowId)
+          .map((flow) => {
+            const termOverlap = computeOverlapScore(draft.interpretedTerms, flow.interpretedTerms);
+            const stepOverlap = computeOverlapScore(draft.interpretedSteps, flow.interpretedSteps);
+            const normalizedDraftOutcome = normalizeCompareValue(draft.outcome || "");
+            const normalizedFlowOutcome = normalizeCompareValue(flow.outcome || "");
+            const sameOutcome = normalizedDraftOutcome === normalizedFlowOutcome;
+            const exactDuplicate = termOverlap === 1 && stepOverlap >= 0.8 && sameOutcome;
+            const likelyDuplicate = exactDuplicate || termOverlap >= 0.8 || stepOverlap >= 0.8;
+            const matchedConcepts = [...new Set((draft.interpretedTerms || []).filter((term) =>
+              (flow.interpretedTerms || []).map(normalizeCompareValue).includes(normalizeCompareValue(term))
+            ))];
+
+            return {
+              flow,
+              exactDuplicate,
+              likelyDuplicate,
+              matchedConcepts,
+              score: termOverlap * 0.7 + stepOverlap * 0.3 + (sameOutcome ? 0.1 : 0),
+            };
+          })
+          .filter((match) => match.likelyDuplicate)
+          .sort((a, b) => b.score - a.score || a.flow.name.localeCompare(b.flow.name))
+          .slice(0, 3);
+      };
       async function interpretDraft(rawText) {
         state.draftText = rawText;
         state.parsedDraft = null;
@@ -715,6 +762,7 @@ function renderCriticalFlowsPage() {
       function renderDraftArea(options = {}) {
         const compact = options.compact === true;
         const parsed = state.parsedDraft;
+        const duplicateMatches = getLikelyDuplicates(parsed);
         const examples = state.suggestions.length === 0 ? \`
           <ul class="example-list">
             <li>Log in successfully</li>
@@ -722,7 +770,7 @@ function renderCriticalFlowsPage() {
             <li>Create and export a report</li>
             <li>Invite a new user</li>
           </ul>\` : "";
-        const suggestions = state.hasApprovedDescriptors
+        const suggestions = state.hasApprovedDescriptors && state.suggestions.length > 0
           ? \`<div class="suggestions">
               <strong>Suggested from reviewed tests</strong>
               <div class="pills">
@@ -756,8 +804,26 @@ function renderCriticalFlowsPage() {
                 <ul>\${parsed.interpretedSteps.map((step) => \`<li>\${escapeHtml(step)}</li>\`).join("")}</ul>
                 <p><strong>Interpreted terms:</strong> \${escapeHtml(parsed.interpretedTerms.join(", "))}</p>
                 <p><strong>Outcome:</strong> \${escapeHtml(parsed.outcome || "-")}</p>
+                \${duplicateMatches.length > 0 ? \`
+                  <div class="duplicate-warning">
+                    <h3>Possible duplicate detected</h3>
+                    <p class="meta">\${duplicateMatches.some((match) => match.exactDuplicate)
+                      ? "This flow appears to already exist:"
+                      : "This flow appears similar to an existing critical flow:"}</p>
+                    \${duplicateMatches.map((match) => \`
+                      <div class="duplicate-match">
+                        <div class="duplicate-label">\${match.exactDuplicate ? "Existing flow" : "Similar flow"}</div>
+                        <strong>\${escapeHtml(match.flow.name)}</strong>
+                        \${match.matchedConcepts.length > 0 ? \`<p class="meta">Matched concepts: \${escapeHtml(match.matchedConcepts.join(", "))}</p>\` : ""}
+                        <div class="button-row">
+                          <button type="button" data-view-duplicate="\${escapeHtml(match.flow.id)}">View Existing Flow</button>
+                        </div>
+                      </div>\`).join("")}
+                  </div>\`
+                : ""}
                 <div class="button-row">
                   <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Critical Flow"}</button>
+                  \${duplicateMatches.length > 0 ? '<span class="meta">Save Anyway</span>' : ""}
                 </div>
               </div>\`
             : ""}
@@ -830,6 +896,22 @@ function renderCriticalFlowsPage() {
         detail.querySelectorAll("[data-suggestion]").forEach((button) => {
           button.addEventListener("click", async () => {
             await interpretDraft(button.getAttribute("data-suggestion") || "");
+          });
+        });
+        detail.querySelectorAll("[data-view-duplicate]").forEach((button) => {
+          button.addEventListener("click", () => {
+            const targetId = button.getAttribute("data-view-duplicate");
+            if (!targetId) {
+              return;
+            }
+
+            state.selectedId = targetId;
+            state.showDraftForm = false;
+            state.editingFlowId = null;
+            state.parsedDraft = null;
+            state.error = "";
+            state.isWorking = false;
+            render();
           });
         });
 
