@@ -88,3 +88,8 @@ export function normalizeProposedVocabulary(terms: string[], entries: Iterable<V
     proposedVocab: [...proposedTerms].sort((a, b) => a.localeCompare(b)),
   };
 }
+
+export function canonicalizeSemanticTerms(terms: string[], entries: Iterable<VocabularyEntry>) {
+  const normalized = normalizeProposedVocabulary(terms, entries);
+  return [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])].sort((a, b) => a.localeCompare(b));
+}

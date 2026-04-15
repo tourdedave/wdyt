@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1171,4 +1171,442 @@ test("API validation rejects missing required fields and accepts omitted optiona
   }
 
   assert.match(getOutput(), /WDYT server listening/);
+});
+
+test("critical flows cold start saves missing flows and exposes placeholder guidance", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-cold-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      name: "User can log in and export a report to CSV",
+      rawText: "User can log in and export a report to CSV",
+      interpretedSteps: ["login", "export report"],
+      interpretedTerms: ["login", "export report", "csv"],
+      outcome: "report exported",
+    },
+  });
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
+    assert.match(page, /Critical Flows/);
+    assert.match(page, /What are the most important things your application must do\?/);
+    assert.match(page, /Learn how to capture a test/);
+
+    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+      rawText: "User can log in and export a report to CSV",
+    });
+    assert.deepEqual(interpreted.interpretedSteps, ["login", "export report"]);
+    assert.deepEqual(interpreted.interpretedTerms, ["csv", "export report", "login"]);
+    assert.equal(interpreted.outcome, "report exported");
+
+    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+    assert.equal(created.status, "missing");
+    assert.deepEqual(created.matchedDescriptorIds, []);
+
+    const state = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(state.hasApprovedDescriptors, false);
+    assert.equal(state.flows.length, 1);
+    assert.equal(state.flows[0].status, "missing");
+
+    const captureGuide = await fetch(`${serverUrl}/critical-flows/capture-guide`).then((response) => response.text());
+    assert.match(captureGuide, /TODO: Add product-specific guidance/);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("critical flows suggest approved descriptors and match composite coverage", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-covered-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const dataDir = path.join(tempDir, ".wdyt");
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      name: "User can log in and create and export a report",
+      rawText: "User can log in and create and export a report",
+      interpretedSteps: ["login", "create report", "export report"],
+      interpretedTerms: ["login", "create report", "export report"],
+      outcome: "report exported",
+    },
+  });
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "descriptor-login",
+          flowId: "descriptor-login",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["login-success"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Successful sign-in",
+          proposedConfidence: 0.8,
+          proposedRationale: "Login succeeds.",
+          approvedVocabUsed: ["login"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Successful sign-in",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "descriptor-create-report",
+          flowId: "descriptor-create-report",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["create-report"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Create report",
+          proposedConfidence: 0.8,
+          proposedRationale: "Report is created.",
+          approvedVocabUsed: ["create report"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Create report",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "descriptor-export-report",
+          flowId: "descriptor-export-report",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["export-report"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Export report",
+          proposedConfidence: 0.8,
+          proposedRationale: "Report is exported.",
+          approvedVocabUsed: ["export report"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Export report",
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    [
+      {
+        runId: "run-login",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-login",
+        meta: { canonicalSource: "reducer" },
+      },
+      {
+        runId: "run-create-report",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-create-report",
+        meta: { canonicalSource: "reducer" },
+      },
+      {
+        runId: "run-export-report",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-export-report",
+        meta: { canonicalSource: "reducer" },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-login", testName: "login-success", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" }],
+      },
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-create-report", testName: "create-report", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/reports" }],
+      },
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-export-report", testName: "export-report", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/reports/export" }],
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const initialState = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(initialState.hasApprovedDescriptors, true);
+    assert.deepEqual(initialState.suggestions, [
+      "Create a report",
+      "Export a report to CSV",
+      "Sign in successfully",
+    ]);
+
+    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+      rawText: "User can log in and create and export a report",
+    });
+    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+
+    assert.equal(created.status, "covered");
+    assert.deepEqual(created.matchedDescriptorIds.sort(), [
+      "descriptor-create-report",
+      "descriptor-export-report",
+      "descriptor-login",
+    ]);
+
+    const state = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(state.flows.length, 1);
+    assert.equal(state.flows[0].status, "covered");
+    assert.deepEqual(state.flows[0].matchedConcepts, ["create report", "export report", "login"]);
+    assert.deepEqual(state.flows[0].missingTerms, []);
+    assert.deepEqual(state.suggestions, []);
+    assert.deepEqual(
+      state.flows[0].matchedDescriptors.map((descriptor) => descriptor.name).sort(),
+      ["Create report", "Export report", "Successful sign-in"]
+    );
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("critical flows frame missing terms as missing reviewed evidence", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-partial-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const dataDir = path.join(tempDir, ".wdyt");
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      name: "User can log in and create and export a report",
+      rawText: "User can log in and create and export a report",
+      interpretedSteps: ["login", "create report", "export report"],
+      interpretedTerms: ["login", "create report", "export report"],
+      outcome: "report exported",
+    },
+  });
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "descriptor-login",
+          flowId: "descriptor-login",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["login-success"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Successful sign-in",
+          proposedConfidence: 0.8,
+          proposedRationale: "Login succeeds.",
+          approvedVocabUsed: ["login"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Successful sign-in",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "descriptor-create-report",
+          flowId: "descriptor-create-report",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["create-report"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Create report",
+          proposedConfidence: 0.8,
+          proposedRationale: "Report is created.",
+          approvedVocabUsed: ["create report"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Create report",
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    [
+      {
+        runId: "run-login",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-login",
+        meta: { canonicalSource: "reducer" },
+      },
+      {
+        runId: "run-create-report",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-create-report",
+        meta: { canonicalSource: "reducer" },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-login", testName: "login-success", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" }],
+      },
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-create-report", testName: "create-report", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/reports" }],
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+      rawText: "User can log in and create and export a report",
+    });
+    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+    assert.equal(created.status, "partial");
+
+    const state = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(state.flows[0].status, "partial");
+    assert.deepEqual(state.flows[0].matchedConcepts, ["create report", "login"]);
+    assert.deepEqual(state.flows[0].missingTerms, ["export report"]);
+
+    const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
+    assert.match(page, /Coverage Gaps/);
+    assert.match(page, /Missing:/);
+    assert.match(page, /Referenced by:/);
+    assert.match(page, /Potential missing coverage/);
+    assert.match(page, /No reviewed test evidence currently matches:/);
+    assert.match(page, /No reviewed test evidence matches this critical flow yet\./);
+    assert.match(
+      page,
+      /These concepts were not found in reviewed descriptor vocabulary\. This may indicate missing test coverage, missing reviewed runs, or vocabulary mismatch\./
+    );
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
 });

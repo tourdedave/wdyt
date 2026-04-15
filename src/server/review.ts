@@ -27,12 +27,10 @@ import {
   resolveApprovedVocabularyTerm,
 } from "../shared/vocabulary.js";
 import { scoreProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
+import { DEFAULT_LLM_API_KEY, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, requestJsonCompletion } from "./llm.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
-const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_LLM_API_KEY = "ollama";
-const DEFAULT_LLM_MODEL = "mistral:instruct";
 
 let processingQueue = false;
 
@@ -101,52 +99,6 @@ function clampConfidence(value: unknown) {
   }
 
   return Math.max(0, Math.min(1, value));
-}
-
-async function requestJsonCompletion(input: {
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  systemPrompt: string;
-  userPrompt: string;
-}) {
-  const response = await fetch(new URL("chat/completions", `${input.baseUrl.replace(/\/?$/, "/")}`).toString(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${input.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: input.model,
-      response_format: { type: "json_object" },
-      temperature: 0.2,
-      stream: false,
-      messages: [
-        { role: "system", content: input.systemPrompt },
-        { role: "user", content: input.userPrompt },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`LLM proposal failed with status ${response.status}: ${errorText}`);
-  }
-
-  const body = (await response.json()) as {
-    choices?: Array<{
-      message?: {
-        content?: string;
-      };
-    }>;
-  };
-  const content = body.choices?.[0]?.message?.content;
-
-  if (!content) {
-    throw new Error("LLM response did not include message content");
-  }
-
-  return JSON.parse(content) as unknown;
 }
 
 function normalizeFlowDescriptorProposal(value: unknown, vocabulary: VocabularyEntry[]): FlowDescriptorProposal | null {

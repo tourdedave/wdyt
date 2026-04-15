@@ -154,3 +154,32 @@ export type ReviewUnitRecord = {
   proposedAt?: number;
   reviewedAt?: number;
 };
+
+export type CriticalFlowStatus = "missing" | "partial" | "covered";
+
+export type ParsedCriticalFlow = {
+  name: string;
+  rawText: string;
+  interpretedSteps: string[];
+  interpretedTerms: string[];
+  outcome?: string;
+};
+
+export type CriticalFlowRecord = ParsedCriticalFlow & {
+  id: string;
+  status: CriticalFlowStatus;
+  matchedDescriptorIds: string[];
+  updatedAt: number;
+};
+
+export type ApprovedDescriptorRecord = {
+  id: string;
+  name: string;
+  vocab: string[];
+};
+
+export type CriticalFlowDetailRecord = CriticalFlowRecord & {
+  matchedDescriptors: ApprovedDescriptorRecord[];
+  matchedConcepts: string[];
+  missingTerms: string[];
+};

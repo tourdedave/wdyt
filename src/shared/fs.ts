@@ -37,6 +37,10 @@ export function getReviewUnitsPath() {
   return path.join(DATA_DIR, "review-units.json");
 }
 
+export function getCriticalFlowsPath() {
+  return path.join(DATA_DIR, "critical-flows.json");
+}
+
 export async function ensureDataDir() {
   await mkdir(DATA_DIR, { recursive: true });
 }
