@@ -1596,7 +1596,7 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
     assert.match(page, /Coverage Gaps/);
     assert.match(page, /Missing:/);
-    assert.match(page, /Referenced by:/);
+    assert.match(page, /Missing in/);
     assert.match(page, /Potential missing coverage/);
     assert.match(page, /No reviewed test evidence currently matches:/);
     assert.match(page, /No reviewed test evidence matches this critical flow yet\./);
@@ -1604,6 +1604,145 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
       page,
       /These concepts were not found in reviewed descriptor vocabulary\. This may indicate missing test coverage, missing reviewed runs, or vocabulary mismatch\./
     );
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("critical flows can be updated and deleted", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-edit-delete-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const dataDir = path.join(tempDir, ".wdyt");
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseContent: {
+      name: "Create a report",
+      rawText: "Create a report",
+      interpretedSteps: ["create report"],
+      interpretedTerms: ["create report"],
+      outcome: "report created",
+    },
+  });
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "descriptor-create-report",
+          flowId: "descriptor-create-report",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["integration"],
+          tests: ["create-report"],
+          tools: ["integration-test"],
+          browsers: ["chromium 146"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Create report",
+          proposedConfidence: 0.8,
+          proposedRationale: "Report is created.",
+          approvedVocabUsed: ["create report"],
+          proposedVocab: [],
+          reviewStatus: "approved",
+          approvedDescriptor: "Create report",
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    [
+      {
+        runId: "run-create-report",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        reduced: ["NAVIGATE"],
+        canonical: ["NAVIGATE"],
+        flowId: "descriptor-create-report",
+        meta: { canonicalSource: "reducer" },
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: { tool: "integration-test" },
+        endState: {},
+        run: { id: "run-create-report", testName: "create-report", startedAt: 0, endedAt: 1, reason: "completed" },
+        events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/reports" }],
+      },
+    ]
+      .map((entry) => JSON.stringify(entry))
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const created = await postJson(serverUrl, "/critical-flows", {
+      name: "Create a report",
+      rawText: "Create a report",
+      interpretedSteps: ["create report"],
+      interpretedTerms: ["create report"],
+      outcome: "report created",
+    });
+    assert.equal(created.status, "covered");
+
+    const updated = await fetch(`${serverUrl}/critical-flows/${encodeURIComponent(created.id)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Create and export a report",
+        rawText: "Create and export a report",
+        interpretedSteps: ["create report", "export report"],
+        interpretedTerms: ["create report", "export report"],
+        outcome: "report exported",
+      }),
+    }).then((response) => response.json());
+
+    assert.equal(updated.name, "Create and export a report");
+    assert.equal(updated.status, "partial");
+
+    const stateAfterUpdate = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(stateAfterUpdate.flows.length, 1);
+    assert.equal(stateAfterUpdate.flows[0].status, "partial");
+    assert.deepEqual(stateAfterUpdate.flows[0].missingTerms, ["export report"]);
+
+    const deleted = await fetch(`${serverUrl}/critical-flows/${encodeURIComponent(created.id)}`, {
+      method: "DELETE",
+    }).then((response) => response.json());
+    assert.equal(deleted.ok, true);
+
+    const stateAfterDelete = await getJson(serverUrl, "/critical-flows/state");
+    assert.equal(stateAfterDelete.flows.length, 0);
   } finally {
     llmServer.close();
     await stopChildProcess(child);

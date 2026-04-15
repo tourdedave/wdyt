@@ -218,6 +218,45 @@ export async function createCriticalFlow(input: ParsedCriticalFlow) {
   return record;
 }
 
+export async function updateCriticalFlow(id: string, input: ParsedCriticalFlow) {
+  const [flows, vocabulary, descriptors] = await Promise.all([loadCriticalFlows(), loadVocabulary(), loadApprovedDescriptors()]);
+  const existing = flows.find((flow) => flow.id === id);
+
+  if (!existing) {
+    return null;
+  }
+
+  const normalized = normalizeParsedCriticalFlow(input, input.rawText, vocabulary);
+  if (!normalized) {
+    throw new Error("Critical flow is missing required interpreted fields.");
+  }
+
+  const coverage = computeCoverage(normalized, descriptors);
+  existing.name = normalized.name;
+  existing.rawText = normalized.rawText;
+  existing.interpretedSteps = normalized.interpretedSteps;
+  existing.interpretedTerms = normalized.interpretedTerms;
+  existing.outcome = normalized.outcome;
+  existing.status = coverage.status;
+  existing.matchedDescriptorIds = coverage.matchedDescriptorIds;
+  existing.updatedAt = Date.now();
+
+  await saveCriticalFlows(flows);
+  return existing;
+}
+
+export async function deleteCriticalFlow(id: string) {
+  const flows = await loadCriticalFlows();
+  const nextFlows = flows.filter((flow) => flow.id !== id);
+
+  if (nextFlows.length === flows.length) {
+    return false;
+  }
+
+  await saveCriticalFlows(nextFlows);
+  return true;
+}
+
 function toSentenceCase(value: string) {
   const trimmed = value.trim().replace(/[.?!]+$/, "");
   if (!trimmed) {

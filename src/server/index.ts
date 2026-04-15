@@ -4,7 +4,7 @@ import { DEFAULT_SERVER_URL } from "../shared/constants.js";
 import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js";
 import type { BrowserInfo, EndRunRequest, StartRunRequest } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
-import { createCriticalFlow, loadCriticalFlowState, parseCriticalFlow } from "./critical-flows.js";
+import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
 import { loadReviewUnits, refreshReviewUnits, saveReviewDecision, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
@@ -533,8 +533,11 @@ function renderCriticalFlowsPage() {
       .error { color: var(--danger); }
       .add-flow-bar { display: flex; justify-content: flex-start; margin-bottom: 18px; }
       .add-flow-button { border: 1px solid var(--line); background: transparent; color: var(--accent); font-weight: 600; }
-      .modal-backdrop { position: fixed; inset: 0; background: rgba(29,26,22,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; }
-      .modal-card { width: min(760px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(29,26,22,0.18); }
+      .modal-backdrop { position: fixed; inset: 0; background: rgba(29,26,22,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; overflow-y: auto; }
+      .modal-card { position: relative; width: min(760px, 100%); max-height: calc(100vh - 96px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(29,26,22,0.18); }
+      .modal-shell { position: relative; padding-top: 18px; }
+      .modal-close { position: absolute; top: 0; right: 0; border: 1px solid rgba(216,207,191,0.9); background: rgba(255,253,248,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(29,26,22,0.08); }
+      .modal-close:hover { color: var(--ink); border-color: var(--line); }
       .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
       .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
       .list-block h3 { margin: 0 0 10px; font-size: 15px; }
@@ -565,7 +568,7 @@ function renderCriticalFlowsPage() {
       <section><div id="detail" class="panel">Loading…</div></section>
     </main>
     <script>
-      let state = { flows: [], suggestions: [], hasApprovedDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", activeGapTerm: null, showDraftForm: false };
+      let state = { flows: [], suggestions: [], hasApprovedDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -575,6 +578,31 @@ function renderCriticalFlowsPage() {
       const summarizeItems = (values) => Array.isArray(values) && values.length > 0
         ? values.map((value) => \`<li>\${escapeHtml(value.name || value)}</li>\`).join("")
         : "<li>-</li>";
+      async function interpretDraft(rawText) {
+        state.draftText = rawText;
+        state.parsedDraft = null;
+        state.error = "";
+        state.isWorking = true;
+        render();
+
+        try {
+          const response = await fetch("/critical-flows/interpret", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ rawText: state.draftText }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error || "Unable to interpret critical flow.");
+          }
+          state.parsedDraft = payload;
+        } catch (error) {
+          state.error = error instanceof Error ? error.message : "Unable to interpret critical flow.";
+        } finally {
+          state.isWorking = false;
+          render();
+        }
+      }
       const getGapSummary = () => {
         const summary = new Map();
         state.flows.forEach((flow) => {
@@ -631,8 +659,11 @@ function renderCriticalFlowsPage() {
             \${gaps.map((gap) => \`
               <article class="gap-card \${gap.term === state.activeGapTerm ? "active" : ""}" data-term="\${escapeHtml(gap.term)}">
                 <div class="gap-term">\${escapeHtml(gap.term)}</div>
-                <div class="gap-meta">\${escapeHtml(String(gap.flows.length))} flow\${gap.flows.length === 1 ? "" : "s"} affected</div>
-                <div class="gap-meta">Referenced by: \${escapeHtml(gap.flows.map((flow) => flow.name).join(", "))}</div>
+                <div class="gap-meta">\${gap.flows.length === 1 ? "Missing in:" : \`Missing in \${escapeHtml(String(gap.flows.length))} flows:\`}</div>
+                <div class="gap-meta">
+                  \${gap.flows.slice(0, 2).map((flow) => \`<div>\${gap.flows.length === 1 ? escapeHtml(flow.name) : \`- \${escapeHtml(flow.name)}\`}</div>\`).join("")}
+                  \${gap.flows.length > 2 ? \`<div>+\${escapeHtml(String(gap.flows.length - 2))} more</div>\` : ""}
+                </div>
               </article>\`).join("")}
           </div>\`;
 
@@ -684,13 +715,13 @@ function renderCriticalFlowsPage() {
       function renderDraftArea(options = {}) {
         const compact = options.compact === true;
         const parsed = state.parsedDraft;
-        const examples = \`
+        const examples = state.suggestions.length === 0 ? \`
           <ul class="example-list">
             <li>Log in successfully</li>
             <li>Reset password</li>
             <li>Create and export a report</li>
             <li>Invite a new user</li>
-          </ul>\`;
+          </ul>\` : "";
         const suggestions = state.hasApprovedDescriptors
           ? \`<div class="suggestions">
               <strong>Suggested from reviewed tests</strong>
@@ -726,7 +757,7 @@ function renderCriticalFlowsPage() {
                 <p><strong>Interpreted terms:</strong> \${escapeHtml(parsed.interpretedTerms.join(", "))}</p>
                 <p><strong>Outcome:</strong> \${escapeHtml(parsed.outcome || "-")}</p>
                 <div class="button-row">
-                  <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>Save Critical Flow</button>
+                  <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Critical Flow"}</button>
                 </div>
               </div>\`
             : ""}
@@ -760,6 +791,10 @@ function renderCriticalFlowsPage() {
             <div class="detail-block">
               <p><strong>Original raw text:</strong> \${escapeHtml(flow.rawText)}</p>
               <p><strong>Outcome:</strong> \${escapeHtml(flow.outcome || "-")}</p>
+              <div class="button-row" style="margin-top: 14px;">
+                <button type="button" id="editCriticalFlow">Edit</button>
+                <button type="button" id="deleteCriticalFlow">Delete</button>
+              </div>
             </div>
             <div class="grid">
               \${renderListBlock("Interpreted Steps", flow.interpretedSteps)}
@@ -782,30 +817,43 @@ function renderCriticalFlowsPage() {
             : renderDraftArea()) +
           (selectedFlow ? renderSelectedFlow(selectedFlow) : "") +
           (hasFlows && state.showDraftForm
-            ? \`<div class="modal-backdrop" id="criticalFlowModal">
+            ? \`<div class="modal-backdrop" id="criticalFlowModal" tabindex="-1">
                 <div class="modal-card">
-                  \${renderDraftArea({ compact: true })}
+                  <div class="modal-shell">
+                    <button type="button" class="modal-close" id="closeCriticalFlowModal" aria-label="Close critical flow form">×</button>
+                    \${renderDraftArea({ compact: true })}
+                  </div>
                 </div>
               </div>\`
             : "");
 
         detail.querySelectorAll("[data-suggestion]").forEach((button) => {
-          button.addEventListener("click", () => {
-            state.draftText = button.getAttribute("data-suggestion") || "";
-            state.parsedDraft = null;
-            state.error = "";
-            render();
+          button.addEventListener("click", async () => {
+            await interpretDraft(button.getAttribute("data-suggestion") || "");
           });
         });
 
         detail.querySelector("#openCriticalFlowForm")?.addEventListener("click", () => {
           state.showDraftForm = true;
+          state.editingFlowId = null;
+          state.draftText = "";
+          state.parsedDraft = null;
           state.error = "";
           render();
         });
 
         detail.querySelector("#cancelCriticalFlow")?.addEventListener("click", () => {
           state.showDraftForm = false;
+          state.editingFlowId = null;
+          state.parsedDraft = null;
+          state.error = "";
+          state.isWorking = false;
+          render();
+        });
+
+        detail.querySelector("#closeCriticalFlowModal")?.addEventListener("click", () => {
+          state.showDraftForm = false;
+          state.editingFlowId = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
@@ -818,37 +866,75 @@ function renderCriticalFlowsPage() {
           }
 
           state.showDraftForm = false;
+          state.editingFlowId = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
           render();
         });
 
-        detail.querySelector("#interpretFlow")?.addEventListener("click", async () => {
-          const input = document.getElementById("criticalFlowInput");
-          state.draftText = input.value;
+        detail.querySelector("#criticalFlowModal")?.addEventListener("keydown", (event) => {
+          if (event.key !== "Escape") {
+            return;
+          }
+
+          state.showDraftForm = false;
+          state.editingFlowId = null;
           state.parsedDraft = null;
           state.error = "";
-          state.isWorking = true;
+          state.isWorking = false;
           render();
+        });
+        detail.querySelector("#criticalFlowModal")?.focus();
 
-          try {
-            const response = await fetch("/critical-flows/interpret", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ rawText: state.draftText }),
-            });
-            const payload = await response.json();
-            if (!response.ok) {
-              throw new Error(payload.error || "Unable to interpret critical flow.");
-            }
-            state.parsedDraft = payload;
-          } catch (error) {
-            state.error = error instanceof Error ? error.message : "Unable to interpret critical flow.";
-          } finally {
-            state.isWorking = false;
-            render();
+        detail.querySelector("#editCriticalFlow")?.addEventListener("click", () => {
+          if (!selectedFlow) {
+            return;
           }
+
+          state.showDraftForm = true;
+          state.editingFlowId = selectedFlow.id;
+          state.draftText = selectedFlow.rawText;
+          state.parsedDraft = {
+            name: selectedFlow.name,
+            rawText: selectedFlow.rawText,
+            interpretedSteps: selectedFlow.interpretedSteps,
+            interpretedTerms: selectedFlow.interpretedTerms,
+            outcome: selectedFlow.outcome,
+          };
+          state.error = "";
+          render();
+        });
+
+        detail.querySelector("#deleteCriticalFlow")?.addEventListener("click", async () => {
+          if (!selectedFlow) {
+            return;
+          }
+
+          const confirmed = window.confirm(\`Delete critical flow "\${selectedFlow.name}"?\`);
+          if (!confirmed) {
+            return;
+          }
+
+          const response = await fetch(\`/critical-flows/\${encodeURIComponent(selectedFlow.id)}\`, { method: "DELETE" });
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            state.error = payload.error || "Unable to delete critical flow.";
+            render();
+            return;
+          }
+
+          state.showDraftForm = false;
+          state.editingFlowId = null;
+          state.parsedDraft = null;
+          state.error = "";
+          state.selectedId = state.flows.find((flow) => flow.id !== selectedFlow.id)?.id ?? null;
+          await loadState();
+        });
+
+        detail.querySelector("#interpretFlow")?.addEventListener("click", async () => {
+          const input = document.getElementById("criticalFlowInput");
+          await interpretDraft(input.value);
         });
 
         detail.querySelector("#saveCriticalFlow")?.addEventListener("click", async () => {
@@ -861,8 +947,10 @@ function renderCriticalFlowsPage() {
           render();
 
           try {
-            const response = await fetch("/critical-flows", {
-              method: "POST",
+            const response = await fetch(
+              state.editingFlowId ? \`/critical-flows/\${encodeURIComponent(state.editingFlowId)}\` : "/critical-flows",
+              {
+              method: state.editingFlowId ? "PUT" : "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify(state.parsedDraft),
             });
@@ -874,6 +962,7 @@ function renderCriticalFlowsPage() {
             state.parsedDraft = null;
             state.isWorking = false;
             state.showDraftForm = false;
+            state.editingFlowId = null;
             state.selectedId = payload.id;
             await loadState();
           } catch (error) {
@@ -1268,6 +1357,55 @@ const server = http.createServer(async (req, res) => {
       }
 
       writeJson(res, 201, await createCriticalFlow(body));
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
+  if (req.method === "PUT" && requestPath?.startsWith("/critical-flows/")) {
+    try {
+      const criticalFlowId = decodeURIComponent(requestPath.slice("/critical-flows/".length));
+      const body = await readJsonBody(req);
+
+      if (
+        !body ||
+        typeof body.name !== "string" ||
+        typeof body.rawText !== "string" ||
+        !Array.isArray(body.interpretedSteps) ||
+        !Array.isArray(body.interpretedTerms)
+      ) {
+        writeJson(res, 400, { error: "Invalid critical flow payload" });
+        return;
+      }
+
+      const updated = await updateCriticalFlow(criticalFlowId, body);
+      if (!updated) {
+        writeJson(res, 404, { error: "Critical flow not found" });
+        return;
+      }
+
+      writeJson(res, 200, updated);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
+  if (req.method === "DELETE" && requestPath?.startsWith("/critical-flows/")) {
+    try {
+      const criticalFlowId = decodeURIComponent(requestPath.slice("/critical-flows/".length));
+      const deleted = await deleteCriticalFlow(criticalFlowId);
+      if (!deleted) {
+        writeJson(res, 404, { error: "Critical flow not found" });
+        return;
+      }
+
+      writeJson(res, 200, { ok: true });
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
