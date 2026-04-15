@@ -53,10 +53,19 @@ async function endRun(runId) {
 
 async function login(page, username = "demo", password = demoPassword) {
   await page.goto(`${demoBaseUrl}/login`, { waitUntil: "domcontentloaded" });
+  await submitCredentials(page, username, password);
+}
+
+async function submitCredentials(page, username = "demo", password = demoPassword) {
   await page.locator('input[name="username"]').fill(username);
   await page.locator('input[name="password"]').fill(password);
   await page.locator('button[type="submit"]').click();
   await page.waitForLoadState("domcontentloaded");
+}
+
+async function logout(page) {
+  await page.goto(`${demoBaseUrl}/logout`, { waitUntil: "domcontentloaded" });
+  await page.waitForURL(`${demoBaseUrl}/login`);
 }
 
 async function withBoundPage(context, testName, testFn) {
@@ -89,6 +98,20 @@ async function main() {
       await page.waitForURL(`${demoBaseUrl}/dashboard`);
     });
 
+    await withBoundPage(context, "login-redirect-dashboard", async (page) => {
+      await logout(page);
+      await page.goto(`${demoBaseUrl}/dashboard`, { waitUntil: "domcontentloaded" });
+      await page.waitForURL(`${demoBaseUrl}/login`);
+      await submitCredentials(page);
+      await page.waitForURL(`${demoBaseUrl}/dashboard`);
+    });
+
+    await withBoundPage(context, "dashboard-link-after-login", async (page) => {
+      await login(page);
+      await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+      await page.waitForURL(`${demoBaseUrl}/dashboard`);
+    });
+
     await withBoundPage(context, "login-success-reports", async (page) => {
       await login(page);
       await page.getByRole("link", { name: "Open reports" }).click();
@@ -116,6 +139,20 @@ async function main() {
       await page.locator('input[name="q"]').fill("wdyt");
       await page.locator('button[type="submit"]').click();
       await page.waitForURL(/\/search\/results\?q=wdyt$/);
+    });
+
+    await withBoundPage(context, "search-results-repeat", async (page) => {
+      await login(page);
+      await page.getByRole("link", { name: "Open search" }).click();
+      await page.waitForURL(`${demoBaseUrl}/search`);
+      await page.locator('input[name="q"]').fill("wdyt");
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL(/\/search\/results\?q=wdyt$/);
+      await page.getByRole("link", { name: "Back to search" }).click();
+      await page.waitForURL(`${demoBaseUrl}/search`);
+      await page.locator('input[name="q"]').fill("demo");
+      await page.locator('button[type="submit"]').click();
+      await page.waitForURL(/\/search\/results\?q=demo$/);
     });
 
     await withBoundPage(context, "login-success-settings", async (page) => {

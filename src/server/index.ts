@@ -163,7 +163,13 @@ function renderReviewPage() {
       .unit-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(31,111,74,0.15); }
       .unit-card h2 { margin: 0 0 8px; font-size: 17px; }
       .meta { color: var(--muted); font-size: 14px; line-height: 1.4; }
+      .overlap-summary { display: grid; gap: 10px; margin-bottom: 22px; }
+      .overlap-card { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 12px; cursor: pointer; }
+      .overlap-card.active { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.14); }
+      .overlap-term { display: inline-block; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
       .status { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #efe6d7; }
+      .unit-card.related { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
+      .unit-card.dimmed { opacity: 0.56; }
       section { padding: 24px; overflow: auto; }
       .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
       .descriptor { font-size: 28px; margin: 8px 0 6px; }
@@ -200,11 +206,11 @@ function renderReviewPage() {
       </nav>
     </header>
     <main>
-      <aside><div id="units"></div></aside>
+      <aside><div id="overlapSummary"></div><div id="units"></div></aside>
       <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
     </main>
     <script>
-      let state = { units: [], vocabulary: [], selectedId: null, editingId: null, submittingReviewId: null, transitionMessage: "", pendingFocusHeading: false };
+      let state = { units: [], vocabulary: [], selectedId: null, editingId: null, submittingReviewId: null, transitionMessage: "", pendingFocusHeading: false, activeOverlapKey: null };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -212,6 +218,55 @@ function renderReviewPage() {
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
       const getReviewableUnits = () => state.units.filter((unit) => unit.reviewStatus === "pending");
+      const getOverlapVocab = (unit) => {
+        const approved = Array.isArray(unit.approvedVocabUsed) ? unit.approvedVocabUsed : [];
+        const proposed = Array.isArray(unit.proposedVocab) ? unit.proposedVocab : [];
+        return [...new Set([...approved, ...proposed].map((value) => String(value).trim()).filter(Boolean))].sort();
+      };
+      const getOverlapKey = (unit) => {
+        const vocab = getOverlapVocab(unit);
+        return vocab.length > 0 ? vocab.join("||") : null;
+      };
+      const getComparableUnits = () =>
+        state.units.filter(
+          (unit) =>
+            unit.reviewStatus !== "rejected" &&
+            (unit.proposalState === "proposed" || unit.reviewStatus === "approved" || unit.reviewStatus === "overridden")
+        );
+      const getOverlapGroups = () => {
+        const groups = new Map();
+        getComparableUnits().forEach((unit) => {
+          const vocab = getOverlapVocab(unit);
+          if (vocab.length === 0) {
+            return;
+          }
+
+          const key = vocab.join("||");
+          const current = groups.get(key) || { key, vocab, units: [] };
+          current.units.push(unit);
+          groups.set(key, current);
+        });
+
+        return [...groups.values()]
+          .filter((group) => group.units.length > 1)
+          .sort((a, b) => b.units.length - a.units.length || a.vocab.join(" ").localeCompare(b.vocab.join(" ")));
+      };
+      const getOverlapTitle = (group) => {
+        const descriptors = group.units
+          .map((unit) => String(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
+          .filter(Boolean);
+        if (descriptors.length === 0) {
+          return group.vocab.join(" + ");
+        }
+
+        const counts = new Map();
+        descriptors.forEach((descriptor) => {
+          counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
+        });
+
+        return [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
+      };
       const getDisplayStatus = (unit) => {
         if (unit.reviewStatus === "approved") return "approved";
         if (unit.reviewStatus === "rejected") return "rejected";
@@ -244,10 +299,47 @@ function renderReviewPage() {
         render();
       }
 
+      function renderOverlapSummary() {
+        const container = document.getElementById("overlapSummary");
+        const groups = getOverlapGroups();
+
+        if (groups.length === 0) {
+          container.innerHTML = "";
+          return;
+        }
+
+        container.innerHTML = \`
+          <div class="overlap-summary">
+            <p class="rail-title">Repeated Coverage</p>
+            \${groups.map((group) => \`
+              <article class="overlap-card \${group.key === state.activeOverlapKey ? "active" : ""}" data-key="\${escapeHtml(group.key)}">
+                <div class="overlap-term">\${escapeHtml(getOverlapTitle(group))}</div>
+                <div class="meta">Appears in \${escapeHtml(String(group.units.length))} flows:</div>
+                <div class="meta">
+                  \${group.units.map((unit) => \`<div>- \${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
+                </div>
+              </article>\`).join("")}
+          </div>\`;
+
+        container.querySelectorAll(".overlap-card").forEach((node) => {
+          node.addEventListener("click", () => {
+            const key = node.getAttribute("data-key");
+            state.activeOverlapKey = state.activeOverlapKey === key ? null : key;
+            if (state.activeOverlapKey) {
+              const group = getOverlapGroups().find((entry) => entry.key === state.activeOverlapKey);
+              if (group?.units[0]) {
+                state.selectedId = group.units[0].reviewId;
+              }
+            }
+            render();
+          });
+        });
+      }
+
       function renderList() {
         const container = document.getElementById("units");
         container.innerHTML = state.units.map((unit) => \`
-          <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
+          <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapKey(unit) === state.activeOverlapKey ? "related" : ""} \${state.activeOverlapKey && getOverlapKey(unit) !== state.activeOverlapKey ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
             <h2>\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
             <div class="status">\${escapeHtml(getDisplayStatus(unit))}</div>
           </article>\`).join("");
@@ -360,7 +452,7 @@ function renderReviewPage() {
         });
       }
 
-      function render() { renderList(); renderDetail(); }
+      function render() { renderOverlapSummary(); renderList(); renderDetail(); }
       loadState();
       setInterval(loadState, 4000);
     </script>

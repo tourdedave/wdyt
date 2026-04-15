@@ -31,13 +31,27 @@ npm start
 Current flow set:
 
 - `login-success-dashboard`
+- `login-redirect-dashboard`
+- `dashboard-link-after-login`
 - `login-success-reports`
 - `login-success-settings`
 - `login-invalid`
 - `search-empty`
 - `search-results`
+- `search-results-repeat`
 - `workspace-tabs`
 - `logout-after-login`
+
+These suites intentionally include overlapping semantic flows so the `/review`
+Potential Overlap summary shows up from real captured runs:
+
+- dashboard overlap group:
+  - `login-success-dashboard`
+  - `login-redirect-dashboard`
+  - `dashboard-link-after-login`
+- search overlap group:
+  - `search-results`
+  - `search-results-repeat`
 
 After a run, inspect grouped flows from the repo root:
 

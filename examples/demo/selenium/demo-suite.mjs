@@ -54,6 +54,10 @@ async function endRun(runId) {
 
 async function login(driver, username = "demo", password = demoPassword) {
   await driver.get(`${demoBaseUrl}/login`);
+  await submitCredentials(driver, username, password);
+}
+
+async function submitCredentials(driver, username = "demo", password = demoPassword) {
   const usernameInput = await driver.findElement(By.css('input[name="username"]'));
   const passwordInput = await driver.findElement(By.css('input[name="password"]'));
   const submitButton = await driver.findElement(By.css('button[type="submit"]'));
@@ -67,6 +71,11 @@ async function login(driver, username = "demo", password = demoPassword) {
   if (username === "demo" && password === demoPassword) {
     await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
   }
+}
+
+async function logout(driver) {
+  await driver.get(`${demoBaseUrl}/logout`);
+  await driver.wait(until.urlIs(`${demoBaseUrl}/login`), 15_000);
 }
 
 async function withBoundDriver(driver, testName, testFn) {
@@ -97,6 +106,20 @@ async function main() {
   try {
     await withBoundDriver(driver, "login-success-dashboard", async () => {
       await login(driver);
+      await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
+    });
+
+    await withBoundDriver(driver, "login-redirect-dashboard", async () => {
+      await logout(driver);
+      await driver.get(`${demoBaseUrl}/dashboard`);
+      await driver.wait(until.urlIs(`${demoBaseUrl}/login`), 15_000);
+      await submitCredentials(driver);
+      await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
+    });
+
+    await withBoundDriver(driver, "dashboard-link-after-login", async () => {
+      await login(driver);
+      await driver.findElement(By.linkText("Dashboard")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
     });
 
@@ -131,6 +154,24 @@ async function main() {
       await searchInput.sendKeys("wdyt");
       await driver.findElement(By.css('button[type="submit"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdyt`), 15_000);
+    });
+
+    await withBoundDriver(driver, "search-results-repeat", async () => {
+      await login(driver);
+      await driver.findElement(By.linkText("Open search")).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
+      const searchInput = await driver.findElement(By.css('input[name="q"]'));
+      await searchInput.clear();
+      await searchInput.sendKeys("wdyt");
+      await driver.findElement(By.css('button[type="submit"]')).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdyt`), 15_000);
+      await driver.findElement(By.linkText("Back to search")).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
+      const repeatedSearchInput = await driver.findElement(By.css('input[name="q"]'));
+      await repeatedSearchInput.clear();
+      await repeatedSearchInput.sendKeys("demo");
+      await driver.findElement(By.css('button[type="submit"]')).click();
+      await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=demo`), 15_000);
     });
 
     await withBoundDriver(driver, "login-success-settings", async () => {

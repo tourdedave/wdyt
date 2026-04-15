@@ -1749,3 +1749,204 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("review page surfaces repeated coverage for proposed review units with matching vocab sets", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-overlap-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "sample-login-dashboard-1",
+          flowId: "sample-login-dashboard-1",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["sample-login-dashboard-1"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Successful login leads to dashboard",
+          proposedConfidence: 0.82,
+          proposedRationale: "Sample reviewed flow for overlap grouping.",
+          approvedVocabUsed: ["login", "dashboard"],
+          proposedVocab: [],
+          reviewStatus: "pending",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "sample-login-dashboard-2",
+          flowId: "sample-login-dashboard-2",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["sample-login-dashboard-2"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "User signs in and reaches dashboard",
+          proposedConfidence: 0.82,
+          proposedRationale: "Sample reviewed flow for overlap grouping.",
+          approvedVocabUsed: ["login", "dashboard"],
+          proposedVocab: [],
+          reviewStatus: "pending",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "sample-login-dashboard-3",
+          flowId: "sample-login-dashboard-3",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["sample-login-dashboard-3"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Dashboard is displayed after login",
+          proposedConfidence: 0.82,
+          proposedRationale: "Sample reviewed flow for overlap grouping.",
+          approvedVocabUsed: ["login", "dashboard"],
+          proposedVocab: [],
+          reviewStatus: "pending",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "sample-create-report-1",
+          flowId: "sample-create-report-1",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["sample-create-report-1"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "User creates a report",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample reviewed flow for overlap grouping.",
+          approvedVocabUsed: ["create report"],
+          proposedVocab: [],
+          reviewStatus: "pending",
+          updatedAt: 1,
+        },
+        {
+          reviewId: "sample-create-report-2",
+          flowId: "sample-create-report-2",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["sample-create-report-2"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "New report is successfully created",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample reviewed flow for overlap grouping.",
+          approvedVocabUsed: ["create report"],
+          proposedVocab: [],
+          reviewStatus: "pending",
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    [
+      "sample-login-dashboard-1",
+      "sample-login-dashboard-2",
+      "sample-login-dashboard-3",
+      "sample-create-report-1",
+      "sample-create-report-2",
+    ]
+      .map((flowId) =>
+        JSON.stringify({
+          runId: `run-${flowId}`,
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          reduced: ["NAVIGATE"],
+          canonical: ["NAVIGATE"],
+          flowId,
+          meta: { canonicalSource: "reducer" },
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      "sample-login-dashboard-1",
+      "sample-login-dashboard-2",
+      "sample-login-dashboard-3",
+      "sample-create-report-1",
+      "sample-create-report-2",
+    ]
+      .map((flowId) =>
+        JSON.stringify({
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          run: { id: `run-${flowId}`, testName: flowId, startedAt: 0, endedAt: 1, reason: "completed" },
+          events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/demo" }],
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
+    assert.match(reviewPage, /Repeated Coverage/);
+    assert.match(reviewPage, /Appears in/);
+    assert.doesNotMatch(reviewPage, /reviewed flows/);
+
+    const units = await getJson(serverUrl, "/review/units");
+    assert.equal(units.length, 5);
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
