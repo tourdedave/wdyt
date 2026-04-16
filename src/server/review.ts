@@ -16,13 +16,13 @@ import type {
   FlowDescriptorProposal,
   IngestPayload,
   ProcessedRunRecord,
-  ReviewDecisionStatus,
   ReviewUnitRecord,
   VocabularyEntry,
 } from "../shared/types.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
+  normalizeOverlapTerms,
   normalizeProposedVocabulary,
   resolveApprovedVocabularyTerm,
 } from "../shared/vocabulary.js";
@@ -145,12 +145,42 @@ async function loadVocabulary() {
   return readJsonFile<VocabularyEntry[]>(getVocabularyPath(), []);
 }
 
+function getActiveDescriptor(unit: Partial<ReviewUnitRecord>) {
+  return unit.activeDescriptor ?? unit.proposedDescriptor;
+}
+
+function getActiveVocab(unit: Partial<ReviewUnitRecord>, vocabulary: VocabularyEntry[]) {
+  const active = Array.isArray(unit.activeVocab) ? unit.activeVocab : [];
+  if (active.length > 0) {
+    return normalizeProposedVocabulary(active, vocabulary);
+  }
+
+  return normalizeProposedVocabulary([...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])], vocabulary);
+}
+
+function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[]) {
+  const normalized = getActiveVocab(unit, vocabulary);
+  const activeVocab = [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])].sort((a, b) => a.localeCompare(b));
+  const activeDescriptor = getActiveDescriptor(unit);
+  const interpretationStatus = unit.interpretationStatus ?? "auto-generated";
+
+  return {
+    ...unit,
+    activeDescriptor,
+    activeVocab,
+    overlapTerms: normalizeOverlapTerms(activeVocab, vocabulary),
+    interpretationStatus,
+  };
+}
+
 async function saveReviewUnits(units: ReviewUnitRecord[]) {
   await writeJsonFile(getReviewUnitsPath(), units.sort((a, b) => a.reviewId.localeCompare(b.reviewId)));
 }
 
 export async function loadReviewUnits() {
-  return readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), []);
+  const units = await readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), []);
+  const vocabulary = await loadVocabulary();
+  return units.map((unit) => materializeActiveFields(unit, vocabulary));
 }
 
 export async function buildReviewUnits() {
@@ -240,6 +270,7 @@ export async function buildReviewUnits() {
   }
 
   const existing = await loadReviewUnits();
+  const vocabulary = await loadVocabulary();
   const existingById = new Map(existing.map((unit) => [unit.reviewId, unit]));
   const now = Date.now();
 
@@ -247,7 +278,7 @@ export async function buildReviewUnits() {
     .sort((a, b) => b.count - a.count || a.reviewId.localeCompare(b.reviewId))
     .map((unit) => {
       const previous = existingById.get(unit.reviewId);
-      return {
+      return materializeActiveFields({
         reviewId: unit.reviewId,
         flowId: unit.flowId,
         variantSignature: unit.variantSignature,
@@ -270,14 +301,15 @@ export async function buildReviewUnits() {
         candidateVocab: previous?.candidateVocab,
         approvedVocabUsed: previous?.approvedVocabUsed ?? [],
         proposedVocab: previous?.proposedVocab ?? [],
+        activeDescriptor: previous?.activeDescriptor ?? previous?.proposedDescriptor,
+        activeVocab: previous?.activeVocab ?? [...new Set([...(previous?.approvedVocabUsed ?? []), ...(previous?.proposedVocab ?? [])])],
+        interpretationStatus: previous?.interpretationStatus,
         proposalError: previous?.proposalError,
-        reviewStatus: previous?.reviewStatus ?? "pending",
-        approvedDescriptor: previous?.approvedDescriptor,
         notes: previous?.notes,
         updatedAt: now,
         proposedAt: previous?.proposedAt,
-        reviewedAt: previous?.reviewedAt,
-      };
+        reprocessRequestedAt: previous?.reprocessRequestedAt,
+      }, vocabulary);
     });
 
   await saveReviewUnits(materialized);
@@ -375,9 +407,7 @@ export async function queueProposalProcessing() {
     while (true) {
       const reviewUnits = await loadReviewUnits();
       const vocabulary = await loadVocabulary();
-      const nextUnit = reviewUnits.find(
-        (unit) => unit.reviewStatus === "pending" && (unit.proposalState === "pending" || unit.proposalState === "error")
-      );
+      const nextUnit = reviewUnits.find((unit) => unit.proposalState === "pending" || unit.proposalState === "error");
 
       if (!nextUnit) {
         console.log("[WDYT] proposal worker idle");
@@ -398,9 +428,15 @@ export async function queueProposalProcessing() {
         nextUnit.proposedRationale = proposal.proposedRationale;
         nextUnit.approvedVocabUsed = proposal.approvedVocabUsed;
         nextUnit.proposedVocab = proposal.proposedVocab;
+        nextUnit.activeDescriptor = proposal.proposedDescriptor;
+        nextUnit.activeVocab = [...new Set([...proposal.approvedVocabUsed, ...proposal.proposedVocab])].sort((a, b) =>
+          a.localeCompare(b)
+        );
+        nextUnit.interpretationStatus = nextUnit.reprocessRequestedAt ? "reprocessed" : "auto-generated";
         nextUnit.proposalError = undefined;
         nextUnit.proposedAt = Date.now();
         nextUnit.updatedAt = nextUnit.proposedAt;
+        nextUnit.reprocessRequestedAt = undefined;
         console.log(
           `[WDYT] proposal ready reviewId=${nextUnit.reviewId} descriptor=${JSON.stringify(nextUnit.proposedDescriptor)}`
         );
@@ -425,14 +461,13 @@ export async function refreshReviewUnits() {
   void queueProposalProcessing();
 }
 
-export async function saveReviewDecision(input: {
+export async function saveReviewUnitEdits(input: {
   reviewId: string;
-  reviewStatus: ReviewDecisionStatus;
-  approvedDescriptor?: string;
+  descriptor: string;
+  vocab: string[];
   notes?: string;
-  promoteVocab?: string[];
 }) {
-  console.log(`[WDYT] saving review decision reviewId=${input.reviewId} status=${input.reviewStatus}`);
+  console.log(`[WDYT] saving review unit edits reviewId=${input.reviewId}`);
   const reviewUnits = await loadReviewUnits();
   const reviewUnit = reviewUnits.find((unit) => unit.reviewId === input.reviewId);
 
@@ -441,7 +476,7 @@ export async function saveReviewDecision(input: {
   }
 
   const vocabulary = await loadVocabulary();
-  const promotedTerms = [...new Set((input.promoteVocab ?? []).map((term) => term.trim()).filter(Boolean))];
+  const promotedTerms = [...new Set((input.vocab ?? []).map((term) => term.trim()).filter(Boolean))];
   const now = Date.now();
 
   for (const term of promotedTerms) {
@@ -458,26 +493,39 @@ export async function saveReviewDecision(input: {
     }
   }
 
-  reviewUnit.reviewStatus = input.reviewStatus;
-  reviewUnit.approvedDescriptor = input.approvedDescriptor ?? reviewUnit.proposedDescriptor;
+  reviewUnit.activeDescriptor = input.descriptor.trim() || reviewUnit.activeDescriptor || reviewUnit.proposedDescriptor;
   reviewUnit.notes = input.notes;
-  reviewUnit.reviewedAt = now;
   reviewUnit.updatedAt = now;
+  reviewUnit.interpretationStatus = "edited";
 
-  if (promotedTerms.length > 0) {
-    const normalizedProposals = normalizeProposedVocabulary(
-      [...new Set([...reviewUnit.proposedVocab, ...promotedTerms])],
-      vocabulary
-    );
-    reviewUnit.approvedVocabUsed = [
-      ...new Set([...reviewUnit.approvedVocabUsed, ...normalizedProposals.approvedVocab, ...promotedTerms]),
-    ].sort((a, b) => a.localeCompare(b));
-    reviewUnit.proposedVocab = normalizedProposals.proposedVocab;
-  }
+  const normalizedActive = normalizeProposedVocabulary(promotedTerms, vocabulary);
+  reviewUnit.activeVocab = [...new Set([...normalizedActive.approvedVocab, ...normalizedActive.proposedVocab])].sort((a, b) =>
+    a.localeCompare(b)
+  );
+  reviewUnit.overlapTerms = normalizeOverlapTerms(reviewUnit.activeVocab, vocabulary);
+  reviewUnit.approvedVocabUsed = normalizedActive.approvedVocab;
+  reviewUnit.proposedVocab = normalizedActive.proposedVocab;
 
   await writeJsonFile(getVocabularyPath(), vocabulary.sort((a, b) => a.term.localeCompare(b.term)));
   await saveReviewUnits(reviewUnits);
-  console.log(`[WDYT] review decision saved reviewId=${input.reviewId}`);
+  console.log(`[WDYT] review unit edits saved reviewId=${input.reviewId}`);
+  return reviewUnit;
+}
+
+export async function requestReviewUnitReprocess(reviewId: string) {
+  const reviewUnits = await loadReviewUnits();
+  const reviewUnit = reviewUnits.find((unit) => unit.reviewId === reviewId);
+
+  if (!reviewUnit) {
+    return null;
+  }
+
+  reviewUnit.proposalState = "pending";
+  reviewUnit.proposalError = undefined;
+  reviewUnit.reprocessRequestedAt = Date.now();
+  reviewUnit.updatedAt = reviewUnit.reprocessRequestedAt;
+  await saveReviewUnits(reviewUnits);
+  void queueProposalProcessing();
   return reviewUnit;
 }
 

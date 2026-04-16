@@ -81,11 +81,11 @@ export async function loadApprovedDescriptors() {
   const vocabulary = await loadVocabulary();
 
   return units
-    .filter((unit) => unit.reviewStatus === "approved" || unit.reviewStatus === "overridden")
+    .filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor))
     .map((unit) => ({
       id: unit.reviewId,
-      name: unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
-      vocab: normalizeDescriptorTerms(unit.approvedVocabUsed ?? [], vocabulary),
+      name: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
+      vocab: normalizeDescriptorTerms(unit.activeVocab ?? [...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])], vocabulary),
     }))
     .filter((descriptor) => descriptor.name.trim().length > 0);
 }
@@ -335,6 +335,6 @@ export async function loadCriticalFlowState() {
   return {
     flows: flowsWithDetails,
     suggestions,
-    hasApprovedDescriptors: descriptors.length > 0,
+    hasDescriptors: descriptors.length > 0,
   };
 }

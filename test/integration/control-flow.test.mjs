@@ -1085,6 +1085,8 @@ test("server materializes review units, proposes descriptors in background, and 
     });
 
     assert.equal(proposedUnit.proposedDescriptor, "search ends at dashboard");
+    assert.equal(proposedUnit.activeDescriptor, "search ends at dashboard");
+    assert.deepEqual(proposedUnit.activeVocab, ["search"]);
     assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
@@ -1093,17 +1095,32 @@ test("server materializes review units, proposes descriptors in background, and 
     assert.match(reviewPage, /overflow-wrap: anywhere;/);
     assert.match(reviewPage, /word-break: break-word;/);
 
-    const updatedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
-      reviewStatus: "approved",
-      approvedDescriptor: "approved search descriptor",
-      notes: "looks good",
-      promoteVocab: ["search"],
-    });
+    const updatedUnit = await fetch(`${serverUrl}/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        descriptor: "approved search descriptor",
+        notes: "looks good",
+        vocab: ["search"],
+      }),
+    }).then((response) => response.json());
 
-    assert.equal(updatedUnit.reviewStatus, "approved");
-    assert.equal(updatedUnit.approvedDescriptor, "approved search descriptor");
+    assert.equal(updatedUnit.activeDescriptor, "approved search descriptor");
+    assert.equal(updatedUnit.interpretationStatus, "edited");
+    assert.deepEqual(updatedUnit.activeVocab, ["search"]);
     assert.deepEqual(updatedUnit.approvedVocabUsed, ["search"]);
     assert.deepEqual(updatedUnit.proposedVocab, []);
+
+    const reprocessedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}/reprocess`, {});
+    assert.equal(reprocessedUnit.proposalState, "pending");
+
+    const refreshedUnit = await waitForCondition(async () => {
+      const units = await getJson(serverUrl, "/review/units");
+      const match = units.find((unit) => unit.reviewId === proposedUnit.reviewId);
+      return match?.interpretationStatus === "reprocessed" ? match : null;
+    });
+    assert.equal(refreshedUnit.activeDescriptor, "search ends at dashboard");
+    assert.equal(refreshedUnit.interpretationStatus, "reprocessed");
 
     const vocabulary = await getJson(serverUrl, "/review/vocabulary");
     assert.equal(vocabulary[0].term, "search");
@@ -1214,7 +1231,7 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
     assert.deepEqual(created.matchedDescriptorIds, []);
 
     const state = await getJson(serverUrl, "/critical-flows/state");
-    assert.equal(state.hasApprovedDescriptors, false);
+    assert.equal(state.hasDescriptors ?? state.hasApprovedDescriptors, false);
     assert.equal(state.flows.length, 1);
     assert.equal(state.flows[0].status, "missing");
 
@@ -1227,7 +1244,7 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
   }
 });
 
-test("critical flows suggest approved descriptors and match composite coverage", { timeout: 15_000 }, async () => {
+test("critical flows suggest active descriptors and match composite coverage", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-covered-"));
   const port = randomPort();
   const llmPort = randomPort();
@@ -1408,7 +1425,7 @@ test("critical flows suggest approved descriptors and match composite coverage",
     await waitForHealth(serverUrl);
 
     const initialState = await getJson(serverUrl, "/critical-flows/state");
-    assert.equal(initialState.hasApprovedDescriptors, true);
+    assert.equal(initialState.hasDescriptors ?? initialState.hasApprovedDescriptors, true);
     assert.deepEqual(initialState.suggestions, [
       "Create a report",
       "Export a report to CSV",
@@ -1945,6 +1962,226 @@ test("review page surfaces repeated coverage for proposed review units with matc
 
     const units = await getJson(serverUrl, "/review/units");
     assert.equal(units.length, 5);
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review page groups semantically similar repeated coverage with divergent active vocab", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-semantic-overlap-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "dashboard-a",
+          flowId: "dashboard-a",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["login-success-dashboard"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Login succeeds and navigates to dashboard",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample semantic overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["dashboard", "login", "success"],
+          activeDescriptor: "Login succeeds and navigates to dashboard",
+          activeVocab: ["dashboard", "login", "success"],
+          updatedAt: 1,
+        },
+        {
+          reviewId: "dashboard-b",
+          flowId: "dashboard-b",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["dashboard-link-after-login"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Login succeeds and navigates to dashboard",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample semantic overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["dashboard", "login", "successful login"],
+          activeDescriptor: "Login succeeds and navigates to dashboard",
+          activeVocab: ["dashboard", "login", "successful login"],
+          updatedAt: 1,
+        },
+        {
+          reviewId: "dashboard-c",
+          flowId: "dashboard-c",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["login-redirect-dashboard"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Login succeeds and redirects to dashboard",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample semantic overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["dashboard", "login", "successful authentication"],
+          activeDescriptor: "Login succeeds and redirects to dashboard",
+          activeVocab: ["dashboard", "login", "successful authentication"],
+          updatedAt: 1,
+        },
+        {
+          reviewId: "search-a",
+          flowId: "search-a",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["search-results"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Search is submitted and results are displayed",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample semantic overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["search", "search results"],
+          activeDescriptor: "Search is submitted and results are displayed",
+          activeVocab: ["search", "search results"],
+          updatedAt: 1,
+        },
+        {
+          reviewId: "search-b",
+          flowId: "search-b",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["search-results-repeat"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "Search is performed with repeated queries ending on results",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample semantic overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["query repetition", "search", "search results"],
+          activeDescriptor: "Search is performed with repeated queries ending on results",
+          activeVocab: ["query repetition", "search", "search results"],
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    [
+      "dashboard-a",
+      "dashboard-b",
+      "dashboard-c",
+      "search-a",
+      "search-b",
+    ]
+      .map((flowId) =>
+        JSON.stringify({
+          runId: `run-${flowId}`,
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          reduced: ["NAVIGATE"],
+          canonical: ["NAVIGATE"],
+          flowId,
+          meta: { canonicalSource: "reducer" },
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      "dashboard-a",
+      "dashboard-b",
+      "dashboard-c",
+      "search-a",
+      "search-b",
+    ]
+      .map((flowId) =>
+        JSON.stringify({
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          run: { id: `run-${flowId}`, testName: flowId, startedAt: 0, endedAt: 1, reason: "completed" },
+          events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/demo" }],
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
+    assert.match(reviewPage, /Repeated Coverage/);
+
+    const units = await getJson(serverUrl, "/review/units");
+    const dashboardUnits = units.filter((unit) => String(unit.reviewId).startsWith("dashboard-"));
+    const searchUnits = units.filter((unit) => String(unit.reviewId).startsWith("search-"));
+    assert.deepEqual(
+      dashboardUnits.map((unit) => unit.overlapTerms),
+      [
+        ["dashboard", "login"],
+        ["dashboard", "login"],
+        ["dashboard", "login"],
+      ]
+    );
+    assert.deepEqual(
+      searchUnits.map((unit) => unit.overlapTerms),
+      [
+        ["search", "search results"],
+        ["query repetition", "search", "search results"],
+      ]
+    );
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });

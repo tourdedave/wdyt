@@ -121,7 +121,7 @@ export type FlowDescriptorProposal = {
 
 export type ReviewProposalState = "pending" | "processing" | "proposed" | "error";
 
-export type ReviewDecisionStatus = "pending" | "approved" | "rejected" | "overridden";
+export type ReviewUnitInterpretationStatus = "auto-generated" | "edited" | "reprocessed";
 
 export type ReviewUnitRecord = {
   reviewId: string;
@@ -146,13 +146,15 @@ export type ReviewUnitRecord = {
   candidateVocab?: string[];
   approvedVocabUsed: string[];
   proposedVocab: string[];
+  activeDescriptor?: string;
+  activeVocab: string[];
+  overlapTerms?: string[];
+  interpretationStatus?: ReviewUnitInterpretationStatus;
   proposalError?: string;
-  reviewStatus: ReviewDecisionStatus;
-  approvedDescriptor?: string;
   notes?: string;
   updatedAt: number;
   proposedAt?: number;
-  reviewedAt?: number;
+  reprocessRequestedAt?: number;
 };
 
 export type CriticalFlowStatus = "missing" | "partial" | "covered";

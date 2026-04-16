@@ -5,7 +5,7 @@ import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js"
 import type { BrowserInfo, EndRunRequest, StartRunRequest } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
-import { loadReviewUnits, refreshReviewUnits, saveReviewDecision, upsertVocabulary } from "./review.js";
+import { loadReviewUnits, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
@@ -198,7 +198,7 @@ function renderReviewPage() {
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Review flow variants, approve descriptors, and promote vocabulary.</p>
+      <p>Review flow variants, refine interpretations, and reprocess them when needed.</p>
       <nav>
         <a class="active" href="/review">Review</a>
         <a href="/review/summary">Summary</a>
@@ -217,43 +217,67 @@ function renderReviewPage() {
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
-      const getReviewableUnits = () => state.units.filter((unit) => unit.reviewStatus === "pending");
-      const getOverlapVocab = (unit) => {
-        const approved = Array.isArray(unit.approvedVocabUsed) ? unit.approvedVocabUsed : [];
-        const proposed = Array.isArray(unit.proposedVocab) ? unit.proposedVocab : [];
-        return [...new Set([...approved, ...proposed].map((value) => String(value).trim()).filter(Boolean))].sort();
+      const getActiveUnits = () => state.units.filter((unit) => unit.proposalState === "proposed" || unit.activeDescriptor);
+      const getOverlapVocab = (unit) => Array.isArray(unit.overlapTerms) ? unit.overlapTerms : [];
+      const getSharedOverlapCount = (leftValues, rightValues) => {
+        const right = new Set((rightValues || []).map((value) => String(value).trim()).filter(Boolean));
+        return (leftValues || []).filter((value) => right.has(String(value).trim())).length;
       };
-      const getOverlapKey = (unit) => {
-        const vocab = getOverlapVocab(unit);
-        return vocab.length > 0 ? vocab.join("||") : null;
+      const isOverlapMatch = (leftValues, rightValues) => {
+        const left = (leftValues || []).map((value) => String(value).trim()).filter(Boolean);
+        const right = (rightValues || []).map((value) => String(value).trim()).filter(Boolean);
+        const shared = getSharedOverlapCount(left, right);
+        const maxCount = Math.max(left.length, right.length);
+        if (maxCount === 0) {
+          return false;
+        }
+
+        if (shared >= 2 && shared / maxCount >= 0.67) {
+          return true;
+        }
+
+        return maxCount <= 2 && shared === maxCount && maxCount > 0;
       };
       const getComparableUnits = () =>
         state.units.filter(
           (unit) =>
-            unit.reviewStatus !== "rejected" &&
-            (unit.proposalState === "proposed" || unit.reviewStatus === "approved" || unit.reviewStatus === "overridden")
+            unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor)
         );
       const getOverlapGroups = () => {
-        const groups = new Map();
-        getComparableUnits().forEach((unit) => {
+        const groups = [];
+        getComparableUnits()
+          .slice()
+          .sort((a, b) => getOverlapVocab(a).length - getOverlapVocab(b).length || a.reviewId.localeCompare(b.reviewId))
+          .forEach((unit) => {
           const vocab = getOverlapVocab(unit);
           if (vocab.length === 0) {
             return;
           }
 
-          const key = vocab.join("||");
-          const current = groups.get(key) || { key, vocab, units: [] };
-          current.units.push(unit);
-          groups.set(key, current);
+          const matchedGroup = groups.find((group) =>
+            group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)))
+          );
+
+          if (matchedGroup) {
+            matchedGroup.units.push(unit);
+            matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
+            return;
+          }
+
+          groups.push({
+            key: "group-" + (groups.length + 1),
+            vocab: [...vocab],
+            units: [unit],
+          });
         });
 
-        return [...groups.values()]
+        return groups
           .filter((group) => group.units.length > 1)
           .sort((a, b) => b.units.length - a.units.length || a.vocab.join(" ").localeCompare(b.vocab.join(" ")));
       };
       const getOverlapTitle = (group) => {
         const descriptors = group.units
-          .map((unit) => String(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
+          .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
           .filter(Boolean);
         if (descriptors.length === 0) {
           return group.vocab.join(" + ");
@@ -268,13 +292,12 @@ function renderReviewPage() {
           .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
       };
       const getDisplayStatus = (unit) => {
-        if (unit.reviewStatus === "approved") return "approved";
-        if (unit.reviewStatus === "rejected") return "rejected";
-        if (unit.reviewStatus === "overridden") return "overridden";
+        if (unit.interpretationStatus === "edited") return "edited";
+        if (unit.interpretationStatus === "reprocessed") return "reprocessed";
         if (unit.proposalState === "proposed") return "ready for review";
         if (unit.proposalState === "processing") return "generating proposal";
         if (unit.proposalState === "error") return "proposal failed";
-        return "pending";
+        return "auto-generated";
       };
 
       async function loadState() {
@@ -288,13 +311,13 @@ function renderReviewPage() {
           return;
         }
         state.units = nextUnits;
-        const reviewableUnits = getReviewableUnits();
+        const activeUnits = getActiveUnits();
         if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
           state.selectedId = initialReviewId;
         }
-        if (!state.selectedId && reviewableUnits[0]) state.selectedId = reviewableUnits[0].reviewId;
+        if (!state.selectedId && activeUnits[0]) state.selectedId = activeUnits[0].reviewId;
         if (state.selectedId && !state.units.some((unit) => unit.reviewId === state.selectedId)) {
-          state.selectedId = reviewableUnits[0]?.reviewId ?? null;
+          state.selectedId = activeUnits[0]?.reviewId ?? state.units[0]?.reviewId ?? null;
         }
         render();
       }
@@ -316,7 +339,7 @@ function renderReviewPage() {
                 <div class="overlap-term">\${escapeHtml(getOverlapTitle(group))}</div>
                 <div class="meta">Appears in \${escapeHtml(String(group.units.length))} flows:</div>
                 <div class="meta">
-                  \${group.units.map((unit) => \`<div>- \${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
+                  \${group.units.map((unit) => \`<div>- \${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
                 </div>
               </article>\`).join("")}
           </div>\`;
@@ -339,8 +362,8 @@ function renderReviewPage() {
       function renderList() {
         const container = document.getElementById("units");
         container.innerHTML = state.units.map((unit) => \`
-          <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapKey(unit) === state.activeOverlapKey ? "related" : ""} \${state.activeOverlapKey && getOverlapKey(unit) !== state.activeOverlapKey ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
-            <h2>\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
+          <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "related" : ""} \${state.activeOverlapKey && !getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
+            <h2>\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
             <div class="status">\${escapeHtml(getDisplayStatus(unit))}</div>
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
@@ -357,24 +380,24 @@ function renderReviewPage() {
 
       function renderDetail() {
         const detail = document.getElementById("detail");
-        const reviewableUnits = getReviewableUnits();
         const unit = state.units.find((candidate) => candidate.reviewId === state.selectedId);
 
         if (!unit) {
-          if (reviewableUnits.length === 0) {
-          detail.innerHTML = '<p id="empty">Nothing left to review.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
+          const activeUnits = getActiveUnits();
+          if (activeUnits.length === 0) {
+          detail.innerHTML = '<p id="empty">Waiting for interpreted flow variants.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
           } else {
-            state.selectedId = reviewableUnits[0].reviewId;
+            state.selectedId = activeUnits[0].reviewId;
             render();
           }
           return;
         }
 
-        const isPending = unit.reviewStatus === "pending";
         const isSubmitting = state.submittingReviewId === unit.reviewId;
+        const llmVocab = [...new Set([...(unit.approvedVocabUsed || []), ...(unit.proposedVocab || [])])];
         detail.innerHTML = \`
           \${state.transitionMessage ? \`<div class="transition-banner" role="status">\${escapeHtml(state.transitionMessage)}</div>\` : ""}
-          <div class="descriptor" id="reviewHeading" tabindex="-1">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "Pending proposal")}</div>
+          <div class="descriptor" id="reviewHeading" tabindex="-1">\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || "Pending interpretation")}</div>
           <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
           <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
           <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
@@ -388,29 +411,39 @@ function renderReviewPage() {
             \${renderListBlock("Headings", unit.headings)}
             \${renderListBlock("Alerts", unit.alerts)}
             \${renderListBlock("Targets", unit.targets)}
-            \${renderListBlock("Approved Vocab", unit.approvedVocabUsed)}
-            \${renderListBlock("Proposed Vocab", unit.proposedVocab)}
+            \${renderListBlock("Active Vocab", unit.activeVocab)}
+            \${unit.interpretationStatus === "edited" ? renderListBlock("LLM Vocab", llmVocab) : ""}
           </div>
-          \${!isPending ? '<div class="actions"><div class="button-row"><button id="editDecision">Edit Decision</button></div></div>' : ''}
-          <div class="actions decision-editor \${isPending ? "open" : ""}" id="decisionEditor">
-            <label><div>Approved Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || "")}" /></label>
-            <label><div>Promote Vocabulary Terms</div><input id="promoteVocab" value="\${escapeHtml(unit.proposedVocab.join(", "))}" /></label>
+          <div class="actions"><div class="button-row"><button id="editDecision">Edit Flow</button><button id="reprocessFlow" \${isSubmitting ? "disabled" : ""}>Re-run Interpretation</button></div></div>
+          <div class="actions decision-editor \${state.editingId === unit.reviewId ? "open" : ""}" id="decisionEditor">
+            <label><div>Descriptor</div><input id="approvedDescriptor" value="\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || "")}" /></label>
+            <label><div>Vocabulary</div><input id="promoteVocab" value="\${escapeHtml((unit.activeVocab || []).join(", "))}" /></label>
             <label><div>Notes</div><textarea id="reviewNotes" rows="4">\${escapeHtml(unit.notes || "")}</textarea></label>
             <div class="button-row">
-              <button class="primary" data-action="approved" \${isSubmitting ? "disabled" : ""}>\${isSubmitting ? "Saving…" : "Approve"}</button>
-              <button data-action="overridden" \${isSubmitting ? "disabled" : ""}>Override</button>
-              <button class="reject" data-action="rejected" \${isSubmitting ? "disabled" : ""}>Reject</button>
+              <button class="primary" data-action="save" \${isSubmitting ? "disabled" : ""}>\${isSubmitting ? "Saving…" : "Save Changes"}</button>
               <button type="button" id="cancelDecision" \${isSubmitting ? "disabled" : ""}>Cancel</button>
             </div>
           </div>\`;
         detail.classList.toggle("is-submitting", isSubmitting);
 
-        if (!isPending) {
-          detail.querySelector("#editDecision")?.addEventListener("click", () => {
-            state.editingId = unit.reviewId;
-            detail.querySelector("#decisionEditor")?.classList.add("open");
-          });
-        }
+        detail.querySelector("#editDecision")?.addEventListener("click", () => {
+          state.editingId = unit.reviewId;
+          detail.querySelector("#decisionEditor")?.classList.add("open");
+        });
+
+        detail.querySelector("#reprocessFlow")?.addEventListener("click", async () => {
+          state.submittingReviewId = unit.reviewId;
+          state.transitionMessage = "Re-running interpretation…";
+          render();
+          await fetch(\`/review/units/\${encodeURIComponent(unit.reviewId)}/reprocess\`, { method: "POST" });
+          state.submittingReviewId = null;
+          state.pendingFocusHeading = true;
+          await loadState();
+          setTimeout(() => {
+            state.transitionMessage = "";
+            render();
+          }, 1200);
+        });
 
         detail.querySelector("#cancelDecision")?.addEventListener("click", () => {
           state.editingId = null;
@@ -425,23 +458,19 @@ function renderReviewPage() {
 
         detail.querySelectorAll("button[data-action]").forEach((button) => {
           button.addEventListener("click", async () => {
-            const currentIndex = reviewableUnits.findIndex((candidate) => candidate.reviewId === unit.reviewId);
-            const nextUnit = reviewableUnits[currentIndex + 1] ?? reviewableUnits[currentIndex - 1] ?? null;
-            const reviewStatus = button.getAttribute("data-action");
             const approvedDescriptor = document.getElementById("approvedDescriptor").value.trim();
             const promoteVocab = document.getElementById("promoteVocab").value.split(",").map((value) => value.trim()).filter(Boolean);
             const notes = document.getElementById("reviewNotes").value.trim();
             state.submittingReviewId = unit.reviewId;
-            state.transitionMessage = \`\${reviewStatus === "approved" ? "Approved" : reviewStatus === "rejected" ? "Rejected" : "Updated"}. Loading next review…\`;
+            state.transitionMessage = "Saved flow changes.";
             render();
             await fetch(\`/review/units/\${encodeURIComponent(unit.reviewId)}\`, {
-              method: "POST",
+              method: "PATCH",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify({ reviewStatus, approvedDescriptor, notes, promoteVocab }),
+              body: JSON.stringify({ descriptor: approvedDescriptor, vocab: promoteVocab, notes }),
             });
             state.editingId = null;
             state.submittingReviewId = null;
-            state.selectedId = nextUnit ? nextUnit.reviewId : null;
             state.pendingFocusHeading = true;
             await loadState();
             setTimeout(() => {
@@ -518,17 +547,17 @@ function renderReviewSummaryPage() {
 
       async function loadSummary() {
         const units = await fetch("/review/units").then((response) => response.json());
-        const approved = units.filter((unit) => unit.reviewStatus === "approved" || unit.reviewStatus === "overridden");
+        const approved = units.filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor));
         const target = document.getElementById("summary");
 
         if (approved.length === 0) {
-          target.innerHTML = "<p>No approved descriptors yet.</p>";
+          target.innerHTML = "<p>No interpreted descriptors yet.</p>";
           return;
         }
 
         target.innerHTML = approved.map((unit) => \`
           <article class="card" data-review-id="\${escapeHtml(unit.reviewId)}">
-            <h2 class="descriptor">\${escapeHtml(unit.approvedDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
+            <h2 class="descriptor">\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
             <div class="details">
               <p class="meta">Suites: \${escapeHtml((unit.suites || []).join(", ") || "-")}</p>
               <p class="meta">Tests: \${escapeHtml((unit.tests || []).join(", ") || "-")}</p>
@@ -649,7 +678,7 @@ function renderCriticalFlowsPage() {
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Define the flows that matter most, then compare approved reviewed tests against them.</p>
+      <p>Define the flows that matter most, then compare them against interpreted reviewed tests.</p>
       <nav>
         <a href="/review">Review</a>
         <a href="/review/summary">Summary</a>
@@ -665,7 +694,7 @@ function renderCriticalFlowsPage() {
       <section><div id="detail" class="panel">Loading…</div></section>
     </main>
     <script>
-      let state = { flows: [], suggestions: [], hasApprovedDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null };
+      let state = { flows: [], suggestions: [], hasDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -770,7 +799,7 @@ function renderCriticalFlowsPage() {
         const nextState = await response.json();
         state.flows = nextState.flows;
         state.suggestions = nextState.suggestions;
-        state.hasApprovedDescriptors = nextState.hasApprovedDescriptors;
+        state.hasDescriptors = nextState.hasDescriptors;
         if (state.activeGapTerm && !getGapSummary().some((entry) => entry.term === state.activeGapTerm)) {
           state.activeGapTerm = null;
         }
@@ -862,7 +891,7 @@ function renderCriticalFlowsPage() {
             <li>Create and export a report</li>
             <li>Invite a new user</li>
           </ul>\` : "";
-        const suggestions = state.hasApprovedDescriptors && state.suggestions.length > 0
+        const suggestions = state.hasDescriptors && state.suggestions.length > 0
           ? \`<div class="suggestions">
               <strong>Suggested from reviewed tests</strong>
               <div class="pills">
@@ -875,7 +904,7 @@ function renderCriticalFlowsPage() {
           <div class="stack">
             <div class="intro">
               <h2>What are the most important things your application must do?</h2>
-              <p>Capture each critical business flow one at a time, then compare it against approved reviewed tests.</p>
+              <p>Capture each critical business flow one at a time, then compare it against interpreted reviewed tests.</p>
               \${examples}
             </div>
             \${suggestions}
@@ -919,7 +948,7 @@ function renderCriticalFlowsPage() {
                 </div>
               </div>\`
             : ""}
-            \${state.flows.length > 0 && !state.hasApprovedDescriptors ? \`
+            \${state.flows.length > 0 && !state.hasDescriptors ? \`
               <div class="callout">
                 <p>We&apos;ll compare reviewed tests against these critical flows automatically.</p>
                 <p>Next step: Capture and review a test run to start measuring coverage.</p>
@@ -1423,33 +1452,47 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && requestPath?.startsWith("/review/units/")) {
+  if (req.method === "PATCH" && requestPath?.startsWith("/review/units/")) {
     try {
       const reviewId = decodeURIComponent(requestPath.slice("/review/units/".length));
       const body = (await readJsonBody(req)) as
         | {
-            reviewStatus?: "approved" | "rejected" | "overridden";
-            approvedDescriptor?: string;
+            descriptor?: string;
             notes?: string;
-            promoteVocab?: string[];
+            vocab?: string[];
           }
         | null;
 
-      if (
-        !body ||
-        (body.reviewStatus !== "approved" && body.reviewStatus !== "rejected" && body.reviewStatus !== "overridden")
-      ) {
+      if (!body || typeof body.descriptor !== "string") {
         writeJson(res, 400, { error: "Invalid review payload" });
         return;
       }
 
-      const updated = await saveReviewDecision({
+      const updated = await saveReviewUnitEdits({
         reviewId,
-        reviewStatus: body.reviewStatus,
-        approvedDescriptor: body.approvedDescriptor,
+        descriptor: body.descriptor,
         notes: body.notes,
-        promoteVocab: Array.isArray(body.promoteVocab) ? body.promoteVocab : [],
+        vocab: Array.isArray(body.vocab) ? body.vocab : [],
       });
+
+      if (!updated) {
+        writeJson(res, 404, { error: "Review unit not found" });
+        return;
+      }
+
+      writeJson(res, 200, updated);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
+  if (req.method === "POST" && requestPath?.startsWith("/review/units/") && requestPath.endsWith("/reprocess")) {
+    try {
+      const reviewId = decodeURIComponent(requestPath.slice("/review/units/".length, -"/reprocess".length));
+      const updated = await requestReviewUnitReprocess(reviewId);
 
       if (!updated) {
         writeJson(res, 404, { error: "Review unit not found" });

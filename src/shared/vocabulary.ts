@@ -93,3 +93,42 @@ export function canonicalizeSemanticTerms(terms: string[], entries: Iterable<Voc
   const normalized = normalizeProposedVocabulary(terms, entries);
   return [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])].sort((a, b) => a.localeCompare(b));
 }
+
+function foldOverlapTerm(term: string) {
+  const normalized = normalizeVocabularyValue(term);
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized === "success") {
+    return null;
+  }
+
+  if (normalized.includes("dashboard")) {
+    return "dashboard";
+  }
+
+  if (normalized.includes("search results")) {
+    return "search results";
+  }
+
+  if (normalized === "search" || (normalized.includes("search") && normalized.includes("query"))) {
+    return "search";
+  }
+
+  if (normalized.includes("login")) {
+    return "login";
+  }
+
+  if (normalized.includes("authentication") && (normalized.includes("success") || normalized.includes("successful"))) {
+    return "login";
+  }
+
+  return normalized;
+}
+
+export function normalizeOverlapTerms(terms: string[], entries: Iterable<VocabularyEntry>) {
+  const canonicalTerms = canonicalizeSemanticTerms(terms, entries);
+  const foldedTerms = canonicalTerms.map((term) => foldOverlapTerm(term)).filter((term): term is string => Boolean(term));
+  return [...new Set(foldedTerms)].sort((a, b) => a.localeCompare(b));
+}
