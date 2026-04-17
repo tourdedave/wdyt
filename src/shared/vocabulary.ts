@@ -91,7 +91,22 @@ export function normalizeProposedVocabulary(terms: string[], entries: Iterable<V
 
 export function canonicalizeSemanticTerms(terms: string[], entries: Iterable<VocabularyEntry>) {
   const normalized = normalizeProposedVocabulary(terms, entries);
-  return [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])].sort((a, b) => a.localeCompare(b));
+  const canonicalTerms = [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])];
+  const normalizedTerms = new Set(canonicalTerms.map((term) => normalizeVocabularyValue(term)).filter(Boolean));
+
+  // Contextual fold: a critical flow like "search and display results" should land in the
+  // same vocabulary space as reviewed flows that use the compound term "search results".
+  if (normalizedTerms.has("search") && normalizedTerms.has("results") && !normalizedTerms.has("search results")) {
+    const searchResultsTerm = resolveApprovedVocabularyTerm("search results", entries) ?? "search results";
+    return canonicalTerms
+      .filter((term) => normalizeVocabularyValue(term) !== "results")
+      .concat(searchResultsTerm)
+      .filter(Boolean)
+      .filter((term, index, values) => values.findIndex((candidate) => candidate.localeCompare(term) === 0) === index)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  return canonicalTerms.sort((a, b) => a.localeCompare(b));
 }
 
 function foldOverlapTerm(term: string) {

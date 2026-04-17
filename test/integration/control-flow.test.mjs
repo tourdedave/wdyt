@@ -1654,6 +1654,120 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
   }
 });
 
+test("critical flows normalize search plus results into covered search results", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-search-results-"));
+  const port = randomPort();
+  const llmPort = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseSequence: [
+      {
+        descriptor: "Search query is submitted and results are displayed",
+        approvedVocab: [],
+        proposedVocab: ["search", "search results"],
+        confidence: 0.8,
+        rationale: "The flow ends on search results after a submitted query.",
+      },
+      {
+        name: "Search and display results",
+        rawText: "Search queries are submitted with results displayed",
+        interpretedSteps: ["search", "view results"],
+        interpretedTerms: ["results", "search"],
+        outcome: "results visible",
+      },
+    ],
+  });
+
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const started = await postJson(serverUrl, "/runs/start", {
+      suiteName: "integration",
+      testName: "search-results",
+      environment: {
+        tool: "integration-test",
+      },
+    });
+
+    await fetch(started.bootstrapUrl, {
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
+      },
+    }).then((response) => response.text());
+
+    const bound = await postJson(serverUrl, "/bindings/bind", {
+      browserSessionId: "browser-session-search-results",
+      runId: started.runId,
+    });
+
+    await postJson(serverUrl, "/ingest", {
+      suite: bound.suite,
+      environment: bound.environment,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/search/results?q=wdyt",
+        title: "Search Results",
+        heading: "Search Results",
+        alertText: null,
+      },
+      run: {
+        id: started.runId,
+        testName: "search-results",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "input", ts: 1010, seq: 1, target: { tag: "input", text: "demo" }, value: "demo" },
+        { type: "change", ts: 1020, seq: 2, target: { tag: "input", text: "demo" }, value: "demo" },
+        { type: "click", ts: 1030, seq: 3, target: { tag: "button", text: "Search" } },
+        { type: "submit", ts: 1040, seq: 4, target: { tag: "form", text: "Search" } },
+        { type: "navigate", ts: 1050, seq: 5, url: "http://127.0.0.1:4010/search/results?q=wdyt" },
+      ],
+    });
+
+    const proposedUnit = await waitForCondition(async () => {
+      const units = await getJson(serverUrl, "/review/units");
+      return units.find((unit) => unit.proposalState === "proposed" && unit.activeDescriptor) ?? null;
+    });
+
+    assert.equal(proposedUnit.activeDescriptor, "Search query is submitted and results are displayed");
+    assert.deepEqual(proposedUnit.activeVocab, ["search", "search results"]);
+
+    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+      rawText: "Search queries are submitted with results displayed",
+    });
+
+    assert.deepEqual(interpreted.interpretedTerms, ["search", "search results"]);
+
+    const created = await postJson(serverUrl, "/critical-flows", {
+      rawText: interpreted.rawText,
+      name: interpreted.name,
+      interpretedSteps: interpreted.interpretedSteps,
+      interpretedTerms: interpreted.interpretedTerms,
+      outcome: interpreted.outcome,
+    });
+
+    assert.equal(created.status, "covered");
+    assert.deepEqual(created.matchedDescriptorIds, [proposedUnit.reviewId]);
+
+    const state = await getJson(serverUrl, "/critical-flows/state");
+    assert.deepEqual(state.flows[0].missingTerms, []);
+  } finally {
+    llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("critical flows can be updated and deleted", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-edit-delete-"));
   const port = randomPort();
