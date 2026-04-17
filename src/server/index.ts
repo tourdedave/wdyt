@@ -569,7 +569,8 @@ function renderReviewSummaryPage() {
       .repeat-meta, .concept-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
       .repeat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .flow-summary-list { display: grid; gap: 6px; }
-      .flow-summary-card { border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; }
+      .flow-summary-card { display: block; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; color: inherit; text-decoration: none; }
+      .flow-summary-card:hover { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
       .flow-summary-title { font-size: 16px; font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
       .flow-summary-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
       .flow-summary-meta.covered { color: var(--accent); }
@@ -778,10 +779,10 @@ function renderReviewSummaryPage() {
               \${filteredFlows.length > 0 ? \`
                 <div class="flow-summary-list">
                   \${filteredFlows.map((flow) => \`
-                    <div class="flow-summary-card">
+                    <a class="flow-summary-card" href="/critical-flows?flowId=\${encodeURIComponent(flow.id)}">
                       <div class="flow-summary-title">\${escapeHtml(flow.name)}</div>
                       <div class="flow-summary-meta \${escapeHtml(flow.status)}">\${escapeHtml(getFlowStatusText(flow))}</div>
-                    </div>\`).join("")}
+                    </a>\`).join("")}
                 </div>\`
               : '<p class="empty-note">No critical flows match this filter.</p>'}
               </section>
@@ -1059,11 +1060,15 @@ function renderCriticalFlowsPage() {
       async function loadState() {
         const params = new URLSearchParams(window.location.search);
         const initialGapTerm = params.get("gapTerm");
+        const initialFlowId = params.get("flowId");
         const response = await fetch("/critical-flows/state");
         const nextState = await response.json();
         state.flows = nextState.flows;
         state.suggestions = nextState.suggestions;
         state.hasDescriptors = nextState.hasDescriptors;
+        if (initialFlowId && nextState.flows.some((flow) => flow.id === initialFlowId)) {
+          state.selectedId = initialFlowId;
+        }
         if (initialGapTerm && nextState.flows.some((flow) => (flow.missingTerms || []).includes(initialGapTerm))) {
           state.activeGapTerm = initialGapTerm;
           state.selectedId = nextState.flows.find((flow) => (flow.missingTerms || []).includes(initialGapTerm))?.id ?? state.selectedId;
