@@ -148,7 +148,7 @@ function renderReviewPage() {
       }
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -517,9 +517,10 @@ function renderReviewSummaryPage() {
         --danger: #9f1d1d;
         --warn: #b76e1b;
       }
+      html { scroll-behavior: smooth; }
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -527,35 +528,64 @@ function renderReviewSummaryPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 48px; display: grid; gap: 20px; }
+      main { max-width: 1080px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 14px; }
       .hero { display: grid; gap: 8px; }
       .hero h2 { margin: 0; font-size: 34px; }
-      .hero p { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.5; }
-      .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-      .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
-      .kpi-label { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
-      .kpi-value { font-size: 30px; font-weight: 700; }
-      .section-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
-      .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
-      .section-header h3 { margin: 0; font-size: 26px; }
-      .section-header p { margin: 0; color: var(--muted); }
-      .metric-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-      .metric-chip { padding: 8px 12px; border-radius: 999px; background: #f3ecdf; font-size: 14px; }
+      .hero p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.35; max-width: 760px; }
+      .summary-stack { display: grid; gap: 30px; }
+      .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+      .kpi-card { display: block; background: linear-gradient(180deg, #fffefb 0%, #f7efe1 100%); border: 1px solid #c8bba6; border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.75); position: relative; overflow: hidden; color: inherit; text-decoration: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease; }
+      .kpi-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: transparent; }
+      .kpi-card:hover { transform: translateY(-1px); border-color: #bba98e; box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 6px 16px rgba(29,26,22,0.06); background: linear-gradient(180deg, #fffefc 0%, #f9f1e6 100%); }
+      .kpi-label { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
+      .kpi-value { font-size: 29px; font-weight: 700; line-height: 1; }
+      .kpi-card.covered::before { background: rgba(31,111,74,0.24); }
+      .kpi-card.covered .kpi-value { color: var(--accent); }
+      .kpi-card.partial::before,
+      .kpi-card.repeated::before { background: rgba(183,110,27,0.24); }
+      .kpi-card.partial .kpi-value,
+      .kpi-card.repeated .kpi-value { color: var(--warn); }
+      .kpi-card.missing::before { background: rgba(159,29,29,0.22); }
+      .kpi-card.missing .kpi-value { color: var(--danger); }
+      .section-card { background: rgba(255,253,248,0.9); border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; position: relative; box-shadow: inset 0 1px 0 rgba(255,255,255,0.55); scroll-margin-top: 20px; }
+      .section-card::before { content: ""; position: absolute; top: -16px; left: 10px; right: 10px; border-top: 1px solid rgba(216,207,191,0.95); }
+      .section-card:first-child::before { display: none; }
+      .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(216,207,191,0.65); }
+      .section-header h3 { margin: 0; font-size: 24px; }
+      .metric-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+      .metric-chip { padding: 5px 9px; border-radius: 999px; background: #f3ecdf; font-size: 12px; }
+      button.metric-chip { border: 1px solid transparent; cursor: pointer; font: inherit; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
+      button.metric-chip:hover { transform: translateY(-1px); border-color: rgba(138,90,24,0.18); box-shadow: 0 2px 10px rgba(29,26,22,0.06); }
+      button.metric-chip.active { border-color: rgba(29,26,22,0.16); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55); }
+      .metric-chip.all { color: var(--ink); background: #efe7d9; }
       .metric-chip.covered { color: var(--accent); background: rgba(31,111,74,0.12); }
       .metric-chip.partial { color: var(--warn); background: rgba(183,110,27,0.14); }
       .metric-chip.missing { color: var(--danger); background: rgba(159,29,29,0.12); }
       .empty-note, .meta { color: var(--muted); }
-      .concept-list, .repeat-list, .unique-list { display: grid; gap: 12px; }
-      .concept-link, .repeat-link, .unique-card { display: block; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #fff; }
+      .concept-list, .repeat-list { display: grid; gap: 6px; }
+      .concept-link, .repeat-link { display: block; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; }
       .concept-link:hover, .repeat-link:hover { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
-      .concept-title, .repeat-title, .unique-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
-      .repeat-meta, .concept-meta, .unique-meta { color: var(--muted); font-size: 14px; line-height: 1.45; }
+      .concept-title, .repeat-title { font-size: 16px; font-weight: 700; margin-bottom: 1px; line-height: 1.25; }
+      .repeat-meta, .concept-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
       .repeat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .unique-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .flow-summary-list { display: grid; gap: 6px; }
+      .flow-summary-card { border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; }
+      .flow-summary-title { font-size: 16px; font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
+      .flow-summary-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
+      .flow-summary-meta.covered { color: var(--accent); }
+      .flow-summary-meta.partial { color: var(--warn); }
+      .flow-summary-meta.missing { color: var(--danger); }
+      .unique-list { display: grid; gap: 4px; }
+      .unique-item { display: flex; align-items: flex-start; gap: 8px; padding: 1px 0; }
+      .unique-bullet { color: var(--accent-2); font-size: 16px; line-height: 1.35; }
+      .unique-link { color: inherit; text-decoration: none; font-size: 17px; line-height: 1.35; }
+      .unique-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+      .unique-marker { color: var(--accent-2); font-weight: 700; margin-left: 3px; }
+      .unique-legend { margin-top: 8px; color: var(--muted); font-size: 12px; }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .repeat-list, .unique-list { grid-template-columns: 1fr; }
+        .repeat-list { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -572,7 +602,7 @@ function renderReviewSummaryPage() {
     <main>
       <div class="hero">
         <h2>Executive Overview</h2>
-        <p>See what was covered, what appears missing, where coverage repeats, and which distinct business behaviors were actually observed.</p>
+        <p>Coverage first, repeated evidence second, distinct observed behaviors last.</p>
       </div>
       <div id="summary">Loading…</div>
       <p><a class="back" href="/review">Back to review</a></p>
@@ -663,6 +693,18 @@ function renderReviewSummaryPage() {
           .map(([term, relatedFlows]) => ({ term, flows: relatedFlows.sort((a, b) => a.name.localeCompare(b.name)) }))
           .sort((a, b) => b.flows.length - a.flows.length || a.term.localeCompare(b.term));
       };
+      const getFlowStatusText = (flow) => {
+        if (flow.status === "covered") {
+          return "Covered";
+        }
+        if (flow.status === "partial") {
+          const missing = (flow.missingTerms || []).filter(Boolean);
+          return missing.length > 0
+            ? \`Partial — missing: \${missing.join(", ")}\`
+            : "Partial — some reviewed evidence is still missing";
+        }
+        return "Missing — no reviewed test evidence found";
+      };
       const getUniqueFlows = (units, overlapGroups) => {
         const clusteredIds = new Set(overlapGroups.flatMap((group) => group.units.map((unit) => unit.reviewId)));
         const representatives = overlapGroups.map((group) => ({
@@ -670,6 +712,7 @@ function renderReviewSummaryPage() {
           key: group.key,
           title: getOverlapTitle(group),
           count: group.units.length,
+          reviewId: group.units[0]?.reviewId || "",
         }));
         const singletons = getActiveUnits(units)
           .filter((unit) => !clusteredIds.has(unit.reviewId))
@@ -681,11 +724,11 @@ function renderReviewSummaryPage() {
           }));
         return [...representatives, ...singletons].sort((a, b) => a.title.localeCompare(b.title));
       };
-      const renderKpiCard = (label, value) => \`
-        <article class="kpi-card">
+      const renderKpiCard = (label, value, href, tone = "", filter = "") => \`
+        <a class="kpi-card \${escapeHtml(tone)}" href="\${escapeHtml(href)}" \${filter ? \`data-kpi-filter="\${escapeHtml(filter)}"\` : ""}>
           <div class="kpi-label">\${escapeHtml(label)}</div>
           <div class="kpi-value">\${escapeHtml(String(value))}</div>
-        </article>\`;
+        </a>\`;
 
       async function loadSummary() {
         const [units, criticalFlowState] = await Promise.all([
@@ -696,82 +739,107 @@ function renderReviewSummaryPage() {
         const overlapGroups = getOverlapGroups(units);
         const uniqueFlows = getUniqueFlows(units, overlapGroups);
         const criticalFlows = criticalFlowState.flows || [];
-        const gaps = getGapSummary(criticalFlows);
         const coveredCount = criticalFlows.filter((flow) => flow.status === "covered").length;
         const partialCount = criticalFlows.filter((flow) => flow.status === "partial").length;
         const missingCount = criticalFlows.filter((flow) => flow.status === "missing").length;
         const target = document.getElementById("summary");
+        let coverageFilter = "all";
 
         if (activeUnits.length === 0 && criticalFlows.length === 0) {
           target.innerHTML = "<p class='empty-note'>No interpreted review units or critical flows yet.</p>";
           return;
         }
 
-        target.innerHTML = \`
-          <div class="kpi-grid">
-            \${renderKpiCard("Covered", coveredCount)}
-            \${renderKpiCard("Partial", partialCount)}
-            \${renderKpiCard("Missing", missingCount)}
-            \${renderKpiCard("Unique Flows", uniqueFlows.length)}
-            \${renderKpiCard("Repeated Coverage", overlapGroups.length)}
-          </div>
+        const renderSummary = () => {
+          const filteredFlows = criticalFlows
+            .filter((flow) => coverageFilter === "all" ? true : flow.status === coverageFilter)
+            .sort((a, b) => a.name.localeCompare(b.name));
 
-          <section class="section-card">
-            <div class="section-header">
-              <h3>Critical Flow Coverage</h3>
-              <p>How the reviewed evidence maps to the critical business flows you defined.</p>
+          target.innerHTML = \`
+            <div class="summary-stack">
+              <div class="kpi-grid">
+              \${renderKpiCard("Covered", coveredCount, "#critical-flow-coverage", coveredCount > 0 ? "covered" : "", "covered")}
+              \${renderKpiCard("Partial", partialCount, "#critical-flow-coverage", partialCount > 0 ? "partial" : "", "partial")}
+              \${renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "missing")}
+              \${renderKpiCard("Unique Flows", uniqueFlows.length, "#unique-flows-observed")}
+              \${renderKpiCard("Repeated Coverage", overlapGroups.length, "#repeated-coverage", overlapGroups.length > 0 ? "repeated" : "")}
             </div>
-            <div class="metric-row">
-              <span class="metric-chip covered">Covered: \${escapeHtml(String(coveredCount))}</span>
-              <span class="metric-chip partial">Partial: \${escapeHtml(String(partialCount))}</span>
-              <span class="metric-chip missing">Missing: \${escapeHtml(String(missingCount))}</span>
-            </div>
-            \${gaps.length > 0 ? \`
-              <div class="concept-list">
-                \${gaps.slice(0, 6).map((gap) => \`
-                  <a class="concept-link" href="/critical-flows?gapTerm=\${encodeURIComponent(gap.term)}">
-                    <div class="concept-title">\${escapeHtml(gap.term)}</div>
-                    <div class="concept-meta">Missing in \${escapeHtml(String(gap.flows.length))} critical \${gap.flows.length === 1 ? "flow" : "flows"}</div>
-                  </a>\`).join("")}
-              </div>\`
-            : '<p class="empty-note">No missing concepts are currently surfaced from critical flows.</p>'}
-          </section>
 
-          <section class="section-card">
-            <div class="section-header">
-              <h3>Repeated Coverage</h3>
-              <p>Clusters of reviewed flows that appear to cover the same business behavior.</p>
-            </div>
-            \${overlapGroups.length > 0 ? \`
-              <div class="repeat-list">
-                \${overlapGroups.map((group) => \`
-                  <a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(group.key)}">
-                    <div class="repeat-title">\${escapeHtml(getOverlapTitle(group))}</div>
-                    <div class="repeat-meta">Appears in \${escapeHtml(String(group.units.length))} reviewed flows</div>
-                  </a>\`).join("")}
-              </div>\`
-            : '<p class="empty-note">No repeated coverage clusters detected yet.</p>'}
-          </section>
+              <section id="critical-flow-coverage" class="section-card">
+              <div class="section-header">
+                <h3>Critical Flow Coverage</h3>
+              </div>
+              <div class="metric-row">
+                <button class="metric-chip all \${coverageFilter === "all" ? "active" : ""}" data-coverage-filter="all">All: \${escapeHtml(String(criticalFlows.length))}</button>
+                <button class="metric-chip covered \${coverageFilter === "covered" ? "active" : ""}" data-coverage-filter="covered">Covered: \${escapeHtml(String(coveredCount))}</button>
+                <button class="metric-chip partial \${coverageFilter === "partial" ? "active" : ""}" data-coverage-filter="partial">Partial: \${escapeHtml(String(partialCount))}</button>
+                <button class="metric-chip missing \${coverageFilter === "missing" ? "active" : ""}" data-coverage-filter="missing">Missing: \${escapeHtml(String(missingCount))}</button>
+              </div>
+              \${filteredFlows.length > 0 ? \`
+                <div class="flow-summary-list">
+                  \${filteredFlows.map((flow) => \`
+                    <div class="flow-summary-card">
+                      <div class="flow-summary-title">\${escapeHtml(flow.name)}</div>
+                      <div class="flow-summary-meta \${escapeHtml(flow.status)}">\${escapeHtml(getFlowStatusText(flow))}</div>
+                    </div>\`).join("")}
+                </div>\`
+              : '<p class="empty-note">No critical flows match this filter.</p>'}
+              </section>
 
-          <section class="section-card">
-            <div class="section-header">
-              <h3>Unique Flows Observed</h3>
-              <p>The distilled set of distinct business behaviors observed across reviewed flows.</p>
-            </div>
-            \${uniqueFlows.length > 0 ? \`
-              <div class="unique-list">
-                \${uniqueFlows.map((item) => item.kind === "cluster"
-                  ? \`<a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(item.key)}">
-                      <div class="unique-title">\${escapeHtml(item.title)}</div>
-                      <div class="unique-meta">Representative flow for \${escapeHtml(String(item.count))} repeated reviewed runs</div>
-                    </a>\`
-                  : \`<a class="repeat-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">
-                      <div class="unique-title">\${escapeHtml(item.title)}</div>
-                      <div class="unique-meta">Observed as a distinct reviewed flow</div>
+              <section id="repeated-coverage" class="section-card">
+              <div class="section-header">
+                <h3>Repeated Coverage</h3>
+              </div>
+              \${overlapGroups.length > 0 ? \`
+                <div class="repeat-list">
+                  \${overlapGroups.map((group) => \`
+                    <a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(group.key)}">
+                      <div class="repeat-title">\${escapeHtml(getOverlapTitle(group))}</div>
+                      <div class="repeat-meta">Appears in \${escapeHtml(String(group.units.length))} reviewed flows</div>
                     </a>\`).join("")}
-              </div>\`
-            : '<p class="empty-note">No unique flows observed yet.</p>'}
-          </section>\`;
+                </div>\`
+              : '<p class="empty-note">No repeated coverage clusters detected yet.</p>'}
+              </section>
+
+              <section id="unique-flows-observed" class="section-card">
+              <div class="section-header">
+                <h3>Unique Flows Observed</h3>
+              </div>
+              \${uniqueFlows.length > 0 ? \`
+                <div class="unique-list">
+                  \${uniqueFlows.map((item) => \`
+                    <div class="unique-item">
+                      <span class="unique-bullet">•</span>
+                      \${item.kind === "cluster"
+                        ? \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}&overlapKey=\${encodeURIComponent(item.key)}">\${escapeHtml(item.title)}<span class="unique-marker">*</span></a>\`
+                        : \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">\${escapeHtml(item.title)}</a>\`}
+                    </div>\`).join("")}
+                </div>
+                \${uniqueFlows.some((item) => item.kind === "cluster") ? '<div class="unique-legend">* Represented in more than one reviewed flow</div>' : ''}
+              \`
+              : '<p class="empty-note">No unique flows observed yet.</p>'}
+              </section>
+            </div>\`;
+
+          target.querySelectorAll("[data-coverage-filter]").forEach((button) => {
+            button.addEventListener("click", () => {
+              coverageFilter = button.getAttribute("data-coverage-filter") || "all";
+              renderSummary();
+            });
+          });
+
+          target.querySelectorAll("[data-kpi-filter]").forEach((link) => {
+            link.addEventListener("click", (event) => {
+              event.preventDefault();
+              coverageFilter = link.getAttribute("data-kpi-filter") || "all";
+              const href = link.getAttribute("href") || "#critical-flow-coverage";
+              renderSummary();
+              document.querySelector(href)?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          });
+        };
+
+        renderSummary();
       }
 
       loadSummary();
