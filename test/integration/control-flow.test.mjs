@@ -1132,6 +1132,32 @@ test("server materializes review units, proposes descriptors in background, and 
   }
 });
 
+test("summary page renders executive overview shell with reordered navigation", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-page-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const page = await fetch(`${serverUrl}/review/summary`).then((response) => response.text());
+    assert.match(page, /What Did You Test\? \| Summary/);
+    assert.match(page, /Executive Overview/);
+    assert.match(page, /Critical Flow Coverage/);
+    assert.match(page, /Repeated Coverage/);
+    assert.match(page, /Unique Flows Observed/);
+    assert.match(page, /Covered/);
+    assert.match(page, /Partial/);
+    assert.match(page, /Missing/);
+    assert.match(page, /Unique Flows/);
+    assert.match(page, /Review<\/a>\s*<a href="\/critical-flows">Critical Flows<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("API validation rejects missing required fields and accepts omitted optional metadata", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-validation-"));
   const port = randomPort();
@@ -2137,18 +2163,18 @@ test("review page groups semantically similar repeated coverage with divergent a
   await writeFile(
     path.join(dataDir, "runs.raw.jsonl"),
     [
-      "dashboard-a",
-      "dashboard-b",
-      "dashboard-c",
-      "search-a",
-      "search-b",
+      ["dashboard-a", "login-success-dashboard"],
+      ["dashboard-b", "dashboard-link-after-login"],
+      ["dashboard-c", "login-redirect-dashboard"],
+      ["search-a", "search-results"],
+      ["search-b", "search-results-repeat"],
     ]
-      .map((flowId) =>
+      .map(([flowId, testName]) =>
         JSON.stringify({
           suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
           environment: { tool: "demo" },
           endState: {},
-          run: { id: `run-${flowId}`, testName: flowId, startedAt: 0, endedAt: 1, reason: "completed" },
+          run: { id: `run-${flowId}`, testName, startedAt: 0, endedAt: 1, reason: "completed" },
           events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/demo" }],
         })
       )
@@ -2165,8 +2191,16 @@ test("review page groups semantically similar repeated coverage with divergent a
     assert.match(reviewPage, /Repeated Coverage/);
 
     const units = await getJson(serverUrl, "/review/units");
-    const dashboardUnits = units.filter((unit) => String(unit.reviewId).startsWith("dashboard-"));
-    const searchUnits = units.filter((unit) => String(unit.reviewId).startsWith("search-"));
+    const dashboardUnits = units.filter((unit) =>
+      ["login-success-dashboard", "dashboard-link-after-login", "login-redirect-dashboard"].some((testName) =>
+        (unit.tests || []).includes(testName)
+      )
+    );
+    const searchUnits = units.filter((unit) =>
+      ["search-results", "search-results-repeat"].some((testName) => (unit.tests || []).includes(testName))
+    );
+    assert.equal(dashboardUnits.length, 3);
+    assert.equal(searchUnits.length, 2);
     assert.deepEqual(
       dashboardUnits.map((unit) => unit.overlapTerms),
       [

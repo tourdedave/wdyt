@@ -201,8 +201,8 @@ function renderReviewPage() {
       <p>Review flow variants, refine interpretations, and reprocess them when needed.</p>
       <nav>
         <a class="active" href="/review">Review</a>
-        <a href="/review/summary">Summary</a>
         <a href="/critical-flows">Critical Flows</a>
+        <a href="/review/summary">Summary</a>
       </nav>
     </header>
     <main>
@@ -265,7 +265,7 @@ function renderReviewPage() {
           }
 
           groups.push({
-            key: "group-" + (groups.length + 1),
+            key: [...vocab].sort().join("||"),
             vocab: [...vocab],
             units: [unit],
           });
@@ -301,7 +301,9 @@ function renderReviewPage() {
       };
 
       async function loadState() {
-        const initialReviewId = new URLSearchParams(window.location.search).get("reviewId");
+        const params = new URLSearchParams(window.location.search);
+        const initialReviewId = params.get("reviewId");
+        const initialOverlapKey = params.get("overlapKey");
         const [unitsRes, vocabRes] = await Promise.all([fetch("/review/units"), fetch("/review/vocabulary")]);
         const nextUnits = await unitsRes.json();
         state.vocabulary = await vocabRes.json();
@@ -312,6 +314,13 @@ function renderReviewPage() {
         }
         state.units = nextUnits;
         const activeUnits = getActiveUnits();
+        const overlapGroups = getOverlapGroups();
+        if (initialOverlapKey && overlapGroups.some((group) => group.key === initialOverlapKey)) {
+          state.activeOverlapKey = initialOverlapKey;
+          if (!initialReviewId) {
+            state.selectedId = overlapGroups.find((group) => group.key === initialOverlapKey)?.units[0]?.reviewId ?? state.selectedId;
+          }
+        }
         if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
           state.selectedId = initialReviewId;
         }
@@ -494,7 +503,7 @@ function renderReviewSummaryPage() {
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>What Did You Test?</title>
+    <title>What Did You Test? | Summary</title>
     <style>
       :root {
         color-scheme: light;
@@ -504,7 +513,11 @@ function renderReviewSummaryPage() {
         --ink: #1d1a16;
         --muted: #6d6458;
         --accent: #1f6f4a;
+        --accent-2: #8a5a18;
+        --danger: #9f1d1d;
+        --warn: #b76e1b;
       }
+      * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; }
       header h1 { margin: 0; font-size: 30px; }
@@ -514,27 +527,53 @@ function renderReviewSummaryPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      main { max-width: 980px; margin: 0 auto; padding: 32px 20px 48px; }
-      .card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin: 14px 0; cursor: pointer; }
-      .descriptor { font-size: 24px; margin: 0 0 8px; }
-      .meta { color: var(--muted); margin: 4px 0; }
+      main { max-width: 1080px; margin: 0 auto; padding: 32px 20px 48px; display: grid; gap: 20px; }
+      .hero { display: grid; gap: 8px; }
+      .hero h2 { margin: 0; font-size: 34px; }
+      .hero p { margin: 0; color: var(--muted); font-size: 17px; line-height: 1.5; }
+      .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+      .kpi-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+      .kpi-label { color: var(--muted); font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 8px; }
+      .kpi-value { font-size: 30px; font-weight: 700; }
+      .section-card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; }
+      .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+      .section-header h3 { margin: 0; font-size: 26px; }
+      .section-header p { margin: 0; color: var(--muted); }
+      .metric-row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+      .metric-chip { padding: 8px 12px; border-radius: 999px; background: #f3ecdf; font-size: 14px; }
+      .metric-chip.covered { color: var(--accent); background: rgba(31,111,74,0.12); }
+      .metric-chip.partial { color: var(--warn); background: rgba(183,110,27,0.14); }
+      .metric-chip.missing { color: var(--danger); background: rgba(159,29,29,0.12); }
+      .empty-note, .meta { color: var(--muted); }
+      .concept-list, .repeat-list, .unique-list { display: grid; gap: 12px; }
+      .concept-link, .repeat-link, .unique-card { display: block; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 14px; padding: 14px; background: #fff; }
+      .concept-link:hover, .repeat-link:hover { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
+      .concept-title, .repeat-title, .unique-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+      .repeat-meta, .concept-meta, .unique-meta { color: var(--muted); font-size: 14px; line-height: 1.45; }
+      .repeat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .unique-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
-      .details { display: none; margin-top: 10px; }
-      .card.expanded .details { display: block; }
-      .review-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+      @media (max-width: 900px) {
+        .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .repeat-list, .unique-list { grid-template-columns: 1fr; }
+      }
     </style>
   </head>
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Summary</p>
+      <p>Executive summary</p>
       <nav>
         <a href="/review">Review</a>
-        <a class="active" href="/review/summary">Summary</a>
         <a href="/critical-flows">Critical Flows</a>
+        <a class="active" href="/review/summary">Summary</a>
       </nav>
     </header>
     <main>
+      <div class="hero">
+        <h2>Executive Overview</h2>
+        <p>See what was covered, what appears missing, where coverage repeats, and which distinct business behaviors were actually observed.</p>
+      </div>
       <div id="summary">Loading…</div>
       <p><a class="back" href="/review">Back to review</a></p>
     </main>
@@ -544,40 +583,195 @@ function renderReviewSummaryPage() {
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
-
-      async function loadSummary() {
-        const units = await fetch("/review/units").then((response) => response.json());
-        const approved = units.filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor));
-        const target = document.getElementById("summary");
-
-        if (approved.length === 0) {
-          target.innerHTML = "<p>No interpreted descriptors yet.</p>";
-          return;
+      const getActiveUnits = (units) => units.filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor));
+      const getOverlapVocab = (unit) => Array.isArray(unit.overlapTerms) ? unit.overlapTerms : [];
+      const getSharedOverlapCount = (leftValues, rightValues) => {
+        const right = new Set((rightValues || []).map((value) => String(value).trim()).filter(Boolean));
+        return (leftValues || []).filter((value) => right.has(String(value).trim())).length;
+      };
+      const isOverlapMatch = (leftValues, rightValues) => {
+        const left = (leftValues || []).map((value) => String(value).trim()).filter(Boolean);
+        const right = (rightValues || []).map((value) => String(value).trim()).filter(Boolean);
+        const shared = getSharedOverlapCount(left, right);
+        const maxCount = Math.max(left.length, right.length);
+        if (maxCount === 0) {
+          return false;
         }
-
-        target.innerHTML = approved.map((unit) => \`
-          <article class="card" data-review-id="\${escapeHtml(unit.reviewId)}">
-            <h2 class="descriptor">\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
-            <div class="details">
-              <p class="meta">Suites: \${escapeHtml((unit.suites || []).join(", ") || "-")}</p>
-              <p class="meta">Tests: \${escapeHtml((unit.tests || []).join(", ") || "-")}</p>
-              <p class="meta">Flow: \${escapeHtml((unit.canonical || []).join(" → "))}</p>
-              <p class="meta">Final URLs: \${escapeHtml((unit.finalUrls || []).join(", ") || "-")}</p>
-              <p class="meta">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</p>
-              <p class="meta">Rationale: \${escapeHtml(unit.proposedRationale || "-")}</p>
-              <p><a class="review-link" href="/review?reviewId=\${encodeURIComponent(unit.reviewId)}">Open full review detail</a></p>
-            </div>
-          </article>\`).join("");
-
-        target.querySelectorAll(".card").forEach((card) => {
-          card.addEventListener("click", (event) => {
-            if (event.target.closest("a")) {
+        if (shared >= 2 && shared / maxCount >= 0.67) {
+          return true;
+        }
+        return maxCount <= 2 && shared === maxCount && maxCount > 0;
+      };
+      const getOverlapGroups = (units) => {
+        const groups = [];
+        getActiveUnits(units)
+          .slice()
+          .sort((a, b) => getOverlapVocab(a).length - getOverlapVocab(b).length || a.reviewId.localeCompare(b.reviewId))
+          .forEach((unit) => {
+            const vocab = getOverlapVocab(unit);
+            if (vocab.length === 0) {
               return;
             }
 
-            card.classList.toggle("expanded");
+            const matchedGroup = groups.find((group) =>
+              group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)))
+            );
+
+            if (matchedGroup) {
+              matchedGroup.units.push(unit);
+              matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
+              matchedGroup.key = matchedGroup.vocab.join("||");
+              return;
+            }
+
+            groups.push({
+              key: [...vocab].sort().join("||"),
+              vocab: [...vocab],
+              units: [unit],
+            });
+          });
+
+        return groups
+          .filter((group) => group.units.length > 1)
+          .sort((a, b) => b.units.length - a.units.length || a.vocab.join(" ").localeCompare(b.vocab.join(" ")));
+      };
+      const getOverlapTitle = (group) => {
+        const descriptors = group.units
+          .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
+          .filter(Boolean);
+        if (descriptors.length === 0) {
+          return group.vocab.join(" + ");
+        }
+        const counts = new Map();
+        descriptors.forEach((descriptor) => {
+          counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
+        });
+        return [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
+      };
+      const getGapSummary = (flows) => {
+        const summary = new Map();
+        flows.forEach((flow) => {
+          (flow.missingTerms || []).forEach((term) => {
+            const current = summary.get(term) || [];
+            current.push(flow);
+            summary.set(term, current);
           });
         });
+
+        return [...summary.entries()]
+          .map(([term, relatedFlows]) => ({ term, flows: relatedFlows.sort((a, b) => a.name.localeCompare(b.name)) }))
+          .sort((a, b) => b.flows.length - a.flows.length || a.term.localeCompare(b.term));
+      };
+      const getUniqueFlows = (units, overlapGroups) => {
+        const clusteredIds = new Set(overlapGroups.flatMap((group) => group.units.map((unit) => unit.reviewId)));
+        const representatives = overlapGroups.map((group) => ({
+          kind: "cluster",
+          key: group.key,
+          title: getOverlapTitle(group),
+          count: group.units.length,
+        }));
+        const singletons = getActiveUnits(units)
+          .filter((unit) => !clusteredIds.has(unit.reviewId))
+          .map((unit) => ({
+            kind: "unit",
+            reviewId: unit.reviewId,
+            title: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
+            count: 1,
+          }));
+        return [...representatives, ...singletons].sort((a, b) => a.title.localeCompare(b.title));
+      };
+      const renderKpiCard = (label, value) => \`
+        <article class="kpi-card">
+          <div class="kpi-label">\${escapeHtml(label)}</div>
+          <div class="kpi-value">\${escapeHtml(String(value))}</div>
+        </article>\`;
+
+      async function loadSummary() {
+        const [units, criticalFlowState] = await Promise.all([
+          fetch("/review/units").then((response) => response.json()),
+          fetch("/critical-flows/state").then((response) => response.json()),
+        ]);
+        const activeUnits = getActiveUnits(units);
+        const overlapGroups = getOverlapGroups(units);
+        const uniqueFlows = getUniqueFlows(units, overlapGroups);
+        const criticalFlows = criticalFlowState.flows || [];
+        const gaps = getGapSummary(criticalFlows);
+        const coveredCount = criticalFlows.filter((flow) => flow.status === "covered").length;
+        const partialCount = criticalFlows.filter((flow) => flow.status === "partial").length;
+        const missingCount = criticalFlows.filter((flow) => flow.status === "missing").length;
+        const target = document.getElementById("summary");
+
+        if (activeUnits.length === 0 && criticalFlows.length === 0) {
+          target.innerHTML = "<p class='empty-note'>No interpreted review units or critical flows yet.</p>";
+          return;
+        }
+
+        target.innerHTML = \`
+          <div class="kpi-grid">
+            \${renderKpiCard("Covered", coveredCount)}
+            \${renderKpiCard("Partial", partialCount)}
+            \${renderKpiCard("Missing", missingCount)}
+            \${renderKpiCard("Unique Flows", uniqueFlows.length)}
+            \${renderKpiCard("Repeated Coverage", overlapGroups.length)}
+          </div>
+
+          <section class="section-card">
+            <div class="section-header">
+              <h3>Critical Flow Coverage</h3>
+              <p>How the reviewed evidence maps to the critical business flows you defined.</p>
+            </div>
+            <div class="metric-row">
+              <span class="metric-chip covered">Covered: \${escapeHtml(String(coveredCount))}</span>
+              <span class="metric-chip partial">Partial: \${escapeHtml(String(partialCount))}</span>
+              <span class="metric-chip missing">Missing: \${escapeHtml(String(missingCount))}</span>
+            </div>
+            \${gaps.length > 0 ? \`
+              <div class="concept-list">
+                \${gaps.slice(0, 6).map((gap) => \`
+                  <a class="concept-link" href="/critical-flows?gapTerm=\${encodeURIComponent(gap.term)}">
+                    <div class="concept-title">\${escapeHtml(gap.term)}</div>
+                    <div class="concept-meta">Missing in \${escapeHtml(String(gap.flows.length))} critical \${gap.flows.length === 1 ? "flow" : "flows"}</div>
+                  </a>\`).join("")}
+              </div>\`
+            : '<p class="empty-note">No missing concepts are currently surfaced from critical flows.</p>'}
+          </section>
+
+          <section class="section-card">
+            <div class="section-header">
+              <h3>Repeated Coverage</h3>
+              <p>Clusters of reviewed flows that appear to cover the same business behavior.</p>
+            </div>
+            \${overlapGroups.length > 0 ? \`
+              <div class="repeat-list">
+                \${overlapGroups.map((group) => \`
+                  <a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(group.key)}">
+                    <div class="repeat-title">\${escapeHtml(getOverlapTitle(group))}</div>
+                    <div class="repeat-meta">Appears in \${escapeHtml(String(group.units.length))} reviewed flows</div>
+                  </a>\`).join("")}
+              </div>\`
+            : '<p class="empty-note">No repeated coverage clusters detected yet.</p>'}
+          </section>
+
+          <section class="section-card">
+            <div class="section-header">
+              <h3>Unique Flows Observed</h3>
+              <p>The distilled set of distinct business behaviors observed across reviewed flows.</p>
+            </div>
+            \${uniqueFlows.length > 0 ? \`
+              <div class="unique-list">
+                \${uniqueFlows.map((item) => item.kind === "cluster"
+                  ? \`<a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(item.key)}">
+                      <div class="unique-title">\${escapeHtml(item.title)}</div>
+                      <div class="unique-meta">Representative flow for \${escapeHtml(String(item.count))} repeated reviewed runs</div>
+                    </a>\`
+                  : \`<a class="repeat-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">
+                      <div class="unique-title">\${escapeHtml(item.title)}</div>
+                      <div class="unique-meta">Observed as a distinct reviewed flow</div>
+                    </a>\`).join("")}
+              </div>\`
+            : '<p class="empty-note">No unique flows observed yet.</p>'}
+          </section>\`;
       }
 
       loadSummary();
@@ -681,8 +875,8 @@ function renderCriticalFlowsPage() {
       <p>Define the flows that matter most, then compare them against interpreted reviewed tests.</p>
       <nav>
         <a href="/review">Review</a>
-        <a href="/review/summary">Summary</a>
         <a class="active" href="/critical-flows">Critical Flows</a>
+        <a href="/review/summary">Summary</a>
       </nav>
     </header>
     <main>
@@ -795,11 +989,17 @@ function renderCriticalFlowsPage() {
       };
 
       async function loadState() {
+        const params = new URLSearchParams(window.location.search);
+        const initialGapTerm = params.get("gapTerm");
         const response = await fetch("/critical-flows/state");
         const nextState = await response.json();
         state.flows = nextState.flows;
         state.suggestions = nextState.suggestions;
         state.hasDescriptors = nextState.hasDescriptors;
+        if (initialGapTerm && nextState.flows.some((flow) => (flow.missingTerms || []).includes(initialGapTerm))) {
+          state.activeGapTerm = initialGapTerm;
+          state.selectedId = nextState.flows.find((flow) => (flow.missingTerms || []).includes(initialGapTerm))?.id ?? state.selectedId;
+        }
         if (state.activeGapTerm && !getGapSummary().some((entry) => entry.term === state.activeGapTerm)) {
           state.activeGapTerm = null;
         }
