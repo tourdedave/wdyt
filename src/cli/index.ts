@@ -19,9 +19,11 @@ import type {
   FlowReviewRecord,
   IngestPayload,
   FlowDescriptorProposal,
+  PrefixStats,
   ProcessedRunRecord,
   VocabularyEntry,
 } from "../shared/types.js";
+import { collectPrefixStats, suppressSharedPrefix } from "../shared/flow-suppression.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -546,7 +548,7 @@ function collectUsedVocab(descriptor: string, vocabulary: Map<string, Vocabulary
     .sort();
 }
 
-async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>) {
+async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>, stats: PrefixStats) {
   const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
   const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
@@ -570,12 +572,18 @@ async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, Vocab
     ],
     vocabulary.values()
   );
+  const suppressed = suppressSharedPrefix(flow.canonical as ProcessedRunRecord["canonical"], stats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
 
   const evidence = {
     reviewId: flow.reviewId,
     flowId: flow.flowId,
     variantSignature: flow.variantSignature ?? null,
-    canonical: flow.canonical,
+    canonical: suppressed.primary,
+    prerequisites: suppressed.prerequisites,
+    canonicalFull: flow.canonical,
     count: flow.count,
     suites: [...flow.suites].sort(),
     tests: [...flow.tests].sort(),
@@ -632,6 +640,11 @@ async function reviewFlows(options: { propose: boolean }) {
 
   const reviews = await loadReviews();
   const vocabulary = await loadVocabulary();
+  const suppressionStats = collectPrefixStats(
+    reviewUnits.map((flow) => flow.canonical),
+    vocabulary.values(),
+    { maxPrefixLength: 3 }
+  );
   const pendingFlows = reviewUnits.filter((flow) => {
     const review = reviews.get(flow.reviewId);
     return !review || review.descriptorStatus === "pending";
@@ -649,7 +662,7 @@ async function reviewFlows(options: { propose: boolean }) {
       const existing = reviews.get(flow.reviewId);
       const proposal =
         options.propose && !existing
-          ? await proposeDescriptor(flow, vocabulary)
+          ? await proposeDescriptor(flow, vocabulary, suppressionStats)
           : {
               descriptor: existing?.proposedDescriptor ?? buildProposedDescriptor(flow),
               approvedVocab: existing?.approvedVocabUsed ?? existing?.usedVocab ?? [],

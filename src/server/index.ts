@@ -5,7 +5,7 @@ import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js"
 import type { BrowserInfo, EndRunRequest, StartRunRequest } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
-import { loadReviewUnits, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
+import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
 import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
@@ -410,12 +410,14 @@ function renderReviewPage() {
           <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
           <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
           <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
-          <p><strong>Flow:</strong> \${escapeHtml(unit.canonical.join(" → "))}</p>
+          <p><strong>Primary Flow:</strong> \${escapeHtml((unit.primaryCanonical || unit.canonical).join(" → "))}</p>
           <p><strong>Suites:</strong> \${escapeHtml(summarize(unit.suites))}</p>
           <p><strong>Tests:</strong> \${escapeHtml(summarize(unit.tests))}</p>
           <p><strong>Tools:</strong> \${escapeHtml(summarize(unit.tools))}</p>
           <p><strong>Browsers:</strong> \${escapeHtml(summarize(unit.browsers))}</p>
           <div class="grid">
+            \${renderListBlock("Prerequisites", unit.prerequisites)}
+            \${renderListBlock("Primary Flow", unit.primaryCanonical || unit.canonical)}
             \${renderListBlock("Final URLs", unit.finalUrls)}
             \${renderListBlock("Headings", unit.headings)}
             \${renderListBlock("Alerts", unit.alerts)}
@@ -1711,7 +1713,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && requestPath === "/review/units") {
-    writeJson(res, 200, await loadReviewUnits());
+    writeJson(res, 200, await loadReviewUnitViews());
     return;
   }
 

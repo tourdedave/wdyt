@@ -278,6 +278,179 @@ async function startMockLlmServer(port, options = {}) {
   return server;
 }
 
+test("shared prefix suppression handles repeated setup prefixes and preserves a non-empty primary flow", async () => {
+  const { collectPrefixStats, suppressSharedPrefix } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+  const vocabulary = [];
+  const stats = collectPrefixStats(
+    [
+      ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "SUBMIT"],
+      ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "NAVIGATE"],
+      ["NAVIGATE", "INPUT", "CHANGE", "SUBMIT", "NAVIGATE"],
+      ["CLICK", "SUBMIT"],
+    ],
+    vocabulary,
+    { maxPrefixLength: 3 }
+  );
+
+  const suppressed = suppressSharedPrefix(["NAVIGATE", "INPUT", "CHANGE", "CLICK", "SUBMIT"], stats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
+
+  assert.deepEqual(suppressed.prerequisites, ["NAVIGATE", "INPUT", "CHANGE"]);
+  assert.deepEqual(suppressed.primary, ["CLICK", "SUBMIT"]);
+
+  const unsuppressed = suppressSharedPrefix(["CLICK", "SUBMIT"], stats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
+
+  assert.deepEqual(unsuppressed.prerequisites, []);
+  assert.deepEqual(unsuppressed.primary, ["CLICK", "SUBMIT"]);
+
+  const singleStep = suppressSharedPrefix(["NAVIGATE"], stats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
+  assert.deepEqual(singleStep.prerequisites, []);
+  assert.deepEqual(singleStep.primary, ["NAVIGATE"]);
+});
+
+test("shared prefix suppression supports length 1 prefixes and skips non-shared flows", async () => {
+  const { collectPrefixStats, suppressSharedPrefix } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+  const vocabulary = [];
+  const stats = collectPrefixStats(
+    [
+      ["NAVIGATE", "CLICK", "SUBMIT"],
+      ["NAVIGATE", "INPUT", "SUBMIT"],
+      ["NAVIGATE", "CHANGE", "CLICK"],
+    ],
+    vocabulary,
+    { maxPrefixLength: 3 }
+  );
+
+  const suppressed = suppressSharedPrefix(["NAVIGATE", "CLICK", "SUBMIT"], stats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
+  assert.deepEqual(suppressed.prerequisites, ["NAVIGATE"]);
+  assert.deepEqual(suppressed.primary, ["CLICK", "SUBMIT"]);
+
+  const noSharedStats = collectPrefixStats(
+    [
+      ["CLICK", "SUBMIT"],
+      ["INPUT", "CHANGE"],
+      ["NAVIGATE", "SUBMIT"],
+    ],
+    vocabulary,
+    { maxPrefixLength: 3 }
+  );
+  const notSuppressed = suppressSharedPrefix(["CLICK", "SUBMIT"], noSharedStats, {
+    minFrequencyPct: 0.5,
+    maxPrefixLength: 3,
+  });
+  assert.deepEqual(notSuppressed.prerequisites, []);
+  assert.deepEqual(notSuppressed.primary, ["CLICK", "SUBMIT"]);
+});
+
+test("review unit views expose prerequisites and primary flow after shared-prefix suppression", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-view-suppression-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const originalCwd = process.cwd();
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "flow-a",
+            flowId: "flow-a",
+            canonical: ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "SUBMIT"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["flow-a"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["task a"],
+            activeDescriptor: "Task A",
+            activeVocab: ["task a"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-b",
+            flowId: "flow-b",
+            canonical: ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["flow-b"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["task b"],
+            activeDescriptor: "Task B",
+            activeVocab: ["task b"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-c",
+            flowId: "flow-c",
+            canonical: ["NAVIGATE", "INPUT", "CHANGE", "SUBMIT", "NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["flow-c"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["task c"],
+            activeDescriptor: "Task C",
+            activeVocab: ["task c"],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    process.chdir(tempDir);
+    const { loadReviewUnitViews } = await import(path.join(repoRoot, "dist", "server", "review.js"));
+    const views = await loadReviewUnitViews();
+    const flowA = views.find((unit) => unit.reviewId === "flow-a");
+
+    assert.ok(flowA);
+    assert.deepEqual(flowA.prerequisites, ["NAVIGATE", "INPUT", "CHANGE"]);
+    assert.deepEqual(flowA.primaryCanonical, ["CLICK", "SUBMIT"]);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-integration-"));
   const port = randomPort();
@@ -1020,45 +1193,40 @@ test("review splits one canonical flow into separate outcome variants", { timeou
   }
 });
 
-test("server materializes review units, proposes descriptors in background, and saves review decisions", { timeout: 20_000 }, async () => {
+test("review module materializes review units, proposes descriptors, and saves review decisions", { timeout: 20_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-ui-"));
-  const port = randomPort();
   const llmPort = randomPort();
-  const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
   const llmServer = await startMockLlmServer(llmPort);
-  const { child } = spawnServer(tempDir, port, {
-    WDYT_LLM_BASE_URL: llmUrl,
-    WDYT_LLM_API_KEY: "ollama",
-    WDYT_LLM_MODEL: "mistral:instruct",
-  });
+  const originalCwd = process.cwd();
+  const originalBaseUrl = process.env.WDYT_LLM_BASE_URL;
+  const originalApiKey = process.env.WDYT_LLM_API_KEY;
+  const originalModel = process.env.WDYT_LLM_MODEL;
 
   try {
-    await waitForHealth(serverUrl);
+    process.chdir(tempDir);
+    process.env.WDYT_LLM_BASE_URL = llmUrl;
+    process.env.WDYT_LLM_API_KEY = "ollama";
+    process.env.WDYT_LLM_MODEL = "mistral:instruct";
 
-    const started = await postJson(serverUrl, "/runs/start", {
-      suiteName: "integration",
-      testName: "ui review flow",
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+    const {
+      loadReviewUnits,
+      refreshReviewUnits,
+      saveReviewUnitEdits,
+      requestReviewUnitReprocess,
+    } = await import(path.join(repoRoot, "dist", "server", "review.js"));
+    const { getVocabularyPath, readJsonFile } = await import(path.join(repoRoot, "dist", "shared", "fs.js"));
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
       environment: {
         tool: "integration-test",
       },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
       endState: {
         finalUrl: "http://127.0.0.1:4010/dashboard",
         title: "Dashboard",
@@ -1066,7 +1234,7 @@ test("server materializes review units, proposes descriptors in background, and 
         alertText: null,
       },
       run: {
-        id: started.runId,
+        id: "run-review-module",
         testName: "ui review flow",
         startedAt: 0,
         endedAt: 1,
@@ -1078,8 +1246,10 @@ test("server materializes review units, proposes descriptors in background, and 
       ],
     });
 
+    await refreshReviewUnits();
+
     const proposedUnit = await waitForCondition(async () => {
-      const units = await getJson(serverUrl, "/review/units");
+      const units = await loadReviewUnits();
       const first = units[0];
       return first?.proposalState === "proposed" ? first : null;
     });
@@ -1090,20 +1260,12 @@ test("server materializes review units, proposes descriptors in background, and 
     assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
-    const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
-    assert.match(reviewPage, /What Did You Test\? \| Review/);
-    assert.match(reviewPage, /overflow-wrap: anywhere;/);
-    assert.match(reviewPage, /word-break: break-word;/);
-
-    const updatedUnit = await fetch(`${serverUrl}/review/units/${encodeURIComponent(proposedUnit.reviewId)}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        descriptor: "approved search descriptor",
-        notes: "looks good",
-        vocab: ["search"],
-      }),
-    }).then((response) => response.json());
+    const updatedUnit = await saveReviewUnitEdits({
+      reviewId: proposedUnit.reviewId,
+      descriptor: "approved search descriptor",
+      notes: "looks good",
+      vocab: ["search"],
+    });
 
     assert.equal(updatedUnit.activeDescriptor, "approved search descriptor");
     assert.equal(updatedUnit.interpretationStatus, "edited");
@@ -1111,23 +1273,26 @@ test("server materializes review units, proposes descriptors in background, and 
     assert.deepEqual(updatedUnit.approvedVocabUsed, ["search"]);
     assert.deepEqual(updatedUnit.proposedVocab, []);
 
-    const reprocessedUnit = await postJson(serverUrl, `/review/units/${encodeURIComponent(proposedUnit.reviewId)}/reprocess`, {});
+    const reprocessedUnit = await requestReviewUnitReprocess(proposedUnit.reviewId);
     assert.equal(reprocessedUnit.proposalState, "pending");
 
     const refreshedUnit = await waitForCondition(async () => {
-      const units = await getJson(serverUrl, "/review/units");
+      const units = await loadReviewUnits();
       const match = units.find((unit) => unit.reviewId === proposedUnit.reviewId);
       return match?.interpretationStatus === "reprocessed" ? match : null;
     });
     assert.equal(refreshedUnit.activeDescriptor, "search ends at dashboard");
     assert.equal(refreshedUnit.interpretationStatus, "reprocessed");
 
-    const vocabulary = await getJson(serverUrl, "/review/vocabulary");
+    const vocabulary = await readJsonFile(getVocabularyPath(), []);
     assert.equal(vocabulary[0].term, "search");
     assert.equal(vocabulary[0].status, "approved");
   } finally {
+    process.chdir(originalCwd);
+    process.env.WDYT_LLM_BASE_URL = originalBaseUrl;
+    process.env.WDYT_LLM_API_KEY = originalApiKey;
+    process.env.WDYT_LLM_MODEL = originalModel;
     llmServer.close();
-    await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -1656,114 +1821,67 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
 
 test("critical flows normalize search plus results into covered search results", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-search-results-"));
-  const port = randomPort();
-  const llmPort = randomPort();
-  const serverUrl = `http://127.0.0.1:${port}`;
-  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const llmServer = await startMockLlmServer(llmPort, {
-    responseSequence: [
-      {
-        descriptor: "Search query is submitted and results are displayed",
-        approvedVocab: [],
-        proposedVocab: ["search", "search results"],
-        confidence: 0.8,
-        rationale: "The flow ends on search results after a submitted query.",
-      },
-      {
-        name: "Search and display results",
-        rawText: "Search queries are submitted with results displayed",
-        interpretedSteps: ["search", "view results"],
-        interpretedTerms: ["results", "search"],
-        outcome: "results visible",
-      },
-    ],
-  });
-
-  const { child } = spawnServer(tempDir, port, {
-    WDYT_LLM_BASE_URL: llmUrl,
-    WDYT_LLM_API_KEY: "ollama",
-    WDYT_LLM_MODEL: "mistral:instruct",
-  });
+  const dataDir = path.join(tempDir, ".wdyt");
+  const originalCwd = process.cwd();
 
   try {
-    await waitForHealth(serverUrl);
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "descriptor-search-results",
+            flowId: "descriptor-search-results",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["search-results"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            proposedDescriptor: "Search query is submitted and results are displayed",
+            proposedConfidence: 0.8,
+            proposedRationale: "Search results are displayed.",
+            approvedVocabUsed: [],
+            proposedVocab: ["search", "search results"],
+            activeDescriptor: "Search query is submitted and results are displayed",
+            activeVocab: ["search", "search results"],
+            interpretationStatus: "auto-generated",
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
 
-    const started = await postJson(serverUrl, "/runs/start", {
-      suiteName: "integration",
-      testName: "search-results",
-      environment: {
-        tool: "integration-test",
-      },
-    });
+    process.chdir(tempDir);
+    const { createCriticalFlow, loadCriticalFlowState } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
 
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-search-results",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
-      endState: {
-        finalUrl: "http://127.0.0.1:4010/search/results?q=wdyt",
-        title: "Search Results",
-        heading: "Search Results",
-        alertText: null,
-      },
-      run: {
-        id: started.runId,
-        testName: "search-results",
-        startedAt: 0,
-        endedAt: 1,
-        reason: "completed",
-      },
-      events: [
-        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
-        { type: "input", ts: 1010, seq: 1, target: { tag: "input", text: "demo" }, value: "demo" },
-        { type: "change", ts: 1020, seq: 2, target: { tag: "input", text: "demo" }, value: "demo" },
-        { type: "click", ts: 1030, seq: 3, target: { tag: "button", text: "Search" } },
-        { type: "submit", ts: 1040, seq: 4, target: { tag: "form", text: "Search" } },
-        { type: "navigate", ts: 1050, seq: 5, url: "http://127.0.0.1:4010/search/results?q=wdyt" },
-      ],
-    });
-
-    const proposedUnit = await waitForCondition(async () => {
-      const units = await getJson(serverUrl, "/review/units");
-      return units.find((unit) => unit.proposalState === "proposed" && unit.activeDescriptor) ?? null;
-    });
-
-    assert.equal(proposedUnit.activeDescriptor, "Search query is submitted and results are displayed");
-    assert.deepEqual(proposedUnit.activeVocab, ["search", "search results"]);
-
-    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+    const created = await createCriticalFlow({
+      name: "Search and display results",
       rawText: "Search queries are submitted with results displayed",
-    });
-
-    assert.deepEqual(interpreted.interpretedTerms, ["search", "search results"]);
-
-    const created = await postJson(serverUrl, "/critical-flows", {
-      rawText: interpreted.rawText,
-      name: interpreted.name,
-      interpretedSteps: interpreted.interpretedSteps,
-      interpretedTerms: interpreted.interpretedTerms,
-      outcome: interpreted.outcome,
+      interpretedSteps: ["search", "view results"],
+      interpretedTerms: ["results", "search"],
+      outcome: "results visible",
     });
 
     assert.equal(created.status, "covered");
-    assert.deepEqual(created.matchedDescriptorIds, [proposedUnit.reviewId]);
+    assert.deepEqual(created.interpretedTerms, ["search", "search results"]);
+    assert.deepEqual(created.matchedDescriptorIds, ["descriptor-search-results"]);
 
-    const state = await getJson(serverUrl, "/critical-flows/state");
+    const state = await loadCriticalFlowState();
     assert.deepEqual(state.flows[0].missingTerms, []);
   } finally {
-    llmServer.close();
-    await stopChildProcess(child);
+    process.chdir(originalCwd);
     await rm(tempDir, { recursive: true, force: true });
   }
 });

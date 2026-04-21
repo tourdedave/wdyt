@@ -157,6 +157,29 @@ export type ReviewUnitRecord = {
   reprocessRequestedAt?: number;
 };
 
+export type SuppressedFlow<CanonicalStep = ReducedStep> = {
+  prerequisites: CanonicalStep[];
+  primary: CanonicalStep[];
+};
+
+export type PrefixStatsEntry<CanonicalStep = ReducedStep> = {
+  sequence: CanonicalStep[];
+  count: number;
+  frequencyPct: number;
+  downstreamVariants: number;
+  terminalCount: number;
+};
+
+export type PrefixStats<CanonicalStep = ReducedStep> = {
+  totalFlows: number;
+  entries: PrefixStatsEntry<CanonicalStep>[];
+};
+
+export type ReviewUnitViewRecord = ReviewUnitRecord & {
+  prerequisites: ReducedStep[];
+  primaryCanonical: ReducedStep[];
+};
+
 export type CriticalFlowStatus = "missing" | "partial" | "covered";
 
 export type ParsedCriticalFlow = {

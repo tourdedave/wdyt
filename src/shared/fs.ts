@@ -11,38 +11,36 @@ function resolveDataDir() {
   return path.resolve(process.cwd(), ".wdyt");
 }
 
-const DATA_DIR = resolveDataDir();
-
 export function getDataDir() {
-  return DATA_DIR;
+  return resolveDataDir();
 }
 
 export function getRawRunsPath() {
-  return path.join(DATA_DIR, "runs.raw.jsonl");
+  return path.join(getDataDir(), "runs.raw.jsonl");
 }
 
 export function getProcessedRunsPath() {
-  return path.join(DATA_DIR, "runs.processed.jsonl");
+  return path.join(getDataDir(), "runs.processed.jsonl");
 }
 
 export function getFlowReviewsPath() {
-  return path.join(DATA_DIR, "flow-reviews.json");
+  return path.join(getDataDir(), "flow-reviews.json");
 }
 
 export function getVocabularyPath() {
-  return path.join(DATA_DIR, "vocabulary.json");
+  return path.join(getDataDir(), "vocabulary.json");
 }
 
 export function getReviewUnitsPath() {
-  return path.join(DATA_DIR, "review-units.json");
+  return path.join(getDataDir(), "review-units.json");
 }
 
 export function getCriticalFlowsPath() {
-  return path.join(DATA_DIR, "critical-flows.json");
+  return path.join(getDataDir(), "critical-flows.json");
 }
 
 export async function ensureDataDir() {
-  await mkdir(DATA_DIR, { recursive: true });
+  await mkdir(getDataDir(), { recursive: true });
 }
 
 export async function appendJsonLine(filePath: string, value: unknown) {
