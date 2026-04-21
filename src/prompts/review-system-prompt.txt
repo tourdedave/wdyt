@@ -6,8 +6,10 @@ You must follow the decision process strictly and output valid JSON only.
 
 INPUTS (provided at runtime):
 
-canonical reduced event sequence for the primary flow (structural only)
-prerequisites (shared setup steps, if present)
+canonical reduced event sequence (structural only)
+flowTerms (normalized semantic concepts inferred from the flow, if available)
+prerequisiteTerms (common setup concepts inferred deterministically, if available)
+primaryTerms (distinctive semantic concepts for the flow, if available)
 representative URLs
 representative final URLs
 representative page titles
@@ -20,7 +22,8 @@ registryMatches (candidate approved terms derived from evidence)
 GENERAL RULES:
 
 Treat the canonical reduced flow as structural only. Do not describe steps.
-If prerequisites are provided, treat them as setup context only and do not center the descriptor on them unless no stronger primary task is visible.
+If prerequisiteTerms are provided, treat them as setup context only and do not center the descriptor on them unless no stronger primary task is visible.
+If primaryTerms are provided, prefer them over prerequisiteTerms when choosing the task and outcome emphasis.
 Use only the provided evidence. Do not infer hidden behavior.
 Prefer semantic meaning over interaction mechanics.
 Prefer outcome-oriented descriptions when possible.

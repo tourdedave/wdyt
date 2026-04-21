@@ -15,13 +15,14 @@ import {
 import type {
   FlowDescriptorProposal,
   IngestPayload,
-  PrefixStats,
+  PrerequisiteAnalysis,
   ProcessedRunRecord,
   ReviewUnitRecord,
   ReviewUnitViewRecord,
+  VocabStats,
   VocabularyEntry,
 } from "../shared/types.js";
-import { collectPrefixStats, suppressSharedPrefix } from "../shared/flow-suppression.js";
+import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms } from "../shared/flow-suppression.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -176,24 +177,19 @@ function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyE
   };
 }
 
-function buildPrefixStats(units: ReviewUnitRecord[], vocabulary: VocabularyEntry[]): PrefixStats {
-  return collectPrefixStats(
-    units.map((unit) => unit.canonical),
-    vocabulary,
-    { maxPrefixLength: 3 }
-  );
+function buildGlobalVocabStats(units: ReviewUnitRecord[], vocabulary: VocabularyEntry[]) {
+  return collectVocabStats(units, vocabulary);
 }
 
-function materializeSuppressedView(unit: ReviewUnitRecord, stats: PrefixStats): ReviewUnitViewRecord {
-  const suppressed = suppressSharedPrefix(unit.canonical, stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
+function materializeSuppressedView(unit: ReviewUnitRecord, stats: Map<string, VocabStats>): ReviewUnitViewRecord {
+  const analysis = analyzePrerequisites(unit.activeVocab, stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
   });
-
   return {
     ...unit,
-    prerequisites: suppressed.prerequisites,
-    primaryCanonical: suppressed.primary,
+    prerequisites: analysis.prerequisiteTerms,
+    primaryTerms: analysis.primaryTerms,
   };
 }
 
@@ -210,7 +206,7 @@ export async function loadReviewUnits() {
 export async function loadReviewUnitViews() {
   const units = await loadReviewUnits();
   const vocabulary = await loadVocabulary();
-  const stats = buildPrefixStats(units, vocabulary);
+  const stats = buildGlobalVocabStats(units, vocabulary);
   return units.map((unit) => materializeSuppressedView(unit, stats));
 }
 
@@ -348,7 +344,7 @@ export async function buildReviewUnits() {
   return materialized;
 }
 
-async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[], stats: PrefixStats) {
+async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[], stats: Map<string, VocabStats>) {
   const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
   const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
@@ -371,18 +367,33 @@ async function proposeDescriptor(unit: ReviewUnitRecord, vocabulary: VocabularyE
     ],
     vocabulary
   );
-  const suppressed = suppressSharedPrefix(unit.canonical, stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
+  const flowTerms = inferEvidenceTerms(
+    [
+      ...unit.urls,
+      ...unit.finalUrls,
+      ...unit.titles,
+      ...unit.headings,
+      ...unit.alerts,
+      ...unit.targets,
+      ...unit.tests,
+    ],
+    stats,
+    vocabulary,
+    [...registryMatches, ...(unit.activeVocab ?? []), ...(unit.proposedVocab ?? [])]
+  );
+  const prerequisiteAnalysis: PrerequisiteAnalysis = analyzePrerequisites(flowTerms, stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
   });
 
   const evidence = {
     reviewId: unit.reviewId,
     flowId: unit.flowId,
     variantSignature: unit.variantSignature ?? null,
-    canonical: suppressed.primary,
-    prerequisites: suppressed.prerequisites,
-    canonicalFull: unit.canonical,
+    canonical: unit.canonical,
+    flowTerms,
+    prerequisiteTerms: prerequisiteAnalysis.prerequisiteTerms,
+    primaryTerms: prerequisiteAnalysis.primaryTerms,
     count: unit.count,
     suites: unit.suites,
     tests: unit.tests,
@@ -444,7 +455,7 @@ export async function queueProposalProcessing() {
     while (true) {
       const reviewUnits = await loadReviewUnits();
       const vocabulary = await loadVocabulary();
-      const stats = buildPrefixStats(reviewUnits, vocabulary);
+      const stats = buildGlobalVocabStats(reviewUnits, vocabulary);
       const nextUnit = reviewUnits.find((unit) => unit.proposalState === "pending" || unit.proposalState === "error");
 
       if (!nextUnit) {

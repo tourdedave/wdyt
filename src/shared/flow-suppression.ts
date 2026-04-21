@@ -1,162 +1,119 @@
-import type { PrefixStats, PrefixStatsEntry, ReducedStep, SuppressedFlow, VocabularyEntry } from "./types.js";
-import { resolveApprovedVocabularyTerm } from "./vocabulary.js";
+import type { PrerequisiteAnalysis, ReviewUnitRecord, VocabStats, VocabularyEntry } from "./types.js";
+import { canonicalizeSemanticTerms, normalizeVocabularyValue } from "./vocabulary.js";
 
-type PrefixEntryAccumulator = {
-  sequence: string[];
-  flowKeys: Set<string>;
-  downstreamSignatures: Set<string>;
-  terminalCount: number;
-};
-
-function normalizeCanonicalStep(step: string, vocabulary: Iterable<VocabularyEntry>) {
-  const canonical = resolveApprovedVocabularyTerm(step, vocabulary);
-  return (canonical ?? step).trim().toUpperCase();
-}
-
-function normalizeCanonicalFlow(flow: string[], vocabulary: Iterable<VocabularyEntry>) {
-  return flow.map((step) => normalizeCanonicalStep(step, vocabulary)).filter(Boolean);
-}
-
-export function collectPrefixStats(
-  flows: string[][],
-  vocabulary: Iterable<VocabularyEntry>,
-  config: {
-    maxPrefixLength?: number;
-  } = {}
-): PrefixStats<ReducedStep> {
-  const maxPrefixLength = Math.max(1, config.maxPrefixLength ?? 3);
-  const uniqueFlows = new Map<string, string[]>();
-
-  for (const flow of flows) {
-    const normalized = normalizeCanonicalFlow(flow, vocabulary);
-    if (normalized.length === 0) {
-      continue;
-    }
-
-    const signature = normalized.join("|");
-    if (!uniqueFlows.has(signature)) {
-      uniqueFlows.set(signature, normalized);
-    }
-  }
-
-  const totalFlows = uniqueFlows.size;
-  const prefixEntries = new Map<string, PrefixEntryAccumulator>();
-
-  for (const flow of uniqueFlows.values()) {
-    const flowKey = flow.join("|");
-    const maxLength = Math.min(maxPrefixLength, flow.length);
-
-    for (let length = 1; length <= maxLength; length += 1) {
-      const sequence = flow.slice(0, length);
-      const key = sequence.join("|");
-      const accumulator = prefixEntries.get(key) ?? {
-        sequence,
-        flowKeys: new Set<string>(),
-        downstreamSignatures: new Set<string>(),
-        terminalCount: 0,
-      };
-
-      accumulator.flowKeys.add(flowKey);
-
-      if (flow.length === length) {
-        accumulator.terminalCount += 1;
-      } else {
-        accumulator.downstreamSignatures.add(flow.slice(length).join("|"));
-      }
-
-      prefixEntries.set(key, accumulator);
-    }
-  }
-
-  const entries: PrefixStatsEntry<ReducedStep>[] = [...prefixEntries.values()]
-    .map((entry) => ({
-      sequence: entry.sequence as ReducedStep[],
-      count: entry.flowKeys.size,
-      frequencyPct: totalFlows === 0 ? 0 : entry.flowKeys.size / totalFlows,
-      downstreamVariants: entry.downstreamSignatures.size,
-      terminalCount: entry.terminalCount,
-    }))
-    .sort(
-      (a, b) =>
-        b.sequence.length - a.sequence.length ||
-        b.frequencyPct - a.frequencyPct ||
-        a.sequence.join("|").localeCompare(b.sequence.join("|"))
-    );
-
-  return {
-    totalFlows,
-    entries,
-  };
-}
-
-function qualifiesSharedPrefix(
-  entry: PrefixStatsEntry,
-  config: {
-    minFrequencyPct: number;
-  }
+export function collectVocabStats(
+  reviewUnits: Array<Pick<ReviewUnitRecord, "activeDescriptor" | "proposedDescriptor" | "activeVocab" | "approvedVocabUsed" | "proposedVocab">>,
+  vocabulary: Iterable<VocabularyEntry>
 ) {
-  if (entry.frequencyPct <= config.minFrequencyPct) {
-    return false;
-  }
+  const totalReviewUnits = Math.max(1, reviewUnits.length);
+  const termToReviewUnits = new Map<string, number>();
+  const termToDescriptors = new Map<string, Set<string>>();
 
-  if (entry.downstreamVariants < 2) {
-    return false;
-  }
-
-  return entry.terminalCount < entry.count / 2;
-}
-
-export function suppressSharedPrefix(
-  flow: ReducedStep[],
-  stats: PrefixStats<ReducedStep>,
-  config: {
-    minFrequencyPct: number;
-    maxPrefixLength: number;
-  } = {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
-  }
-): SuppressedFlow<ReducedStep> {
-  const maxPrefixLength = Math.min(config.maxPrefixLength, Math.max(0, flow.length - 1));
-
-  if (flow.length <= 1 || stats.totalFlows === 0 || maxPrefixLength === 0) {
-    return {
-      prerequisites: [],
-      primary: [...flow],
-    };
-  }
-
-  let matchedLength = 0;
-
-  for (let length = maxPrefixLength; length >= 1; length -= 1) {
-    const prefix = flow.slice(0, length);
-    const entry = stats.entries.find((candidate) => candidate.sequence.length === length);
-
-    if (!entry) {
-      continue;
-    }
-
-    const exactMatch = stats.entries.find(
-      (candidate) =>
-        candidate.sequence.length === length &&
-        candidate.sequence.every((step, index) => step === prefix[index])
+  for (const unit of reviewUnits) {
+    const descriptor = (unit.activeDescriptor ?? unit.proposedDescriptor ?? "").trim();
+    const normalizedTerms = canonicalizeSemanticTerms(
+      unit.activeVocab?.length ? unit.activeVocab : [...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])],
+      vocabulary
     );
 
-    if (exactMatch && qualifiesSharedPrefix(exactMatch, config)) {
-      matchedLength = length;
-      break;
+    for (const term of normalizedTerms) {
+      termToReviewUnits.set(term, (termToReviewUnits.get(term) ?? 0) + 1);
+
+      const descriptors = termToDescriptors.get(term) ?? new Set<string>();
+      if (descriptor) {
+        descriptors.add(descriptor);
+      }
+      termToDescriptors.set(term, descriptors);
     }
   }
 
-  if (matchedLength === 0) {
+  const statsEntries: Array<[string, VocabStats]> = [...termToReviewUnits.entries()]
+    .map(([term, reviewUnitCount]): [string, VocabStats] => [
+      term,
+      {
+        term,
+        reviewUnitCount,
+        descriptorCount: termToDescriptors.get(term)?.size ?? 0,
+        idf: Math.log(totalReviewUnits / reviewUnitCount),
+      },
+    ])
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  return new Map<string, VocabStats>(statsEntries);
+}
+
+export function analyzePrerequisites(
+  flowTerms: string[],
+  globalStats: Map<string, VocabStats>,
+  config: {
+    maxIdf: number;
+    minDistinctDescriptorCount: number;
+  } = {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
+  }
+): PrerequisiteAnalysis {
+  const normalizedTerms = [...new Set(flowTerms.map((term) => term.trim()).filter(Boolean))];
+
+  if (normalizedTerms.length <= 1) {
     return {
-      prerequisites: [],
-      primary: [...flow],
+      prerequisiteTerms: [],
+      primaryTerms: normalizedTerms,
     };
+  }
+
+  const prerequisiteTerms = normalizedTerms.filter((term) => {
+    const stats = globalStats.get(term);
+    if (!stats) {
+      return false;
+    }
+
+    return stats.idf <= config.maxIdf && stats.descriptorCount >= config.minDistinctDescriptorCount;
+  });
+
+  let primaryTerms = normalizedTerms.filter((term) => !prerequisiteTerms.includes(term));
+
+  if (primaryTerms.length === 0) {
+    const ranked = normalizedTerms
+      .map((term) => ({
+        term,
+        stats: globalStats.get(term),
+      }))
+      .sort(
+        (a, b) =>
+          (b.stats?.idf ?? Number.POSITIVE_INFINITY) - (a.stats?.idf ?? Number.POSITIVE_INFINITY) ||
+          (a.stats?.descriptorCount ?? 0) - (b.stats?.descriptorCount ?? 0) ||
+          a.term.localeCompare(b.term)
+      );
+    const keeper = ranked[0]?.term;
+    primaryTerms = keeper ? [keeper] : normalizedTerms.slice(0, 1);
   }
 
   return {
-    prerequisites: flow.slice(0, matchedLength),
-    primary: flow.slice(matchedLength),
+    prerequisiteTerms: normalizedTerms.filter((term) => !primaryTerms.includes(term)),
+    primaryTerms,
   };
+}
+
+export function inferEvidenceTerms(
+  evidenceValues: string[],
+  globalStats: Map<string, VocabStats>,
+  vocabulary: Iterable<VocabularyEntry>,
+  seededTerms: string[] = []
+) {
+  const normalizedEvidence = evidenceValues.map((value) => normalizeVocabularyValue(value)).filter(Boolean);
+  const matchedTerms = new Set(canonicalizeSemanticTerms(seededTerms, vocabulary));
+
+  for (const term of globalStats.keys()) {
+    const normalizedTerm = normalizeVocabularyValue(term);
+    if (!normalizedTerm || normalizedTerm.length < 3) {
+      continue;
+    }
+
+    if (normalizedEvidence.some((value) => value.includes(normalizedTerm))) {
+      matchedTerms.add(term);
+    }
+  }
+
+  return [...matchedTerms].sort((a, b) => a.localeCompare(b));
 }

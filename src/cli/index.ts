@@ -19,11 +19,11 @@ import type {
   FlowReviewRecord,
   IngestPayload,
   FlowDescriptorProposal,
-  PrefixStats,
+  VocabStats,
   ProcessedRunRecord,
   VocabularyEntry,
 } from "../shared/types.js";
-import { collectPrefixStats, suppressSharedPrefix } from "../shared/flow-suppression.js";
+import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms } from "../shared/flow-suppression.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -548,7 +548,7 @@ function collectUsedVocab(descriptor: string, vocabulary: Map<string, Vocabulary
     .sort();
 }
 
-async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>, stats: PrefixStats) {
+async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>, stats: Map<string, VocabStats>) {
   const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
   const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
@@ -572,18 +572,33 @@ async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, Vocab
     ],
     vocabulary.values()
   );
-  const suppressed = suppressSharedPrefix(flow.canonical as ProcessedRunRecord["canonical"], stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
+  const flowTerms = inferEvidenceTerms(
+    [
+      ...[...flow.urls].sort(),
+      ...[...flow.finalUrls].sort(),
+      ...[...flow.titles].sort(),
+      ...[...flow.headings].sort(),
+      ...[...flow.alerts].sort(),
+      ...[...flow.targets].sort(),
+      ...[...flow.tests].sort(),
+    ],
+    stats,
+    vocabulary.values(),
+    registryMatches
+  );
+  const prerequisiteAnalysis = analyzePrerequisites(flowTerms, stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
   });
 
   const evidence = {
     reviewId: flow.reviewId,
     flowId: flow.flowId,
     variantSignature: flow.variantSignature ?? null,
-    canonical: suppressed.primary,
-    prerequisites: suppressed.prerequisites,
-    canonicalFull: flow.canonical,
+    canonical: flow.canonical,
+    flowTerms,
+    prerequisiteTerms: prerequisiteAnalysis.prerequisiteTerms,
+    primaryTerms: prerequisiteAnalysis.primaryTerms,
     count: flow.count,
     suites: [...flow.suites].sort(),
     tests: [...flow.tests].sort(),
@@ -640,10 +655,15 @@ async function reviewFlows(options: { propose: boolean }) {
 
   const reviews = await loadReviews();
   const vocabulary = await loadVocabulary();
-  const suppressionStats = collectPrefixStats(
-    reviewUnits.map((flow) => flow.canonical),
+  const suppressionStats = collectVocabStats(
+    reviewUnits.map((flow) => ({
+      activeDescriptor: reviews.get(flow.reviewId)?.approvedDescriptor ?? reviews.get(flow.reviewId)?.proposedDescriptor,
+      proposedDescriptor: reviews.get(flow.reviewId)?.proposedDescriptor,
+      activeVocab: [...(reviews.get(flow.reviewId)?.approvedVocabUsed ?? []), ...(reviews.get(flow.reviewId)?.proposedVocab ?? [])],
+      approvedVocabUsed: reviews.get(flow.reviewId)?.approvedVocabUsed ?? [],
+      proposedVocab: reviews.get(flow.reviewId)?.proposedVocab ?? [],
+    })),
     vocabulary.values(),
-    { maxPrefixLength: 3 }
   );
   const pendingFlows = reviewUnits.filter((flow) => {
     const review = reviews.get(flow.reviewId);

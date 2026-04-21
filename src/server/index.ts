@@ -410,14 +410,15 @@ function renderReviewPage() {
           <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
           <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
           <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
-          <p><strong>Primary Flow:</strong> \${escapeHtml((unit.primaryCanonical || unit.canonical).join(" → "))}</p>
+          <p><strong>Flow:</strong> \${escapeHtml(unit.canonical.join(" → "))}</p>
           <p><strong>Suites:</strong> \${escapeHtml(summarize(unit.suites))}</p>
           <p><strong>Tests:</strong> \${escapeHtml(summarize(unit.tests))}</p>
           <p><strong>Tools:</strong> \${escapeHtml(summarize(unit.tools))}</p>
           <p><strong>Browsers:</strong> \${escapeHtml(summarize(unit.browsers))}</p>
           <div class="grid">
             \${renderListBlock("Prerequisites", unit.prerequisites)}
-            \${renderListBlock("Primary Flow", unit.primaryCanonical || unit.canonical)}
+            \${renderListBlock("Primary Terms", unit.primaryTerms)}
+            \${renderListBlock("Flow Steps", unit.canonical)}
             \${renderListBlock("Final URLs", unit.finalUrls)}
             \${renderListBlock("Headings", unit.headings)}
             \${renderListBlock("Alerts", unit.alerts)}
@@ -716,6 +717,7 @@ function renderReviewSummaryPage() {
           title: getOverlapTitle(group),
           count: group.units.length,
           reviewId: group.units[0]?.reviewId || "",
+          prerequisites: [...new Set(group.units.flatMap((unit) => unit.prerequisites || []))].sort(),
         }));
         const singletons = getActiveUnits(units)
           .filter((unit) => !clusteredIds.has(unit.reviewId))
@@ -724,6 +726,7 @@ function renderReviewSummaryPage() {
             reviewId: unit.reviewId,
             title: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
             count: 1,
+            prerequisites: unit.prerequisites || [],
           }));
         return [...representatives, ...singletons].sort((a, b) => a.title.localeCompare(b.title));
       };

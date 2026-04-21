@@ -278,82 +278,188 @@ async function startMockLlmServer(port, options = {}) {
   return server;
 }
 
-test("shared prefix suppression handles repeated setup prefixes and preserves a non-empty primary flow", async () => {
-  const { collectPrefixStats, suppressSharedPrefix } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
-  const vocabulary = [];
-  const stats = collectPrefixStats(
+test("vocab stats count all review units and prerequisite analysis suppresses repeated login/setup terms", async () => {
+  const { collectVocabStats, analyzePrerequisites } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+
+  const stats = collectVocabStats(
     [
-      ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "SUBMIT"],
-      ["NAVIGATE", "INPUT", "CHANGE", "CLICK", "NAVIGATE"],
-      ["NAVIGATE", "INPUT", "CHANGE", "SUBMIT", "NAVIGATE"],
-      ["CLICK", "SUBMIT"],
+      {
+        activeDescriptor: "Login and export report",
+        proposedDescriptor: "Login and export report",
+        activeVocab: ["login", "workspace", "export report"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Login and create report",
+        proposedDescriptor: "Login and create report",
+        activeVocab: ["login", "workspace", "create report"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Login and view dashboard",
+        proposedDescriptor: "Login and view dashboard",
+        activeVocab: ["login", "workspace", "dashboard"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
     ],
-    vocabulary,
-    { maxPrefixLength: 3 }
+    []
   );
 
-  const suppressed = suppressSharedPrefix(["NAVIGATE", "INPUT", "CHANGE", "CLICK", "SUBMIT"], stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
+  assert.equal(stats.get("login")?.reviewUnitCount, 3);
+  assert.equal(stats.get("login")?.descriptorCount, 3);
+  assert.equal(stats.get("login")?.idf, 0);
+  assert.equal(stats.get("export report")?.reviewUnitCount, 1);
+
+  const analysis = analyzePrerequisites(["login", "workspace", "export report"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
   });
 
-  assert.deepEqual(suppressed.prerequisites, ["NAVIGATE", "INPUT", "CHANGE"]);
-  assert.deepEqual(suppressed.primary, ["CLICK", "SUBMIT"]);
-
-  const unsuppressed = suppressSharedPrefix(["CLICK", "SUBMIT"], stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
-  });
-
-  assert.deepEqual(unsuppressed.prerequisites, []);
-  assert.deepEqual(unsuppressed.primary, ["CLICK", "SUBMIT"]);
-
-  const singleStep = suppressSharedPrefix(["NAVIGATE"], stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
-  });
-  assert.deepEqual(singleStep.prerequisites, []);
-  assert.deepEqual(singleStep.primary, ["NAVIGATE"]);
+  assert.deepEqual(analysis.prerequisiteTerms, ["login", "workspace"]);
+  assert.deepEqual(analysis.primaryTerms, ["export report"]);
 });
 
-test("shared prefix suppression supports length 1 prefixes and skips non-shared flows", async () => {
-  const { collectPrefixStats, suppressSharedPrefix } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
-  const vocabulary = [];
-  const stats = collectPrefixStats(
+test("prerequisite analysis suppresses common terms even when they appear in the middle of a flow term list", async () => {
+  const { collectVocabStats, analyzePrerequisites } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+
+  const stats = collectVocabStats(
     [
-      ["NAVIGATE", "CLICK", "SUBMIT"],
-      ["NAVIGATE", "INPUT", "SUBMIT"],
-      ["NAVIGATE", "CHANGE", "CLICK"],
+      {
+        activeDescriptor: "Export report from workspace",
+        proposedDescriptor: "Export report from workspace",
+        activeVocab: ["export report", "login", "workspace"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Create report from workspace",
+        proposedDescriptor: "Create report from workspace",
+        activeVocab: ["create report", "login", "workspace"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "View dashboard from workspace",
+        proposedDescriptor: "View dashboard from workspace",
+        activeVocab: ["dashboard", "login", "workspace"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
     ],
-    vocabulary,
-    { maxPrefixLength: 3 }
+    []
   );
 
-  const suppressed = suppressSharedPrefix(["NAVIGATE", "CLICK", "SUBMIT"], stats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
+  const analysis = analyzePrerequisites(["export report", "login", "workspace"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
   });
-  assert.deepEqual(suppressed.prerequisites, ["NAVIGATE"]);
-  assert.deepEqual(suppressed.primary, ["CLICK", "SUBMIT"]);
 
-  const noSharedStats = collectPrefixStats(
-    [
-      ["CLICK", "SUBMIT"],
-      ["INPUT", "CHANGE"],
-      ["NAVIGATE", "SUBMIT"],
-    ],
-    vocabulary,
-    { maxPrefixLength: 3 }
-  );
-  const notSuppressed = suppressSharedPrefix(["CLICK", "SUBMIT"], noSharedStats, {
-    minFrequencyPct: 0.5,
-    maxPrefixLength: 3,
-  });
-  assert.deepEqual(notSuppressed.prerequisites, []);
-  assert.deepEqual(notSuppressed.primary, ["CLICK", "SUBMIT"]);
+  assert.deepEqual(analysis.prerequisiteTerms, ["login", "workspace"]);
+  assert.deepEqual(analysis.primaryTerms, ["export report"]);
 });
 
-test("review unit views expose prerequisites and primary flow after shared-prefix suppression", async () => {
+test("prerequisite analysis preserves distinctive terms and keeps one primary term even when others are suppressed", async () => {
+  const { collectVocabStats, analyzePrerequisites } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+
+  const stats = collectVocabStats(
+    [
+      {
+        activeDescriptor: "Login and workspace",
+        proposedDescriptor: "Login and workspace",
+        activeVocab: ["login", "workspace"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Login and workspace on reports",
+        proposedDescriptor: "Login and workspace on reports",
+        activeVocab: ["login", "workspace"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Export report",
+        proposedDescriptor: "Export report",
+        activeVocab: ["export report", "report"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Download report",
+        proposedDescriptor: "Download report",
+        activeVocab: ["download report", "report"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+    ],
+    []
+  );
+
+  const distinctive = analyzePrerequisites(["export report", "report"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
+  });
+  assert.deepEqual(distinctive.prerequisiteTerms, []);
+  assert.deepEqual(distinctive.primaryTerms, ["export report", "report"]);
+
+  const fallbackPrimary = analyzePrerequisites(["login", "workspace"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 2,
+  });
+  assert.equal(fallbackPrimary.primaryTerms.length, 1);
+  assert.equal(fallbackPrimary.prerequisiteTerms.length, 1);
+});
+
+test("common but important terms are not suppressed when they stay distinctive within a small related set", async () => {
+  const { collectVocabStats, analyzePrerequisites } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+
+  const stats = collectVocabStats(
+    [
+      {
+        activeDescriptor: "Export report to CSV",
+        proposedDescriptor: "Export report to CSV",
+        activeVocab: ["export report", "csv"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Export report to PDF",
+        proposedDescriptor: "Export report to PDF",
+        activeVocab: ["export report", "pdf"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Search results",
+        proposedDescriptor: "Search results",
+        activeVocab: ["search", "search results"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Dashboard",
+        proposedDescriptor: "Dashboard",
+        activeVocab: ["dashboard"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+    ],
+    []
+  );
+
+  const analysis = analyzePrerequisites(["export report", "csv"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
+  });
+
+  assert.deepEqual(analysis.prerequisiteTerms, []);
+  assert.deepEqual(analysis.primaryTerms, ["export report", "csv"]);
+});
+
+test("review unit views expose prerequisite concepts and primary terms", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-view-suppression-"));
   const dataDir = path.join(tempDir, ".wdyt");
   const originalCwd = process.cwd();
@@ -381,9 +487,9 @@ test("review unit views expose prerequisites and primary flow after shared-prefi
             alerts: [],
             proposalState: "proposed",
             approvedVocabUsed: [],
-            proposedVocab: ["task a"],
+            proposedVocab: ["login", "workspace", "export report"],
             activeDescriptor: "Task A",
-            activeVocab: ["task a"],
+            activeVocab: ["login", "workspace", "export report"],
             updatedAt: 1,
           },
           {
@@ -403,9 +509,9 @@ test("review unit views expose prerequisites and primary flow after shared-prefi
             alerts: [],
             proposalState: "proposed",
             approvedVocabUsed: [],
-            proposedVocab: ["task b"],
+            proposedVocab: ["login", "workspace", "create report"],
             activeDescriptor: "Task B",
-            activeVocab: ["task b"],
+            activeVocab: ["login", "workspace", "create report"],
             updatedAt: 1,
           },
           {
@@ -425,9 +531,9 @@ test("review unit views expose prerequisites and primary flow after shared-prefi
             alerts: [],
             proposalState: "proposed",
             approvedVocabUsed: [],
-            proposedVocab: ["task c"],
+            proposedVocab: ["login", "workspace", "dashboard"],
             activeDescriptor: "Task C",
-            activeVocab: ["task c"],
+            activeVocab: ["login", "workspace", "dashboard"],
             updatedAt: 1,
           },
         ],
@@ -443,8 +549,8 @@ test("review unit views expose prerequisites and primary flow after shared-prefi
     const flowA = views.find((unit) => unit.reviewId === "flow-a");
 
     assert.ok(flowA);
-    assert.deepEqual(flowA.prerequisites, ["NAVIGATE", "INPUT", "CHANGE"]);
-    assert.deepEqual(flowA.primaryCanonical, ["CLICK", "SUBMIT"]);
+    assert.deepEqual(flowA.prerequisites, ["login", "workspace"]);
+    assert.deepEqual(flowA.primaryTerms, ["export report"]);
   } finally {
     process.chdir(originalCwd);
     await rm(tempDir, { recursive: true, force: true });

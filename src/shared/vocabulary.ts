@@ -1,6 +1,6 @@
 import type { VocabularyEntry } from "./types.js";
 
-function normalizeVocabularyValue(value: string) {
+export function normalizeVocabularyValue(value: string) {
   return value
     .trim()
     .toLowerCase()
