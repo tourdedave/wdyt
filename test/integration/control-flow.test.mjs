@@ -221,6 +221,11 @@ async function runCli(workdir, args, stdinText = "", env = {}) {
 }
 
 async function startMockLlmServer(port, options = {}) {
+  const roleResponseContent = options.roleResponseContent ?? {
+    termRoles: [
+      { term: "search", role: "primary" },
+    ],
+  };
   const responseContent = options.responseContent ?? {
     descriptor: "search ends at dashboard",
     approvedVocab: [],
@@ -240,7 +245,12 @@ async function startMockLlmServer(port, options = {}) {
       req.on("end", () => {
         const parsedBody = JSON.parse(body);
         onRequest(parsedBody);
-        const nextContent = responseSequence.shift() ?? responseContent;
+        const systemPrompt = String(parsedBody?.messages?.[0]?.content ?? "");
+        const nextContent = responseSequence.shift() ?? (
+          systemPrompt.includes("assign each provided flow term one role")
+            ? roleResponseContent
+            : responseContent
+        );
         res.writeHead(200, { "content-type": "application/json" });
         res.end(
           JSON.stringify({
@@ -459,6 +469,52 @@ test("common but important terms are not suppressed when they stay distinctive w
   assert.deepEqual(analysis.primaryTerms, ["export report", "csv"]);
 });
 
+test("generic meta terms do not become the only primary terms when a stronger domain term exists", async () => {
+  const { collectVocabStats, analyzePrerequisites } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+
+  const stats = collectVocabStats(
+    [
+      {
+        activeDescriptor: "Dashboard after login",
+        proposedDescriptor: "Dashboard after login",
+        activeVocab: ["dashboard", "login", "success"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Reports after login",
+        proposedDescriptor: "Reports after login",
+        activeVocab: ["reports", "login", "success"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Settings after login",
+        proposedDescriptor: "Settings after login",
+        activeVocab: ["settings", "login", "success"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+      {
+        activeDescriptor: "Redirect after login",
+        proposedDescriptor: "Redirect after login",
+        activeVocab: ["dashboard", "login", "redirect"],
+        approvedVocabUsed: [],
+        proposedVocab: [],
+      },
+    ],
+    []
+  );
+
+  const analysis = analyzePrerequisites(["dashboard", "login", "success"], stats, {
+    maxIdf: 0.9,
+    minDistinctDescriptorCount: 3,
+  });
+
+  assert.deepEqual(analysis.primaryTerms, ["dashboard"]);
+  assert.deepEqual(analysis.prerequisiteTerms.sort(), ["login", "success"].sort());
+});
+
 test("review unit views expose prerequisite concepts and primary terms", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-view-suppression-"));
   const dataDir = path.join(tempDir, ".wdyt");
@@ -555,6 +611,159 @@ test("review unit views expose prerequisite concepts and primary terms", async (
     process.chdir(originalCwd);
     await rm(tempDir, { recursive: true, force: true });
   }
+});
+
+test("source-aware term extraction and semantic index preserve setup/action/terminal distinctions", async () => {
+  const { collectVocabStats, inferSourceAwareTermCandidates } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+  const { buildSemanticIndex, dedupeFlowTermCandidates } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+
+  const reviewUnits = [
+    {
+      activeDescriptor: "Search results",
+      proposedDescriptor: "Search results",
+      activeVocab: ["search", "search results", "dashboard"],
+      approvedVocabUsed: [],
+      proposedVocab: [],
+    },
+    {
+      activeDescriptor: "Settings page",
+      proposedDescriptor: "Settings page",
+      activeVocab: ["settings", "login"],
+      approvedVocabUsed: [],
+      proposedVocab: [],
+    },
+  ];
+  const stats = collectVocabStats(reviewUnits, []);
+  const rawCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "login-success-settings"],
+      actionValues: ['button("Search")', 'form("Search query Search")'],
+      terminalValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const candidates = dedupeFlowTermCandidates(rawCandidates);
+  const semanticIndex = buildSemanticIndex(reviewUnits, [], stats);
+  const sourcesByTerm = new Map();
+  for (const candidate of candidates) {
+    const current = sourcesByTerm.get(candidate.term) ?? new Set();
+    current.add(candidate.source);
+    sourcesByTerm.set(candidate.term, current);
+  }
+  const rawSourcesByTerm = new Map();
+  for (const candidate of rawCandidates) {
+    const current = rawSourcesByTerm.get(candidate.term) ?? new Set();
+    current.add(candidate.source);
+    rawSourcesByTerm.set(candidate.term, current);
+  }
+
+  assert.ok(sourcesByTerm.get("dashboard")?.has("setup"));
+  assert.ok(sourcesByTerm.get("search results")?.has("terminal"));
+  assert.ok(rawSourcesByTerm.get("search")?.has("action"));
+  assert.ok(rawSourcesByTerm.get("search results")?.has("terminal"));
+  assert.ok(!rawCandidates.some((candidate) => candidate.term === "d"));
+
+  const neighbors = semanticIndex.search({ term: "search results", source: "terminal" }, 3);
+  assert.ok(neighbors.some((neighbor) => neighbor.term === "search"));
+});
+
+test("concept canonicalization collapses auth aliases before role scoring", async () => {
+  const { canonicalizeSemanticTerms } = await import(path.join(repoRoot, "dist", "shared", "vocabulary.js"));
+
+  assert.deepEqual(
+    canonicalizeSemanticTerms(["sign in", "login", "username password sign in"], []),
+    ["login"]
+  );
+  assert.deepEqual(canonicalizeSemanticTerms(["sign out", "logout"], []), ["logout"]);
+});
+
+test("competitive role scoring prefers terminal and action terms over setup context", async () => {
+  const { collectVocabStats, inferSourceAwareTermCandidates, scoreFlowTermRoles } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
+  const { buildSemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+
+  const reviewUnits = [
+    {
+      activeDescriptor: "Login and settings",
+      proposedDescriptor: "Login and settings",
+      activeVocab: ["login", "settings", "dashboard", "success"],
+      approvedVocabUsed: [],
+      proposedVocab: [],
+    },
+    {
+      activeDescriptor: "Login and reports",
+      proposedDescriptor: "Login and reports",
+      activeVocab: ["login", "reports", "dashboard", "success"],
+      approvedVocabUsed: [],
+      proposedVocab: [],
+    },
+    {
+      activeDescriptor: "Search results",
+      proposedDescriptor: "Search results",
+      activeVocab: ["search", "search results", "dashboard", "login"],
+      approvedVocabUsed: [],
+      proposedVocab: [],
+    },
+  ];
+  const stats = collectVocabStats(reviewUnits, []);
+  const semanticIndex = buildSemanticIndex(reviewUnits, [], stats);
+
+  const settingsCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
+      actionValues: ['a("Open settings")', 'button("Sign in")'],
+      terminalValues: ["Settings", "http://127.0.0.1:4010/settings"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const settingsRoles = scoreFlowTermRoles(settingsCandidates, stats, semanticIndex);
+  assert.ok(settingsRoles.primaryTerms.includes("settings"));
+  assert.ok(!settingsRoles.primaryTerms.includes("dashboard"));
+
+  const searchCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
+      actionValues: ['button("Search")', 'form("Search query Search")'],
+      terminalValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const searchRoles = scoreFlowTermRoles(searchCandidates, stats, semanticIndex);
+  assert.ok(searchRoles.primaryTerms.includes("search") || searchRoles.primaryTerms.includes("search results"));
+  assert.ok(!searchRoles.primaryTerms.includes("dashboard"));
+
+  const reportsCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
+      actionValues: ['a("Open reports")', 'button("Sign in")'],
+      terminalValues: ["Reports", "http://127.0.0.1:4010/reports"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const reportsRoles = scoreFlowTermRoles(reportsCandidates, stats, semanticIndex);
+  assert.ok(reportsRoles.primaryTerms.includes("reports"));
+  assert.ok(!reportsRoles.primaryTerms.includes("dashboard"));
+
+  const workspaceCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
+      actionValues: ['a("Workspace")', 'button("Details")', 'button("Sign in")'],
+      terminalValues: ["Workspace", "http://127.0.0.1:4010/workspace/details"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const workspaceRoles = scoreFlowTermRoles(workspaceCandidates, stats, semanticIndex);
+  assert.ok(workspaceRoles.primaryTerms.includes("workspace details") || workspaceRoles.primaryTerms.includes("workspace"));
+  assert.ok(!workspaceRoles.primaryTerms.includes("details"));
 });
 
 test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
@@ -799,7 +1008,7 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
   const { child } = spawnServer(tempDir, port);
-  let capturedRequest = null;
+  const capturedRequests = [];
   const llmServer = await startMockLlmServer(llmPort, {
     responseContent: {
       descriptor: "User enters search query 'wdyt testing' and receives an error message on Google Search",
@@ -809,7 +1018,7 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
       rationale: "The flow shows a search followed by an error page.",
     },
     onRequest: (body) => {
-      capturedRequest ??= body;
+      capturedRequests.push(body);
     },
   });
 
@@ -881,12 +1090,25 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     );
 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+    const roleRequest = capturedRequests.find((request) =>
+      String(request?.messages?.[1]?.content ?? "").includes('"semanticNeighbors"')
+    );
+    const descriptorRequest = capturedRequests.find((request) =>
+      String(request?.messages?.[1]?.content ?? "").includes('"registryMatches"')
+    );
 
-    assert.ok(capturedRequest);
-    assert.match(capturedRequest.messages[0].content, /Step 1 — Extract signals/);
-    assert.match(capturedRequest.messages[0].content, /Use registryMatches if clearly relevant/);
-    assert.match(capturedRequest.messages[0].content, /approvedVocab contains only canonical terms/);
-    assert.match(capturedRequest.messages[1].content, /"registryMatches": \[\n\s+"Google Search"\n\s+\]/);
+    assert.ok(roleRequest);
+    assert.match(roleRequest.messages[1].content, /"setupTerms": \[/);
+    assert.match(roleRequest.messages[1].content, /"actionTerms": \[/);
+    assert.match(roleRequest.messages[1].content, /"terminalTerms": \[/);
+    assert.match(roleRequest.messages[1].content, /"semanticNeighbors": \{/);
+    assert.ok(descriptorRequest);
+    assert.match(descriptorRequest.messages[0].content, /Step 1 — Extract signals/);
+    assert.match(descriptorRequest.messages[0].content, /Use registryMatches if clearly relevant/);
+    assert.match(descriptorRequest.messages[0].content, /approvedVocab contains only canonical terms/);
+    assert.match(descriptorRequest.messages[0].content, /descriptor should normally be expressible without mentioning prerequisiteTerms/);
+    assert.match(descriptorRequest.messages[1].content, /"registryMatches": \[\n\s+"Google Search"\n\s+\]/);
+    assert.match(descriptorRequest.messages[1].content, /"allFlowTerms": \[/);
     assert.match(reviewOutput, /Approved vocab: Google Search/);
     assert.match(reviewOutput, /Proposed vocab: error message, search query/);
     assert.match(
@@ -986,10 +1208,15 @@ test("review caps confidence for literal typed values even when descriptor is me
 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
 
-    assert.equal(requests.length, 1);
-    assert.match(requests[0].messages[0].content, /Else propose new terms \(only if needed\)/);
-    assert.match(requests[0].messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
-    assert.match(requests[0].messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
+    const descriptorRequest = requests.find((request) =>
+      String(request?.messages?.[0]?.content ?? "").includes("Else propose new terms (only if needed)")
+    );
+
+    assert.equal(requests.length, 2);
+    assert.ok(descriptorRequest);
+    assert.match(descriptorRequest.messages[0].content, /Else propose new terms \(only if needed\)/);
+    assert.match(descriptorRequest.messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
+    assert.match(descriptorRequest.messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
     assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
     assert.match(reviewOutput, /Confidence: 0\.20/);
     assert.match(reviewOutput, /Proposed vocab: -/);
@@ -1363,6 +1590,8 @@ test("review module materializes review units, proposes descriptors, and saves r
     assert.equal(proposedUnit.proposedDescriptor, "search ends at dashboard");
     assert.equal(proposedUnit.activeDescriptor, "search ends at dashboard");
     assert.deepEqual(proposedUnit.activeVocab, ["search"]);
+    assert.deepEqual(proposedUnit.primaryTerms, ["search"]);
+    assert.deepEqual(proposedUnit.prerequisiteTerms, ["login"]);
     assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 

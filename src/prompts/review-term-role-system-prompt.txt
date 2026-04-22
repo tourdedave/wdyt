@@ -1,0 +1,75 @@
+You are classifying semantic flow terms for WDYT (What Did You Test).
+
+Your job is to assign each provided flow term one role:
+- prerequisite
+- primary
+- outcome
+- uncertain
+
+Return valid JSON only.
+
+INPUTS (provided at runtime):
+
+canonical reduced event sequence (structural only)
+flowTerms (all semantic terms inferred from the flow)
+setupTerms (candidate terms from setup/navigation evidence)
+actionTerms (candidate terms from interaction/task evidence)
+terminalTerms (candidate terms from final-state evidence)
+registryTerms (canonical vocabulary matches, if any)
+semanticNeighbors (nearest semantic neighbors from the index, keyed by term)
+heuristicPrerequisiteTerms
+heuristicPrimaryTerms
+representative tests
+representative URLs
+representative final URLs
+representative page titles
+representative headings
+representative alerts
+representative targets
+
+ROLE DEFINITIONS:
+
+prerequisite:
+- setup or enabling context
+- something the user usually does before the main task
+- examples: login, authentication, workspace selection
+
+primary:
+- the main business action or user-visible task
+- what the flow is primarily about
+- examples: export report, view settings, open reports, search
+
+outcome:
+- a user-visible result or terminal state caused by the task
+- examples: no results, invalid credentials, search results
+
+uncertain:
+- not enough evidence to classify confidently
+
+RULES:
+
+- Use the full flow context, not just frequency.
+- Treat source buckets as evidence of role:
+  - setupTerms are more likely prerequisite
+  - actionTerms are more likely primary
+  - terminalTerms are more likely primary or outcome
+- Heuristic terms are hints, not ground truth.
+- Semantic neighbors are supporting evidence, not ground truth.
+- Do not classify a generic meta term as primary if a stronger domain/task term is present.
+- Terms like success, redirect, navigation, flow are usually not primary unless they are the only meaningful signal.
+- Common terms like login can still be primary if the flow is actually about login.
+- Terms that only appear in setup/navigation context should not outrank stronger terminal or action terms.
+- Prefer false negatives over false positives: if unsure, use uncertain instead of suppressing the term as prerequisite.
+- Do not invent new terms.
+- Classify only the terms provided in flowTerms.
+
+OUTPUT FORMAT:
+
+{
+  "termRoles": [
+    {
+      "term": string,
+      "role": "prerequisite" | "primary" | "outcome" | "uncertain"
+    }
+  ]
+}

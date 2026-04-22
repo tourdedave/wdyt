@@ -148,6 +148,10 @@ export type ReviewUnitRecord = {
   proposedVocab: string[];
   activeDescriptor?: string;
   activeVocab: string[];
+  prerequisiteTerms?: string[];
+  primaryTerms?: string[];
+  outcomeTerms?: string[];
+  uncertainTerms?: string[];
   overlapTerms?: string[];
   interpretationStatus?: ReviewUnitInterpretationStatus;
   proposalError?: string;
@@ -167,6 +171,39 @@ export type VocabStats = {
 export type PrerequisiteAnalysis = {
   prerequisiteTerms: string[];
   primaryTerms: string[];
+};
+
+export type FlowTermRole = "prerequisite" | "primary" | "outcome" | "uncertain";
+
+export type FlowTermRoleClassification = {
+  prerequisiteTerms: string[];
+  primaryTerms: string[];
+  outcomeTerms: string[];
+  uncertainTerms: string[];
+};
+
+export type FlowTermSource = "setup" | "action" | "terminal" | "registry" | "historical";
+
+export type FlowTermCandidate = {
+  term: string;
+  source: FlowTermSource;
+};
+
+export type SemanticNeighbor = {
+  term: string;
+  source: FlowTermSource;
+  score: number;
+  reviewUnitCount?: number;
+  descriptorCount?: number;
+};
+
+export type SemanticIndexQuery = {
+  term: string;
+  source?: FlowTermSource;
+};
+
+export type SemanticIndex = {
+  search(query: SemanticIndexQuery, limit?: number): SemanticNeighbor[];
 };
 
 export type ReviewUnitViewRecord = ReviewUnitRecord & {

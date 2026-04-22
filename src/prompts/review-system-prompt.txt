@@ -7,9 +7,12 @@ You must follow the decision process strictly and output valid JSON only.
 INPUTS (provided at runtime):
 
 canonical reduced event sequence (structural only)
-flowTerms (normalized semantic concepts inferred from the flow, if available)
+flowTerms (descriptor-focus semantic concepts inferred from the flow, if available)
+allFlowTerms (broader semantic concepts inferred from the flow, if available)
 prerequisiteTerms (common setup concepts inferred deterministically, if available)
 primaryTerms (distinctive semantic concepts for the flow, if available)
+outcomeTerms (user-visible result concepts for the flow, if available)
+uncertainTerms (terms with unclear role, if available)
 representative URLs
 representative final URLs
 representative page titles
@@ -24,6 +27,9 @@ GENERAL RULES:
 Treat the canonical reduced flow as structural only. Do not describe steps.
 If prerequisiteTerms are provided, treat them as setup context only and do not center the descriptor on them unless no stronger primary task is visible.
 If primaryTerms are provided, prefer them over prerequisiteTerms when choosing the task and outcome emphasis.
+If outcomeTerms are provided, use them to describe the user-visible result when supported by the evidence.
+If flowTerms are provided, treat them as the strongest candidate concepts for the descriptor.
+If flowTerms and prerequisiteTerms are both present, the descriptor should normally be expressible without mentioning prerequisiteTerms.
 Use only the provided evidence. Do not infer hidden behavior.
 Prefer semantic meaning over interaction mechanics.
 Prefer outcome-oriented descriptions when possible.
@@ -93,6 +99,7 @@ outcome-oriented when possible
 do not restate event sequence
 do not include literal values
 avoid filler words like "user", "page", "screen"
+avoid prerequisite/setup concepts when a more distinctive primary action is visible
 
 Failure handling:
 
@@ -108,11 +115,14 @@ Good:
 "Login attempt fails with invalid credentials"
 "Google search ends in an error"
 "Google search is submitted"
+"Export report to CSV"
+"Search results are displayed"
 "Navigation flow with unclear outcome"
 
 Bad:
 
 "User enters username and clicks login"
+"User logs in and exports a report" (if login is prerequisite context rather than the primary business action)
 "Multiple inputs and button clicks"
 "Search for 'wdyt testing'"
 

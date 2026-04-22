@@ -9,6 +9,71 @@ export function normalizeVocabularyValue(value: string) {
     .trim();
 }
 
+function stripLeadingIntentVerbs(value: string) {
+  return value
+    .replace(/^(open|view|display|show|go to|navigate to|back to)\s+/g, "")
+    .replace(/^(a|an|the)\s+/g, "")
+    .trim();
+}
+
+function canonicalizeBuiltinConcept(normalizedValue: string) {
+  if (!normalizedValue) {
+    return null;
+  }
+
+  const stripped = stripLeadingIntentVerbs(normalizedValue)
+    .replace(/^username password\s+/g, "")
+    .replace(/^successful\s+/g, "")
+    .replace(/^success\s+/g, "")
+    .trim();
+
+  if (!stripped) {
+    return null;
+  }
+
+  if (stripped === "flow" || stripped.endsWith(" flow")) {
+    return null;
+  }
+
+  if (
+    stripped === "sign in" ||
+    stripped === "signin" ||
+    stripped === "log in" ||
+    stripped === "login" ||
+    stripped === "authenticate" ||
+    stripped === "authentication" ||
+    stripped === "username password sign in"
+  ) {
+    return "login";
+  }
+
+  if (stripped === "sign out" || stripped === "logout" || stripped === "log out") {
+    return "logout";
+  }
+
+  if (stripped.includes("search") && stripped.includes("results")) {
+    return "search results";
+  }
+
+  if (stripped === "results displayed") {
+    return "search results";
+  }
+
+  if (stripped === "success dashboard") {
+    return "dashboard";
+  }
+
+  if (stripped === "success reports") {
+    return "reports";
+  }
+
+  if (stripped === "success settings") {
+    return "settings";
+  }
+
+  return stripped;
+}
+
 function buildCandidateTerms(entry: VocabularyEntry) {
   return [entry.term, ...(entry.aliases ?? [])]
     .map((value) => value.trim())
@@ -34,6 +99,20 @@ export function resolveApprovedVocabularyTerm(term: string, entries: Iterable<Vo
   }
 
   return null;
+}
+
+export function canonicalizeConceptTerm(term: string, entries: Iterable<VocabularyEntry>) {
+  const normalizedTerm = normalizeVocabularyValue(term);
+  if (!normalizedTerm) {
+    return null;
+  }
+
+  const approvedTerm = resolveApprovedVocabularyTerm(normalizedTerm, entries);
+  if (approvedTerm) {
+    return approvedTerm;
+  }
+
+  return canonicalizeBuiltinConcept(normalizedTerm);
 }
 
 export function findApprovedVocabularyMatches(evidenceValues: string[], entries: Iterable<VocabularyEntry>) {
@@ -69,7 +148,7 @@ export function normalizeProposedVocabulary(terms: string[], entries: Iterable<V
   const approvedTerms = new Set<string>();
 
   for (const term of terms) {
-    const normalizedTerm = term.trim();
+    const normalizedTerm = canonicalizeConceptTerm(term, entries) ?? term.trim();
     if (!normalizedTerm) {
       continue;
     }

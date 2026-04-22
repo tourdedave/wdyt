@@ -17,13 +17,17 @@ import {
 import type {
   DescriptorStatus,
   FlowReviewRecord,
+  FlowTermCandidate,
+  FlowTermRole,
+  FlowTermRoleClassification,
   IngestPayload,
   FlowDescriptorProposal,
   VocabStats,
   ProcessedRunRecord,
   VocabularyEntry,
 } from "../shared/types.js";
-import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms } from "../shared/flow-suppression.js";
+import { collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
+import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -34,6 +38,7 @@ import { scoreProposalConfidence, validateProposal } from "../shared/proposal-va
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
+const reviewTermRolePromptPath = path.join(__dirname, "../prompts/review-term-role-system-prompt.txt");
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_LLM_API_KEY = "ollama";
 const DEFAULT_LLM_MODEL = "mistral:instruct";
@@ -229,6 +234,61 @@ function normalizeFlowDescriptorProposal(
     confidence,
     rationale,
   };
+}
+
+function normalizeFlowTermRoleClassification(value: unknown, fallback: { prerequisiteTerms: string[]; primaryTerms: string[] }): FlowTermRoleClassification {
+  if (!value || typeof value !== "object") {
+    return {
+      prerequisiteTerms: [...fallback.prerequisiteTerms],
+      primaryTerms: [...fallback.primaryTerms],
+      outcomeTerms: [],
+      uncertainTerms: [],
+    };
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const assignments = Array.isArray(candidate.termRoles) ? candidate.termRoles : [];
+  const byRole = new Map<FlowTermRole, Set<string>>([
+    ["prerequisite", new Set<string>()],
+    ["primary", new Set<string>()],
+    ["outcome", new Set<string>()],
+    ["uncertain", new Set<string>()],
+  ]);
+
+  for (const assignment of assignments) {
+    if (!assignment || typeof assignment !== "object") {
+      continue;
+    }
+    const candidateAssignment = assignment as Record<string, unknown>;
+    const role = candidateAssignment.role;
+    const term = typeof candidateAssignment.term === "string"
+      ? candidateAssignment.term.trim()
+      : "";
+    if (!term || (role !== "prerequisite" && role !== "primary" && role !== "outcome" && role !== "uncertain")) {
+      continue;
+    }
+    byRole.get(role)?.add(term);
+  }
+
+  if ((byRole.get("primary")?.size ?? 0) === 0) {
+    fallback.primaryTerms.forEach((term) => byRole.get("primary")?.add(term));
+  }
+  if ((byRole.get("prerequisite")?.size ?? 0) === 0) {
+    fallback.prerequisiteTerms.forEach((term) => byRole.get("prerequisite")?.add(term));
+  }
+
+  const primaryTerms = [...(byRole.get("primary") ?? new Set<string>())].sort((a, b) => a.localeCompare(b));
+  const prerequisiteTerms = [...(byRole.get("prerequisite") ?? new Set<string>())]
+    .filter((term) => !primaryTerms.includes(term))
+    .sort((a, b) => a.localeCompare(b));
+  const outcomeTerms = [...(byRole.get("outcome") ?? new Set<string>())]
+    .filter((term) => !primaryTerms.includes(term) && !prerequisiteTerms.includes(term))
+    .sort((a, b) => a.localeCompare(b));
+  const uncertainTerms = [...(byRole.get("uncertain") ?? new Set<string>())]
+    .filter((term) => !primaryTerms.includes(term) && !prerequisiteTerms.includes(term) && !outcomeTerms.includes(term))
+    .sort((a, b) => a.localeCompare(b));
+
+  return { prerequisiteTerms, primaryTerms, outcomeTerms, uncertainTerms };
 }
 
 async function requestJsonCompletion(input: {
@@ -548,12 +608,32 @@ function collectUsedVocab(descriptor: string, vocabulary: Map<string, Vocabulary
     .sort();
 }
 
-async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, VocabularyEntry>, stats: Map<string, VocabStats>) {
+function partitionTermCandidates(candidates: FlowTermCandidate[]) {
+  const setupTerms = candidates.filter((candidate) => candidate.source === "setup").map((candidate) => candidate.term);
+  const actionTerms = candidates.filter((candidate) => candidate.source === "action").map((candidate) => candidate.term);
+  const terminalTerms = candidates.filter((candidate) => candidate.source === "terminal").map((candidate) => candidate.term);
+  const registryTerms = candidates.filter((candidate) => candidate.source === "registry").map((candidate) => candidate.term);
+
+  return {
+    setupTerms: [...new Set(setupTerms)].sort((a, b) => a.localeCompare(b)),
+    actionTerms: [...new Set(actionTerms)].sort((a, b) => a.localeCompare(b)),
+    terminalTerms: [...new Set(terminalTerms)].sort((a, b) => a.localeCompare(b)),
+    registryTerms: [...new Set(registryTerms)].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+async function proposeDescriptor(
+  flow: ReviewUnit,
+  vocabulary: Map<string, VocabularyEntry>,
+  stats: Map<string, VocabStats>,
+  semanticIndex: ReturnType<typeof buildSemanticIndex>
+) {
   const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
   const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
 
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
+  const roleSystemPrompt = await readFile(reviewTermRolePromptPath, "utf8");
   const approvedVocabulary = getApprovedVocabulary(vocabulary.values())
     .map((entry) => ({
       term: entry.term,
@@ -586,19 +666,72 @@ async function proposeDescriptor(flow: ReviewUnit, vocabulary: Map<string, Vocab
     vocabulary.values(),
     registryMatches
   );
-  const prerequisiteAnalysis = analyzePrerequisites(flowTerms, stats, {
-    maxIdf: 0.9,
-    minDistinctDescriptorCount: 3,
-  });
+    const sourceCandidates = dedupeFlowTermCandidates(
+      inferSourceAwareTermCandidates(
+        {
+          setupValues: [...[...flow.urls].filter((value) => !flow.finalUrls.has(value)).sort()],
+          actionValues: [...[...flow.targets].sort()],
+          terminalValues: [...[...flow.finalUrls].sort(), ...[...flow.titles].sort(), ...[...flow.headings].sort(), ...[...flow.alerts].sort()],
+          registryTerms: registryMatches,
+        },
+      stats,
+      vocabulary.values()
+    )
+  );
+  const evidenceBuckets = partitionTermCandidates(sourceCandidates);
+  const roleHints = scoreFlowTermRoles(sourceCandidates, stats, semanticIndex);
+  const semanticNeighbors = Object.fromEntries(
+    sourceCandidates.map((candidate) => [
+      candidate.term,
+      semanticIndex.search({ term: candidate.term, source: candidate.source }, 5),
+    ])
+  );
+  const roleEvidence = {
+    reviewId: flow.reviewId,
+    flowId: flow.flowId,
+    canonical: flow.canonical,
+    flowTerms,
+    setupTerms: evidenceBuckets.setupTerms,
+    actionTerms: evidenceBuckets.actionTerms,
+    terminalTerms: evidenceBuckets.terminalTerms,
+    registryTerms: evidenceBuckets.registryTerms,
+    semanticNeighbors,
+    heuristicPrerequisiteTerms: roleHints.prerequisiteTerms,
+    heuristicPrimaryTerms: roleHints.primaryTerms,
+    tests: [...flow.tests].sort(),
+    urls: summarizeSamples([...flow.urls].sort(), 5),
+    finalUrls: summarizeSamples([...flow.finalUrls].sort(), 5),
+    titles: summarizeSamples([...flow.titles].sort(), 5),
+    headings: summarizeSamples([...flow.headings].sort(), 5),
+    alerts: summarizeSamples([...flow.alerts].sort(), 5),
+    targets: summarizeSamples([...flow.targets].sort(), 5),
+  };
+  const classifiedTerms = normalizeFlowTermRoleClassification(
+    await requestJsonCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      systemPrompt: roleSystemPrompt,
+      userPrompt: JSON.stringify(roleEvidence, null, 2),
+    }),
+    roleHints
+  );
+  const descriptorFocusTerms =
+    classifiedTerms.primaryTerms.length > 0
+      ? [...classifiedTerms.primaryTerms, ...classifiedTerms.outcomeTerms].sort((a, b) => a.localeCompare(b))
+      : flowTerms;
 
   const evidence = {
     reviewId: flow.reviewId,
     flowId: flow.flowId,
     variantSignature: flow.variantSignature ?? null,
     canonical: flow.canonical,
-    flowTerms,
-    prerequisiteTerms: prerequisiteAnalysis.prerequisiteTerms,
-    primaryTerms: prerequisiteAnalysis.primaryTerms,
+    allFlowTerms: flowTerms,
+    flowTerms: descriptorFocusTerms,
+    prerequisiteTerms: classifiedTerms.prerequisiteTerms,
+    primaryTerms: classifiedTerms.primaryTerms,
+    outcomeTerms: classifiedTerms.outcomeTerms,
+    uncertainTerms: classifiedTerms.uncertainTerms,
     count: flow.count,
     suites: [...flow.suites].sort(),
     tests: [...flow.tests].sort(),
@@ -665,6 +798,17 @@ async function reviewFlows(options: { propose: boolean }) {
     })),
     vocabulary.values(),
   );
+  const semanticIndex = buildSemanticIndex(
+    reviewUnits.map((flow) => ({
+      activeVocab: [...(reviews.get(flow.reviewId)?.approvedVocabUsed ?? []), ...(reviews.get(flow.reviewId)?.proposedVocab ?? [])],
+      approvedVocabUsed: reviews.get(flow.reviewId)?.approvedVocabUsed ?? [],
+      proposedVocab: reviews.get(flow.reviewId)?.proposedVocab ?? [],
+      activeDescriptor: reviews.get(flow.reviewId)?.approvedDescriptor ?? reviews.get(flow.reviewId)?.proposedDescriptor,
+      proposedDescriptor: reviews.get(flow.reviewId)?.proposedDescriptor,
+    })),
+    vocabulary.values(),
+    suppressionStats
+  );
   const pendingFlows = reviewUnits.filter((flow) => {
     const review = reviews.get(flow.reviewId);
     return !review || review.descriptorStatus === "pending";
@@ -682,7 +826,7 @@ async function reviewFlows(options: { propose: boolean }) {
       const existing = reviews.get(flow.reviewId);
       const proposal =
         options.propose && !existing
-          ? await proposeDescriptor(flow, vocabulary, suppressionStats)
+          ? await proposeDescriptor(flow, vocabulary, suppressionStats, semanticIndex)
           : {
               descriptor: existing?.proposedDescriptor ?? buildProposedDescriptor(flow),
               approvedVocab: existing?.approvedVocabUsed ?? existing?.usedVocab ?? [],
