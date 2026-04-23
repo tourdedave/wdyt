@@ -1,4 +1,4 @@
-import { mkdir, appendFile, readFile, writeFile } from "node:fs/promises";
+import { mkdir, appendFile, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 function resolveDataDir() {
@@ -85,5 +85,7 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
 
 export async function writeJsonFile(filePath: string, value: unknown) {
   await ensureDataDir();
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  const tempFilePath = `${filePath}.${process.pid}.tmp`;
+  await writeFile(tempFilePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  await rename(tempFilePath, filePath);
 }

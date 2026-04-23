@@ -57,6 +57,7 @@ const reviewEvidenceClassificationPromptPath = path.join(__dirname, "../prompts/
 const reviewConceptResolutionPromptPath = path.join(__dirname, "../prompts/review-concept-resolution-system-prompt.txt");
 
 let processingQueue = false;
+let reviewUnitWriteChain: Promise<unknown> = Promise.resolve();
 
 type GroupedFlow = {
   flowId: string;
@@ -323,22 +324,27 @@ async function patchReviewUnit(
   reviewId: string,
   update: (unit: MaterializedReviewUnitRecord) => MaterializedReviewUnitRecord | null
 ) {
-  const reviewUnits = await loadReviewUnits();
-  const index = reviewUnits.findIndex((unit) => unit.reviewId === reviewId);
+  const task = reviewUnitWriteChain.then(async () => {
+    const reviewUnits = await loadReviewUnits();
+    const index = reviewUnits.findIndex((unit) => unit.reviewId === reviewId);
 
-  if (index < 0) {
-    return null;
-  }
+    if (index < 0) {
+      return null;
+    }
 
-  const nextUnit = update(reviewUnits[index]);
+    const nextUnit = update(reviewUnits[index]);
 
-  if (!nextUnit) {
-    return null;
-  }
+    if (!nextUnit) {
+      return null;
+    }
 
-  reviewUnits[index] = nextUnit;
-  await saveReviewUnits(reviewUnits);
-  return nextUnit;
+    reviewUnits[index] = nextUnit;
+    await saveReviewUnits(reviewUnits);
+    return nextUnit;
+  });
+
+  reviewUnitWriteChain = task.catch(() => {});
+  return task;
 }
 
 export async function loadReviewUnits() {
