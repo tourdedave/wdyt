@@ -230,6 +230,8 @@ function escapeRegex(value: string) {
 
 function cleanupDescriptorText(value: string) {
   return value
+    .replace(/\bafter successful\b/gi, "")
+    .replace(/\bafter success\b/gi, "")
     .replace(/\b(?:after|post|following)\s*$/i, "")
     .replace(/\s+([,.;:!?])/g, "$1")
     .replace(/\s{2,}/g, " ")
@@ -253,6 +255,21 @@ export function sanitizeDescriptorExcludedTerms(descriptor: string, excludedTerm
   return sanitized || descriptor;
 }
 
+export function normalizeDescriptorStyle(descriptor: string) {
+  const normalized = descriptor
+    .replace(/^\s*viewing\s+/i, "View ")
+    .replace(/^\s*accessing\s+/i, "Access ")
+    .replace(/\bpage\b/gi, "")
+    .replace(/\bpage is accessed\b/gi, "")
+    .replace(/\bare accessed\b/gi, "")
+    .replace(/\bis accessed\b/gi, "")
+    .replace(/\bresulting in dashboard display\b/gi, "dashboard")
+    .replace(/^\s*successful login\s+dashboard\b/gi, "View dashboard")
+    .replace(/^\s*successful login resulting in dashboard\b/gi, "View dashboard");
+
+  return cleanupDescriptorText(normalized);
+}
+
 function titleCaseTerm(term: string) {
   return term.replace(/\b\w/g, (match) => match.toUpperCase());
 }
@@ -264,6 +281,10 @@ function preferViewVerb(term: string) {
 export function buildFallbackDescriptor(evidence: ProposalEvidence) {
   const primary = evidence.primaryTerms?.[0];
   const outcome = evidence.outcomeTerms?.[0];
+
+  if (primary === "login" && outcome === "dashboard") {
+    return "View dashboard";
+  }
 
   if (primary === "search" && outcome === "no results") {
     return "Search returns no results";

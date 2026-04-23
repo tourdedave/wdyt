@@ -52,6 +52,7 @@ import {
   buildProposalRetryFeedback,
   includesDescriptorExcludedTerm,
   isLowValueProposalTerm,
+  normalizeDescriptorStyle,
   sanitizeDescriptorExcludedTerms,
   scoreProposalConfidence,
   validateProposal,
@@ -876,6 +877,11 @@ async function proposeDescriptor(
     };
     validation = validateProposal(evidence, parsed, vocabulary.values());
   }
+  parsed = {
+    ...parsed,
+    descriptor: normalizeDescriptorStyle(parsed.descriptor),
+  };
+  validation = validateProposal(evidence, parsed, vocabulary.values());
   const filteredApprovedVocab = descriptorExcludedTerms.length > 0
     ? parsed.approvedVocab.filter((term) => !includesDescriptorExcludedTerm(term, descriptorExcludedTerms))
     : parsed.approvedVocab;

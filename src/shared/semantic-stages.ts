@@ -47,8 +47,9 @@ function canonicalizeResolvedConceptLabel(term: string, vocabulary: Iterable<Voc
   normalized = normalized
     .replace(/^user\s+/g, "")
     .replace(/^perform\s+/g, "")
+    .replace(/^(?:execute|run)\s+/g, "")
     .replace(/^view(?:ing)?\s+/g, "")
-    .replace(/\s+(?:page|view|action|navigation|submission|display)$/g, "")
+    .replace(/\s+(?:page|view|action|navigation|submission|display|context|interface)$/g, "")
     .trim();
 
   if (!normalized) {
@@ -67,7 +68,15 @@ function canonicalizeResolvedConceptLabel(term: string, vocabulary: Iterable<Voc
     return "search results";
   }
 
+  if (normalized === "search interface") {
+    return "search";
+  }
+
   if (normalized === "dashboard page") {
+    return "dashboard";
+  }
+
+  if (normalized === "dashboard page context" || normalized === "dashboard context") {
     return "dashboard";
   }
 
@@ -75,8 +84,16 @@ function canonicalizeResolvedConceptLabel(term: string, vocabulary: Iterable<Voc
     return "login";
   }
 
+  if (normalized === "reports interface") {
+    return "reports";
+  }
+
   if (normalized === "reports page") {
     return "reports";
+  }
+
+  if (normalized === "settings interface") {
+    return "settings";
   }
 
   if (normalized === "settings page") {

@@ -262,6 +262,14 @@ export function rebalanceClassifiedRoles(
     prerequisite.delete("dashboard");
   }
 
+  if (primary.has("search results")) {
+    prerequisite.delete("search");
+  }
+
+  if (primary.has("search") && outcome.has("search results")) {
+    prerequisite.delete("search");
+  }
+
   const prerequisiteByRoot = new Map<string, string[]>();
   for (const term of prerequisite) {
     const root = firstToken(term);

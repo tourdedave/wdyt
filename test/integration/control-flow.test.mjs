@@ -890,6 +890,7 @@ test("descriptor sanitization strips excluded auth phrasing from mixed-flow desc
     buildFallbackDescriptor,
     buildProposalRetryFeedback,
     isLowValueProposalTerm,
+    normalizeDescriptorStyle,
     validateProposal,
   } = await import(path.join(repoRoot, "dist", "shared", "proposal-validation.js"));
 
@@ -900,6 +901,20 @@ test("descriptor sanitization strips excluded auth phrasing from mixed-flow desc
   assert.equal(
     sanitizeDescriptorExcludedTerms("Workspace details are accessed after login", ["login", "after login"]),
     "Workspace details are accessed"
+  );
+  assert.equal(
+    buildFallbackDescriptor({
+      canonical: ["NAVIGATE"],
+      primaryTerms: ["login"],
+      outcomeTerms: ["dashboard"],
+      urls: [],
+      finalUrls: [],
+      titles: [],
+      headings: [],
+      alerts: [],
+      targets: [],
+    }),
+    "View dashboard"
   );
   assert.equal(
     buildFallbackDescriptor({
@@ -957,6 +972,8 @@ test("descriptor sanitization strips excluded auth phrasing from mixed-flow desc
     }),
     "View search results"
   );
+  assert.equal(normalizeDescriptorStyle("Viewing workspace details"), "View workspace details");
+  assert.equal(normalizeDescriptorStyle("Access reports page after successful"), "Access reports");
   assert.match(
     buildProposalRetryFeedback([
       "The descriptor narrates low-level UI mechanics or reduced event steps instead of the semantic task or outcome.",
@@ -1028,6 +1045,52 @@ test("role rebalance preserves no results as a distinct outcome concept", async 
   });
 
   assert.deepEqual(resolved.map((concept) => concept.term), ["no results"]);
+});
+
+test("role rebalance drops search prerequisite when search results are already primary", async () => {
+  const { rebalanceClassifiedRoles } = await import(path.join(repoRoot, "dist", "shared", "role-rebalance.js"));
+
+  const rebalanced = rebalanceClassifiedRoles(
+    {
+      prerequisiteTerms: ["login", "search"],
+      primaryTerms: ["search results"],
+      outcomeTerms: [],
+      uncertainTerms: [],
+    },
+    [
+      { term: "login", rawTerms: [], sources: ["setup", "action"], confidence: 0.95, strategy: "llm-resolved", neighbors: [], supportingItemIds: [] },
+      { term: "search", rawTerms: [], sources: ["setup", "action"], confidence: 0.95, strategy: "llm-resolved", neighbors: [], supportingItemIds: [] },
+      { term: "search results", rawTerms: [], sources: ["end-state"], confidence: 0.95, strategy: "llm-resolved", neighbors: [], supportingItemIds: [] },
+    ]
+  );
+
+  assert.deepEqual(rebalanced.prerequisiteTerms, ["login"]);
+  assert.deepEqual(rebalanced.primaryTerms, ["search results"]);
+});
+
+test("concept normalization collapses wrapper concepts like execute search and search interface", async () => {
+  const { normalizeConceptResolution } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
+  const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+
+  const resolved = normalizeConceptResolution({
+    value: {
+      concepts: [
+        { term: "execute search", itemIds: ["e1"], confidence: 0.95 },
+        { term: "search interface", itemIds: ["e2"], confidence: 0.95 },
+        { term: "search results", itemIds: ["e3"], confidence: 0.95 },
+      ],
+    },
+    evidenceItems: [
+      { id: "e1", kind: "target", value: 'button("Search")', inferredBucket: "action", bucket: "action", confidence: 0.95 },
+      { id: "e2", kind: "target", value: 'a("Open search")', inferredBucket: "action", bucket: "action", confidence: 0.95 },
+      { id: "e3", kind: "title", value: "Search Results", inferredBucket: "end-state", bucket: "end-state", confidence: 0.95 },
+    ],
+    fallbackCandidates: [],
+    semanticIndex: createInMemorySemanticIndex([]),
+    vocabulary: [],
+  });
+
+  assert.deepEqual(resolved.map((concept) => concept.term), ["search", "search results"]);
 });
 
 test("competitive role scoring prefers end-state and action terms over setup context", async () => {
