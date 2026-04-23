@@ -22,6 +22,7 @@ function canonicalizeBuiltinConcept(normalizedValue: string) {
   }
 
   const stripped = stripLeadingIntentVerbs(normalizedValue)
+    .replace(/^demo\s+/g, "")
     .replace(/^username password\s+/g, "")
     .replace(/^successful\s+/g, "")
     .replace(/^success\s+/g, "")
@@ -49,6 +50,10 @@ function canonicalizeBuiltinConcept(normalizedValue: string) {
 
   if (stripped === "sign out" || stripped === "logout" || stripped === "log out") {
     return "logout";
+  }
+
+  if (stripped === "success" || stripped === "successful") {
+    return null;
   }
 
   if (stripped.includes("search") && stripped.includes("results")) {
@@ -148,7 +153,11 @@ export function normalizeProposedVocabulary(terms: string[], entries: Iterable<V
   const approvedTerms = new Set<string>();
 
   for (const term of terms) {
-    const normalizedTerm = canonicalizeConceptTerm(term, entries) ?? term.trim();
+    const builtinNormalizedTerm = normalizeVocabularyValue(term);
+    const canonicalizedTerm = canonicalizeConceptTerm(term, entries);
+    const normalizedTerm =
+      canonicalizedTerm ??
+      (builtinNormalizedTerm === "success" || builtinNormalizedTerm === "successful" ? "" : term.trim());
     if (!normalizedTerm) {
       continue;
     }

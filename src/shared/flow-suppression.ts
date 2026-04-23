@@ -16,6 +16,18 @@ function isGenericPrimaryTerm(term: string) {
   );
 }
 
+function isGenericSemanticTerm(term: string) {
+  const normalized = normalizeVocabularyValue(term);
+  return (
+    normalized === "success" ||
+    normalized === "successful" ||
+    normalized === "redirect" ||
+    normalized === "navigation" ||
+    normalized === "flow" ||
+    normalized === "access"
+  );
+}
+
 export function collectVocabStats(
   reviewUnits: Array<Pick<ReviewUnitRecord, "activeDescriptor" | "proposedDescriptor" | "activeVocab" | "approvedVocabUsed" | "proposedVocab">>,
   vocabulary: Iterable<VocabularyEntry>
@@ -126,7 +138,7 @@ export function inferEvidenceTerms(
 
   for (const term of globalStats.keys()) {
     const normalizedTerm = normalizeVocabularyValue(term);
-    if (!normalizedTerm || normalizedTerm.length < 3) {
+    if (!normalizedTerm || normalizedTerm.length < 3 || isGenericSemanticTerm(normalizedTerm)) {
       continue;
     }
 
@@ -273,6 +285,14 @@ export function scoreFlowTermRoles(
     const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
     return sources.has("action") && !sources.has("setup");
   });
+  const setupTerminalTerms = terms.filter((term) => {
+    const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
+    return sources.has("setup") && sources.has("terminal");
+  });
+  const fullLifecycleTerms = terms.filter((term) => {
+    const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
+    return sources.has("setup") && sources.has("action") && sources.has("terminal");
+  });
   const tokenizedTerms = new Map(terms.map((term) => [term, new Set(normalizeVocabularyValue(term).split(" ").filter(Boolean))]));
 
   const scored = terms.map((term) => {
@@ -371,6 +391,25 @@ export function scoreFlowTermRoles(
 
     if (actionOnlyTerms.length > 0 && sources.has("action") && !sources.has("terminal")) {
       primaryScore += 0.5;
+    }
+
+    if (setupTerminalTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("terminal")) {
+      primaryScore += 1.4;
+      prerequisiteScore -= 0.4;
+    }
+
+    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("terminal") && !sources.has("action")) {
+      primaryScore -= 0.9;
+    }
+
+    if (fullLifecycleTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("terminal")) {
+      primaryScore += 1.1;
+      prerequisiteScore -= 0.2;
+    }
+
+    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("action") && sources.has("terminal")) {
+      primaryScore -= 1.4;
+      prerequisiteScore += 0.35;
     }
 
     return { term, sources, primaryScore, prerequisiteScore, outcomeScore };

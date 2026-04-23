@@ -676,7 +676,46 @@ test("concept canonicalization collapses auth aliases before role scoring", asyn
     canonicalizeSemanticTerms(["sign in", "login", "username password sign in"], []),
     ["login"]
   );
+  assert.deepEqual(canonicalizeSemanticTerms(["demo login", "log in"], []), ["login"]);
   assert.deepEqual(canonicalizeSemanticTerms(["sign out", "logout"], []), ["logout"]);
+  assert.deepEqual(canonicalizeSemanticTerms(["success", "login"], []), ["login"]);
+});
+
+test("concept resolver groups extracted terms into resolved concepts with evidence", async () => {
+  const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+  const { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } = await import(path.join(repoRoot, "dist", "shared", "concept-resolver.js"));
+
+  const semanticIndex = createInMemorySemanticIndex([
+    { term: "login", source: "historical", normalized: "login", tokens: new Set(["login"]) },
+    { term: "logout", source: "historical", normalized: "logout", tokens: new Set(["logout"]) },
+    { term: "workspace details", source: "historical", normalized: "workspace details", tokens: new Set(["workspace", "details"]) },
+  ]);
+
+  const resolved = resolveFlowConcepts({
+    candidates: [
+      { term: "sign in", source: "action" },
+      { term: "log in", source: "setup" },
+      { term: "sign out", source: "action" },
+      { term: "workspace details", source: "terminal" },
+    ],
+    semanticIndex,
+    vocabulary: [],
+  });
+
+  assert.ok(resolved.some((concept) => concept.term === "login"));
+  assert.ok(resolved.some((concept) => concept.term === "logout"));
+  assert.ok(resolved.some((concept) => concept.term === "workspace details"));
+  assert.ok(resolved.find((concept) => concept.term === "logout")?.sources.includes("action"));
+
+  const candidates = resolvedConceptsToCandidates(resolved);
+  assert.ok(candidates.some((candidate) => candidate.term === "logout" && candidate.source === "action"));
+
+  const evidence = summarizeRoleEvidence({
+    concepts: resolved,
+    prerequisiteTerms: ["login"],
+    primaryTerms: ["logout", "workspace details"],
+  });
+  assert.ok(evidence.rationale.some((line) => line.includes("logout: primary")));
 });
 
 test("competitive role scoring prefers terminal and action terms over setup context", async () => {
@@ -764,6 +803,20 @@ test("competitive role scoring prefers terminal and action terms over setup cont
   const workspaceRoles = scoreFlowTermRoles(workspaceCandidates, stats, semanticIndex);
   assert.ok(workspaceRoles.primaryTerms.includes("workspace details") || workspaceRoles.primaryTerms.includes("workspace"));
   assert.ok(!workspaceRoles.primaryTerms.includes("details"));
+
+  const logoutCandidates = inferSourceAwareTermCandidates(
+    {
+      setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
+      actionValues: ['a("Sign out")', 'button("Sign in")'],
+      terminalValues: ["Demo Login", "Sign in", "http://127.0.0.1:4010/login"],
+      registryTerms: [],
+    },
+    stats,
+    []
+  );
+  const logoutRoles = scoreFlowTermRoles(logoutCandidates, stats, semanticIndex);
+  assert.ok(logoutRoles.primaryTerms.includes("logout"));
+  assert.ok(!logoutRoles.primaryTerms.includes("login"));
 });
 
 test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
@@ -1592,6 +1645,10 @@ test("review module materializes review units, proposes descriptors, and saves r
     assert.deepEqual(proposedUnit.activeVocab, ["search"]);
     assert.deepEqual(proposedUnit.primaryTerms, ["search"]);
     assert.deepEqual(proposedUnit.prerequisiteTerms, ["login"]);
+    assert.ok(Array.isArray(proposedUnit.conceptResolutions));
+    assert.ok(proposedUnit.conceptResolutions.some((concept) => concept.term === "search"));
+    assert.ok(Array.isArray(proposedUnit.roleEvidence?.rationale));
+    assert.ok((proposedUnit.roleEvidence?.rationale.length ?? 0) > 0);
     assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 

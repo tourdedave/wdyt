@@ -57,6 +57,7 @@ RULES:
 - Semantic neighbors are supporting evidence, not ground truth.
 - Do not classify a generic meta term as primary if a stronger domain/task term is present.
 - Terms like success, redirect, navigation, flow are usually not primary unless they are the only meaningful signal.
+- Bare success is usually not an outcome term by itself if a clearer destination or task-specific result is present.
 - Common terms like login can still be primary if the flow is actually about login.
 - Terms that only appear in setup/navigation context should not outrank stronger terminal or action terms.
 - Prefer false negatives over false positives: if unsure, use uncertain instead of suppressing the term as prerequisite.

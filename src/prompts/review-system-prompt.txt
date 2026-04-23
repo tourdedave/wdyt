@@ -28,6 +28,7 @@ Treat the canonical reduced flow as structural only. Do not describe steps.
 If prerequisiteTerms are provided, treat them as setup context only and do not center the descriptor on them unless no stronger primary task is visible.
 If primaryTerms are provided, prefer them over prerequisiteTerms when choosing the task and outcome emphasis.
 If outcomeTerms are provided, use them to describe the user-visible result when supported by the evidence.
+Do not treat a bare success term as the main outcome if a more concrete destination or result concept is available.
 If flowTerms are provided, treat them as the strongest candidate concepts for the descriptor.
 If flowTerms and prerequisiteTerms are both present, the descriptor should normally be expressible without mentioning prerequisiteTerms.
 Use only the provided evidence. Do not infer hidden behavior.

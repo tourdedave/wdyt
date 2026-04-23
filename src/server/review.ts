@@ -15,11 +15,13 @@ import {
 import type {
   FlowTermCandidate,
   FlowDescriptorProposal,
+  FlowRoleEvidence,
   FlowTermRole,
   FlowTermRoleClassification,
   IngestPayload,
   PrerequisiteAnalysis,
   ProcessedRunRecord,
+  ResolvedFlowConcept,
   ReviewUnitRecord,
   ReviewUnitViewRecord,
   VocabStats,
@@ -27,6 +29,7 @@ import type {
 } from "../shared/types.js";
 import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
 import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
+import { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } from "../shared/concept-resolver.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -254,6 +257,8 @@ function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyE
     primaryTerms: Array.isArray(unit.primaryTerms) ? unit.primaryTerms : [],
     outcomeTerms: Array.isArray(unit.outcomeTerms) ? unit.outcomeTerms : [],
     uncertainTerms: Array.isArray(unit.uncertainTerms) ? unit.uncertainTerms : [],
+    conceptResolutions: Array.isArray(unit.conceptResolutions) ? unit.conceptResolutions : [],
+    roleEvidence: unit.roleEvidence,
     overlapTerms: normalizeOverlapTerms(activeVocab, vocabulary),
     interpretationStatus,
   };
@@ -460,6 +465,8 @@ export async function buildReviewUnits() {
         primaryTerms: previous?.primaryTerms ?? [],
         outcomeTerms: previous?.outcomeTerms ?? [],
         uncertainTerms: previous?.uncertainTerms ?? [],
+        conceptResolutions: previous?.conceptResolutions ?? [],
+        roleEvidence: previous?.roleEvidence,
         interpretationStatus: previous?.interpretationStatus,
         proposalError: previous?.proposalError,
         notes: previous?.notes,
@@ -503,7 +510,7 @@ async function proposeDescriptor(
     ],
     vocabulary
   );
-  const flowTerms = inferEvidenceTerms(
+  const inferredFlowTerms = inferEvidenceTerms(
     [
       ...unit.urls,
       ...unit.finalUrls,
@@ -529,14 +536,25 @@ async function proposeDescriptor(
       vocabulary
     )
   );
-  const evidenceBuckets = partitionTermCandidates(sourceCandidates);
-  const roleHints: PrerequisiteAnalysis = scoreFlowTermRoles(sourceCandidates, stats, semanticIndex);
-  const semanticNeighbors = Object.fromEntries(
-    sourceCandidates.map((candidate) => [
-      candidate.term,
-      semanticIndex.search({ term: candidate.term, source: candidate.source }, 5),
-    ])
+  const resolvedConcepts = resolveFlowConcepts({
+    candidates: sourceCandidates,
+    semanticIndex,
+    vocabulary,
+  });
+  const resolvedCandidates = dedupeFlowTermCandidates(resolvedConceptsToCandidates(resolvedConcepts));
+  const flowTerms = [...new Set([...inferredFlowTerms, ...resolvedConcepts.map((concept) => concept.term)])].sort((a, b) =>
+    a.localeCompare(b)
   );
+  const evidenceBuckets = partitionTermCandidates(resolvedCandidates);
+  const roleHints: PrerequisiteAnalysis = scoreFlowTermRoles(resolvedCandidates, stats, semanticIndex);
+  const semanticNeighbors = Object.fromEntries(
+    resolvedConcepts.map((concept) => [concept.term, concept.neighbors])
+  );
+  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
+    concepts: resolvedConcepts,
+    prerequisiteTerms: roleHints.prerequisiteTerms,
+    primaryTerms: roleHints.primaryTerms,
+  });
   const roleEvidence = {
     reviewId: unit.reviewId,
     flowId: unit.flowId,
@@ -547,6 +565,7 @@ async function proposeDescriptor(
     terminalTerms: evidenceBuckets.terminalTerms,
     registryTerms: evidenceBuckets.registryTerms,
     semanticNeighbors,
+    resolvedConcepts,
     heuristicPrerequisiteTerms: roleHints.prerequisiteTerms,
     heuristicPrimaryTerms: roleHints.primaryTerms,
     tests: unit.tests,
@@ -633,6 +652,8 @@ async function proposeDescriptor(
     primaryTerms: classifiedTerms.primaryTerms,
     outcomeTerms: classifiedTerms.outcomeTerms,
     uncertainTerms: classifiedTerms.uncertainTerms,
+    conceptResolutions: resolvedConcepts,
+    roleEvidence: roleEvidenceSummary,
   };
 }
 
@@ -687,6 +708,8 @@ export async function queueProposalProcessing() {
           primaryTerms: proposal.primaryTerms,
           outcomeTerms: proposal.outcomeTerms,
           uncertainTerms: proposal.uncertainTerms,
+          conceptResolutions: proposal.conceptResolutions,
+          roleEvidence: proposal.roleEvidence,
           activeDescriptor: proposal.proposedDescriptor,
           activeVocab: [...new Set([...proposal.approvedVocabUsed, ...proposal.proposedVocab])].sort((a, b) =>
             a.localeCompare(b)
@@ -768,6 +791,12 @@ export async function saveReviewUnitEdits(input: {
   reviewUnit.primaryTerms = [...reviewUnit.activeVocab];
   reviewUnit.outcomeTerms = [];
   reviewUnit.uncertainTerms = [];
+  reviewUnit.conceptResolutions = [];
+  reviewUnit.roleEvidence = {
+    prerequisiteTerms: [],
+    primaryTerms: [...reviewUnit.activeVocab],
+    rationale: ["manual edit"],
+  };
   reviewUnit.overlapTerms = normalizeOverlapTerms(reviewUnit.activeVocab, vocabulary);
   reviewUnit.approvedVocabUsed = normalizedActive.approvedVocab;
   reviewUnit.proposedVocab = normalizedActive.proposedVocab;
@@ -792,6 +821,8 @@ export async function requestReviewUnitReprocess(reviewId: string) {
   reviewUnit.primaryTerms = [];
   reviewUnit.outcomeTerms = [];
   reviewUnit.uncertainTerms = [];
+  reviewUnit.conceptResolutions = [];
+  reviewUnit.roleEvidence = undefined;
   reviewUnit.reprocessRequestedAt = Date.now();
   reviewUnit.updatedAt = reviewUnit.reprocessRequestedAt;
   await saveReviewUnits(reviewUnits);

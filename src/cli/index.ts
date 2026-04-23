@@ -18,9 +18,11 @@ import type {
   DescriptorStatus,
   FlowReviewRecord,
   FlowTermCandidate,
+  FlowRoleEvidence,
   FlowTermRole,
   FlowTermRoleClassification,
   IngestPayload,
+  ResolvedFlowConcept,
   FlowDescriptorProposal,
   VocabStats,
   ProcessedRunRecord,
@@ -28,6 +30,7 @@ import type {
 } from "../shared/types.js";
 import { collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
 import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
+import { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } from "../shared/concept-resolver.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -652,7 +655,7 @@ async function proposeDescriptor(
     ],
     vocabulary.values()
   );
-  const flowTerms = inferEvidenceTerms(
+  const inferredFlowTerms = inferEvidenceTerms(
     [
       ...[...flow.urls].sort(),
       ...[...flow.finalUrls].sort(),
@@ -666,26 +669,37 @@ async function proposeDescriptor(
     vocabulary.values(),
     registryMatches
   );
-    const sourceCandidates = dedupeFlowTermCandidates(
-      inferSourceAwareTermCandidates(
-        {
-          setupValues: [...[...flow.urls].filter((value) => !flow.finalUrls.has(value)).sort()],
-          actionValues: [...[...flow.targets].sort()],
-          terminalValues: [...[...flow.finalUrls].sort(), ...[...flow.titles].sort(), ...[...flow.headings].sort(), ...[...flow.alerts].sort()],
-          registryTerms: registryMatches,
-        },
+  const sourceCandidates = dedupeFlowTermCandidates(
+    inferSourceAwareTermCandidates(
+      {
+        setupValues: [...[...flow.urls].filter((value) => !flow.finalUrls.has(value)).sort()],
+        actionValues: [...[...flow.targets].sort()],
+        terminalValues: [...[...flow.finalUrls].sort(), ...[...flow.titles].sort(), ...[...flow.headings].sort(), ...[...flow.alerts].sort()],
+        registryTerms: registryMatches,
+      },
       stats,
       vocabulary.values()
     )
   );
-  const evidenceBuckets = partitionTermCandidates(sourceCandidates);
-  const roleHints = scoreFlowTermRoles(sourceCandidates, stats, semanticIndex);
-  const semanticNeighbors = Object.fromEntries(
-    sourceCandidates.map((candidate) => [
-      candidate.term,
-      semanticIndex.search({ term: candidate.term, source: candidate.source }, 5),
-    ])
+  const resolvedConcepts = resolveFlowConcepts({
+    candidates: sourceCandidates,
+    semanticIndex,
+    vocabulary: vocabulary.values(),
+  });
+  const resolvedCandidates = dedupeFlowTermCandidates(resolvedConceptsToCandidates(resolvedConcepts));
+  const flowTerms = [...new Set([...inferredFlowTerms, ...resolvedConcepts.map((concept) => concept.term)])].sort((a, b) =>
+    a.localeCompare(b)
   );
+  const evidenceBuckets = partitionTermCandidates(resolvedCandidates);
+  const roleHints = scoreFlowTermRoles(resolvedCandidates, stats, semanticIndex);
+  const semanticNeighbors = Object.fromEntries(
+    resolvedConcepts.map((concept) => [concept.term, concept.neighbors])
+  );
+  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
+    concepts: resolvedConcepts,
+    prerequisiteTerms: roleHints.prerequisiteTerms,
+    primaryTerms: roleHints.primaryTerms,
+  });
   const roleEvidence = {
     reviewId: flow.reviewId,
     flowId: flow.flowId,
@@ -696,6 +710,7 @@ async function proposeDescriptor(
     terminalTerms: evidenceBuckets.terminalTerms,
     registryTerms: evidenceBuckets.registryTerms,
     semanticNeighbors,
+    resolvedConcepts,
     heuristicPrerequisiteTerms: roleHints.prerequisiteTerms,
     heuristicPrimaryTerms: roleHints.primaryTerms,
     tests: [...flow.tests].sort(),
@@ -776,6 +791,8 @@ async function proposeDescriptor(
     proposedVocab: parsed.proposedVocab,
     confidence: scoreProposalConfidence(evidence, parsed, validation.issues),
     rationale: parsed.rationale,
+    conceptResolutions: resolvedConcepts as ResolvedFlowConcept[],
+    roleEvidence: roleEvidenceSummary as FlowRoleEvidence,
   };
 }
 

@@ -152,6 +152,8 @@ export type ReviewUnitRecord = {
   primaryTerms?: string[];
   outcomeTerms?: string[];
   uncertainTerms?: string[];
+  conceptResolutions?: ResolvedFlowConcept[];
+  roleEvidence?: FlowRoleEvidence;
   overlapTerms?: string[];
   interpretationStatus?: ReviewUnitInterpretationStatus;
   proposalError?: string;
@@ -187,6 +189,21 @@ export type FlowTermSource = "setup" | "action" | "terminal" | "registry" | "his
 export type FlowTermCandidate = {
   term: string;
   source: FlowTermSource;
+};
+
+export type ResolvedFlowConcept = {
+  term: string;
+  rawTerms: string[];
+  sources: FlowTermSource[];
+  confidence: number;
+  strategy: "builtin" | "semantic-neighbor" | "literal";
+  neighbors: SemanticNeighbor[];
+};
+
+export type FlowRoleEvidence = {
+  prerequisiteTerms: string[];
+  primaryTerms: string[];
+  rationale: string[];
 };
 
 export type SemanticNeighbor = {
