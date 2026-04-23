@@ -9,8 +9,28 @@ const OPERATIONAL_PRIMITIVE_PATTERNS = [
   /\blink\b/,
 ];
 
-function isAuthTerm(term: string) {
+export function isAuthTerm(term: string) {
   return AUTH_TERMS.has(term);
+}
+
+export function shouldSuppressAuthInDescriptor(classification: FlowTermRoleClassification) {
+  return classification.primaryTerms.some((term) => !isAuthTerm(term));
+}
+
+export function filterAuthTermsForDescriptor(terms: string[], classification: FlowTermRoleClassification) {
+  if (!shouldSuppressAuthInDescriptor(classification)) {
+    return [...terms];
+  }
+
+  return terms.filter((term) => !isAuthTerm(term));
+}
+
+export function getDescriptorExcludedTerms(terms: string[], classification: FlowTermRoleClassification) {
+  if (!shouldSuppressAuthInDescriptor(classification)) {
+    return [];
+  }
+
+  return terms.filter((term) => isAuthTerm(term));
 }
 
 function normalize(value: string) {

@@ -31,7 +31,7 @@ import type {
 import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
 import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
 import { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } from "../shared/concept-resolver.js";
-import { rebalanceClassifiedRoles } from "../shared/role-rebalance.js";
+import { getDescriptorExcludedTerms, rebalanceClassifiedRoles } from "../shared/role-rebalance.js";
 import {
   buildEvidenceCandidates,
   collectStructuredEvidenceItems,
@@ -164,6 +164,11 @@ function normalizeFlowDescriptorProposal(value: unknown, vocabulary: VocabularyE
     confidence,
     rationale,
   };
+}
+
+function isAuthLikeDescriptorTerm(term: string) {
+  const normalized = term.trim().toLowerCase();
+  return normalized === "login" || normalized === "logout" || normalized === "authentication";
 }
 
 function normalizeFlowTermRoleClassification(value: unknown, fallback: PrerequisiteAnalysis): FlowTermRoleClassification {
@@ -654,6 +659,7 @@ async function proposeDescriptor(
     prerequisiteTerms: classifiedTerms.prerequisiteTerms,
     primaryTerms: classifiedTerms.primaryTerms,
   });
+  const descriptorExcludedTerms = getDescriptorExcludedTerms(flowTerms, classifiedTerms);
   const descriptorFocusTerms =
     classifiedTerms.primaryTerms.length > 0
       ? [...classifiedTerms.primaryTerms, ...classifiedTerms.outcomeTerms].sort((a, b) => a.localeCompare(b))
@@ -670,6 +676,7 @@ async function proposeDescriptor(
     primaryTerms: classifiedTerms.primaryTerms,
     outcomeTerms: classifiedTerms.outcomeTerms,
     uncertainTerms: classifiedTerms.uncertainTerms,
+    descriptorExcludedTerms,
     count: unit.count,
     suites: unit.suites,
     tests: unit.tests,
@@ -706,6 +713,12 @@ async function proposeDescriptor(
   }
 
   const parsed = await generateProposal();
+  const filteredApprovedVocabUsed = descriptorExcludedTerms.length > 0
+    ? parsed.approvedVocab.filter((term) => !isAuthLikeDescriptorTerm(term))
+    : parsed.approvedVocab;
+  const filteredProposedVocab = descriptorExcludedTerms.length > 0
+    ? parsed.proposedVocab.filter((term) => !isAuthLikeDescriptorTerm(term))
+    : parsed.proposedVocab;
   const validation = validateProposal(evidence, parsed, vocabulary);
   const adjustedConfidence = scoreProposalConfidence(evidence, parsed, validation.issues);
 
@@ -713,8 +726,8 @@ async function proposeDescriptor(
     proposedDescriptor: parsed.descriptor,
     proposedConfidence: adjustedConfidence,
     proposedRationale: parsed.rationale,
-    approvedVocabUsed: parsed.approvedVocab,
-    proposedVocab: parsed.proposedVocab,
+    approvedVocabUsed: filteredApprovedVocabUsed,
+    proposedVocab: filteredProposedVocab,
     prerequisiteTerms: classifiedTerms.prerequisiteTerms,
     primaryTerms: classifiedTerms.primaryTerms,
     outcomeTerms: classifiedTerms.outcomeTerms,

@@ -373,7 +373,6 @@ function renderReviewPage() {
         container.innerHTML = state.units.map((unit) => \`
           <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "related" : ""} \${state.activeOverlapKey && !getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
             <h2>\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
-            <div class="status">\${escapeHtml(getDisplayStatus(unit))}</div>
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
           node.addEventListener("click", () => { state.selectedId = node.getAttribute("data-id"); render(); });

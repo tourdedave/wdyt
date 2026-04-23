@@ -13,6 +13,7 @@ prerequisiteTerms (common setup concepts inferred deterministically, if availabl
 primaryTerms (distinctive semantic concepts for the flow, if available)
 outcomeTerms (user-visible result concepts for the flow, if available)
 uncertainTerms (terms with unclear role, if available)
+descriptorExcludedTerms (concepts available as context but normally excluded from descriptor wording and vocabulary, if available)
 representative URLs
 representative final URLs
 representative page titles
@@ -28,9 +29,11 @@ Treat the canonical reduced flow as structural only. Do not describe steps.
 If prerequisiteTerms are provided, treat them as setup context only and do not center the descriptor on them unless no stronger primary task is visible.
 If primaryTerms are provided, prefer them over prerequisiteTerms when choosing the task and outcome emphasis.
 If outcomeTerms are provided, use them to describe the user-visible result when supported by the evidence.
+If descriptorExcludedTerms are provided, treat them as available context but not preferred descriptor wording.
 Do not treat a bare success term as the main outcome if a more concrete destination or result concept is available.
 If flowTerms are provided, treat them as the strongest candidate concepts for the descriptor.
 If flowTerms and prerequisiteTerms are both present, the descriptor should normally be expressible without mentioning prerequisiteTerms.
+If descriptorExcludedTerms and stronger non-excluded terms are both present, prefer the non-excluded terms in descriptor wording.
 Use only the provided evidence. Do not infer hidden behavior.
 Prefer semantic meaning over interaction mechanics.
 Prefer outcome-oriented descriptions when possible.
@@ -101,6 +104,7 @@ do not restate event sequence
 do not include literal values
 avoid filler words like "user", "page", "screen"
 avoid prerequisite/setup concepts when a more distinctive primary action is visible
+avoid descriptorExcludedTerms when a stronger non-excluded descriptor is possible
 
 Failure handling:
 
@@ -134,6 +138,8 @@ Vocabulary selection order:
 Use registryMatches if clearly relevant
 Else use approved vocabulary registry terms
 Else propose new terms (only if needed)
+
+If descriptorExcludedTerms are provided, do not include them in approvedVocab or proposedVocab unless they are the true subject of the flow.
 
 Vocabulary quality rubric:
 
