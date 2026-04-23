@@ -12,6 +12,7 @@ const extensionPath = path.join(repoRoot, "dist", "extension");
 const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
 const demoPassword = "wdyt-demo-2026!";
+const demoConcurrency = Math.max(1, Math.min(Number.parseInt(process.env.DEMO_CONCURRENCY ?? "10", 10) || 10, 10));
 
 async function startRun(testName) {
   const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
@@ -91,7 +92,7 @@ async function withBoundDriver(driver, testName, testFn) {
   }
 }
 
-async function main() {
+function buildChromeOptions() {
   const options = new chrome.Options();
   options.setBrowserName("chrome");
   options.setChromeBinaryPath(process.env.CHROMIUM_BINARY ?? "/Applications/Chromium.app/Contents/MacOS/Chromium");
@@ -100,41 +101,57 @@ async function main() {
   if (headless) {
     options.addArguments("--headless=new");
   }
+  return options;
+}
 
-  const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
+async function createDriver() {
+  return new Builder().forBrowser("chrome").setChromeOptions(buildChromeOptions()).build();
+}
 
-  try {
-    await withBoundDriver(driver, "login-success-dashboard", async () => {
+const demoTests = [
+  {
+    name: "login-success-dashboard",
+    run: async (driver) => {
       await login(driver);
       await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
-    });
-
-    await withBoundDriver(driver, "login-redirect-dashboard", async () => {
+    },
+  },
+  {
+    name: "login-redirect-dashboard",
+    run: async (driver) => {
       await logout(driver);
       await driver.get(`${demoBaseUrl}/dashboard`);
       await driver.wait(until.urlIs(`${demoBaseUrl}/login`), 15_000);
       await submitCredentials(driver);
       await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
-    });
-
-    await withBoundDriver(driver, "dashboard-link-after-login", async () => {
+    },
+  },
+  {
+    name: "dashboard-link-after-login",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Dashboard")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/dashboard`), 15_000);
-    });
-
-    await withBoundDriver(driver, "login-success-reports", async () => {
+    },
+  },
+  {
+    name: "login-success-reports",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Open reports")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/reports`), 15_000);
-    });
-
-    await withBoundDriver(driver, "login-invalid", async () => {
+    },
+  },
+  {
+    name: "login-invalid",
+    run: async (driver) => {
       await login(driver, "demo", "wrong-password");
       await driver.wait(until.elementLocated(By.css('[role="alert"]')), 15_000);
-    });
-
-    await withBoundDriver(driver, "search-empty", async () => {
+    },
+  },
+  {
+    name: "search-empty",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Open search")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
@@ -143,9 +160,11 @@ async function main() {
       await searchInput.sendKeys("empty");
       await driver.findElement(By.css('button[type="submit"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search/empty?q=empty`), 15_000);
-    });
-
-    await withBoundDriver(driver, "search-results", async () => {
+    },
+  },
+  {
+    name: "search-results",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Open search")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
@@ -154,9 +173,11 @@ async function main() {
       await searchInput.sendKeys("wdyt");
       await driver.findElement(By.css('button[type="submit"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=wdyt`), 15_000);
-    });
-
-    await withBoundDriver(driver, "search-results-repeat", async () => {
+    },
+  },
+  {
+    name: "search-results-repeat",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Open search")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search`), 15_000);
@@ -172,15 +193,19 @@ async function main() {
       await repeatedSearchInput.sendKeys("demo");
       await driver.findElement(By.css('button[type="submit"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/search/results?q=demo`), 15_000);
-    });
-
-    await withBoundDriver(driver, "login-success-settings", async () => {
+    },
+  },
+  {
+    name: "login-success-settings",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Open settings")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/settings`), 15_000);
-    });
-
-    await withBoundDriver(driver, "workspace-tabs", async () => {
+    },
+  },
+  {
+    name: "workspace-tabs",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Workspace")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace`), 15_000);
@@ -188,16 +213,46 @@ async function main() {
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace/activity`), 15_000);
       await driver.findElement(By.css('button[data-route="/workspace/details"]')).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/workspace/details`), 15_000);
-    });
-
-    await withBoundDriver(driver, "logout-after-login", async () => {
+    },
+  },
+  {
+    name: "logout-after-login",
+    run: async (driver) => {
       await login(driver);
       await driver.findElement(By.linkText("Sign out")).click();
       await driver.wait(until.urlIs(`${demoBaseUrl}/login`), 15_000);
-    });
+    },
+  },
+];
+
+async function runDemoTestsWorker(workerId, queue) {
+  const driver = await createDriver();
+
+  try {
+    while (true) {
+      const next = queue.shift();
+      if (!next) {
+        return;
+      }
+
+      console.log(`[demo-suite] worker=${workerId} test=${next.name}`);
+      await withBoundDriver(driver, next.name, async () => {
+        await next.run(driver);
+      });
+    }
   } finally {
     await driver.quit();
   }
+}
+
+async function main() {
+  const queue = [...demoTests];
+  const concurrency = Math.min(demoConcurrency, queue.length);
+  console.log(`[demo-suite] starting concurrency=${concurrency} tests=${queue.length}`);
+
+  await Promise.all(
+    Array.from({ length: concurrency }, (_, index) => runDemoTestsWorker(index + 1, queue))
+  );
 }
 
 main().catch((error) => {

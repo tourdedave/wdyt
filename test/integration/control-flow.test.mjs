@@ -221,6 +221,8 @@ async function runCli(workdir, args, stdinText = "", env = {}) {
 }
 
 async function startMockLlmServer(port, options = {}) {
+  const evidenceResponseContent = options.evidenceResponseContent ?? { items: [] };
+  const conceptResponseContent = options.conceptResponseContent ?? { concepts: [] };
   const roleResponseContent = options.roleResponseContent ?? {
     termRoles: [
       { term: "search", role: "primary" },
@@ -247,7 +249,11 @@ async function startMockLlmServer(port, options = {}) {
         onRequest(parsedBody);
         const systemPrompt = String(parsedBody?.messages?.[0]?.content ?? "");
         const nextContent = responseSequence.shift() ?? (
-          systemPrompt.includes("assign each provided flow term one role")
+          systemPrompt.includes("label each provided evidence item with one bucket")
+            ? evidenceResponseContent
+            : systemPrompt.includes("group classified evidence items into reusable semantic concepts")
+              ? conceptResponseContent
+              : systemPrompt.includes("assign each provided flow term one role")
             ? roleResponseContent
             : responseContent
         );
@@ -681,6 +687,35 @@ test("concept canonicalization collapses auth aliases before role scoring", asyn
   assert.deepEqual(canonicalizeSemanticTerms(["success", "login"], []), ["login"]);
 });
 
+test("structured evidence compacts incremental input targets into semantic input items", async () => {
+  const { collectStructuredEvidenceItems } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
+
+  const items = collectStructuredEvidenceItems({
+    setupUrls: ["http://127.0.0.1:4010/login"],
+    actionTargets: [
+      'form("Username Password Sign in")',
+      'form("Search query Search")',
+      'button("Sign in")',
+      'input("d")',
+      'input("de")',
+      'input("demo")',
+      'input("w")',
+      'input("wdyt")',
+    ],
+    finalUrls: ["http://127.0.0.1:4010/dashboard"],
+    titles: ["Dashboard"],
+    headings: ["Dashboard"],
+    alerts: [],
+  });
+
+  const actionValues = items.filter((item) => item.kind === "target").map((item) => item.value);
+  assert.ok(actionValues.includes('input("credentials")'));
+  assert.ok(actionValues.includes('input("search query")'));
+  assert.ok(!actionValues.includes('input("d")'));
+  assert.ok(!actionValues.includes('input("demo")'));
+  assert.ok(!actionValues.includes('input("wdyt")'));
+});
+
 test("concept resolver groups extracted terms into resolved concepts with evidence", async () => {
   const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
   const { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } = await import(path.join(repoRoot, "dist", "shared", "concept-resolver.js"));
@@ -716,6 +751,137 @@ test("concept resolver groups extracted terms into resolved concepts with eviden
     primaryTerms: ["logout", "workspace details"],
   });
   assert.ok(evidence.rationale.some((line) => line.includes("logout: primary")));
+});
+
+test("llm concept resolution consolidates decorated variants into canonical concepts", async () => {
+  const { normalizeConceptResolution } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
+  const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+
+  const evidenceItems = [
+    { id: "a1", kind: "target", value: 'button("Sign in")', inferredBucket: "action", bucket: "action", confidence: 0.9 },
+    { id: "s1", kind: "url", value: "http://127.0.0.1:4010/login", inferredBucket: "setup", bucket: "setup", confidence: 0.9 },
+    { id: "e1", kind: "url", value: "http://127.0.0.1:4010/dashboard", inferredBucket: "end-state", bucket: "end-state", confidence: 0.9 },
+  ];
+  const semanticIndex = createInMemorySemanticIndex([
+    { term: "login", source: "historical", normalized: "login", tokens: new Set(["login"]) },
+    { term: "dashboard", source: "historical", normalized: "dashboard", tokens: new Set(["dashboard"]) },
+  ]);
+
+  const resolved = normalizeConceptResolution({
+    value: {
+      concepts: [
+        { term: "user login", itemIds: ["a1", "s1"], confidence: 0.9 },
+        { term: "login page", itemIds: ["s1"], confidence: 0.9 },
+        { term: "dashboard page", itemIds: ["e1"], confidence: 0.9 },
+      ],
+    },
+    evidenceItems,
+    fallbackCandidates: [],
+    semanticIndex,
+    vocabulary: [],
+  });
+
+  assert.ok(resolved.some((concept) => concept.term === "login"));
+  assert.ok(resolved.some((concept) => concept.term === "dashboard"));
+  assert.equal(resolved.filter((concept) => concept.term === "login").length, 1);
+  assert.equal(resolved.filter((concept) => concept.term === "dashboard").length, 1);
+});
+
+test("concept filtering suppresses low-value operational concepts when stronger concepts exist", async () => {
+  const { filterResolvedConcepts } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
+
+  const filtered = filterResolvedConcepts([
+    { term: "credential input", rawTerms: ["input credentials"], sources: ["action"], confidence: 0.8, strategy: "llm-resolved", neighbors: [] },
+    { term: "search link", rawTerms: ["a back to search"], sources: ["action"], confidence: 0.8, strategy: "llm-resolved", neighbors: [] },
+    { term: "login", rawTerms: ["sign in"], sources: ["action", "setup"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+    { term: "search", rawTerms: ["open search"], sources: ["action"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+    { term: "search results", rawTerms: ["search results"], sources: ["end-state"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+  ]);
+
+  assert.deepEqual(filtered.map((concept) => concept.term).sort(), ["login", "search", "search results"]);
+});
+
+test("role rebalance demotes auth primary when stronger downstream concepts exist", async () => {
+  const { rebalanceClassifiedRoles } = await import(path.join(repoRoot, "dist", "shared", "role-rebalance.js"));
+
+  const rebalanced = rebalanceClassifiedRoles(
+    {
+      prerequisiteTerms: ["dashboard"],
+      primaryTerms: ["login"],
+      outcomeTerms: ["settings"],
+      uncertainTerms: [],
+    },
+    [
+      { term: "dashboard", rawTerms: ["dashboard"], sources: ["setup"], confidence: 0.9, strategy: "llm-resolved", neighbors: [] },
+      { term: "login", rawTerms: ["login"], sources: ["action", "setup"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+      { term: "settings", rawTerms: ["settings"], sources: ["action", "end-state"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+    ]
+  );
+
+  assert.deepEqual(rebalanced.primaryTerms, ["settings"]);
+  assert.deepEqual(rebalanced.prerequisiteTerms, ["login"]);
+  assert.deepEqual(rebalanced.outcomeTerms, []);
+});
+
+test("role rebalance keeps auth-only flows auth-led and compacts prerequisites", async () => {
+  const { rebalanceClassifiedRoles } = await import(path.join(repoRoot, "dist", "shared", "role-rebalance.js"));
+
+  const loginSuccess = rebalanceClassifiedRoles(
+    {
+      prerequisiteTerms: ["login"],
+      primaryTerms: ["dashboard"],
+      outcomeTerms: [],
+      uncertainTerms: [],
+    },
+    [
+      { term: "login", rawTerms: ["login"], sources: ["action", "setup"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+      { term: "dashboard", rawTerms: ["dashboard"], sources: ["end-state"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+    ]
+  );
+
+  assert.deepEqual(loginSuccess.primaryTerms, ["login"]);
+  assert.deepEqual(loginSuccess.outcomeTerms, ["dashboard"]);
+  assert.deepEqual(loginSuccess.prerequisiteTerms, []);
+
+  const logoutFlow = rebalanceClassifiedRoles(
+    {
+      prerequisiteTerms: ["dashboard", "login"],
+      primaryTerms: ["credential input", "logout"],
+      outcomeTerms: [],
+      uncertainTerms: [],
+    },
+    [
+      { term: "credential input", rawTerms: ["input credentials"], sources: ["action"], confidence: 0.8, strategy: "llm-resolved", neighbors: [] },
+      { term: "dashboard", rawTerms: ["dashboard"], sources: ["setup"], confidence: 0.9, strategy: "llm-resolved", neighbors: [] },
+      { term: "login", rawTerms: ["login"], sources: ["action", "end-state"], confidence: 0.9, strategy: "llm-resolved", neighbors: [] },
+      { term: "logout", rawTerms: ["sign out"], sources: ["action"], confidence: 0.95, strategy: "llm-resolved", neighbors: [] },
+    ]
+  );
+
+  assert.deepEqual(logoutFlow.primaryTerms, ["logout"]);
+  assert.deepEqual(logoutFlow.prerequisiteTerms, ["dashboard"]);
+});
+
+test("role rebalance preserves no results as a distinct outcome concept", async () => {
+  const { normalizeConceptResolution } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
+  const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
+
+  const resolved = normalizeConceptResolution({
+    value: {
+      concepts: [
+        { term: "search results", itemIds: ["e1", "e2"], confidence: 0.95 },
+      ],
+    },
+    evidenceItems: [
+      { id: "e1", kind: "title", value: "No Results", inferredBucket: "end-state", bucket: "end-state", confidence: 0.95 },
+      { id: "e2", kind: "heading", value: "No Results", inferredBucket: "end-state", bucket: "end-state", confidence: 0.95 },
+    ],
+    fallbackCandidates: [],
+    semanticIndex: createInMemorySemanticIndex([]),
+    vocabulary: [],
+  });
+
+  assert.deepEqual(resolved.map((concept) => concept.term), ["no results"]);
 });
 
 test("competitive role scoring prefers end-state and action terms over setup context", async () => {
@@ -1143,14 +1309,25 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     );
 
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+    const evidenceRequest = capturedRequests.find((request) =>
+      String(request?.messages?.[0]?.content ?? "").includes("label each provided evidence item with one bucket")
+    );
+    const conceptRequest = capturedRequests.find((request) =>
+      String(request?.messages?.[0]?.content ?? "").includes("group classified evidence items into reusable semantic concepts")
+    );
     const roleRequest = capturedRequests.find((request) =>
       String(request?.messages?.[1]?.content ?? "").includes('"semanticNeighbors"')
     );
     const descriptorRequest = capturedRequests.find((request) =>
-      String(request?.messages?.[1]?.content ?? "").includes('"registryMatches"')
+      String(request?.messages?.[0]?.content ?? "").includes("Step 1 — Extract signals")
     );
 
+    assert.ok(evidenceRequest);
+    assert.match(evidenceRequest.messages[1].content, /"evidenceItems": \[/);
+    assert.ok(conceptRequest);
+    assert.match(conceptRequest.messages[1].content, /"candidateConceptHints": \[/);
     assert.ok(roleRequest);
+    assert.match(roleRequest.messages[1].content, /"evidenceItems": \[/);
     assert.match(roleRequest.messages[1].content, /"setupTerms": \[/);
     assert.match(roleRequest.messages[1].content, /"actionTerms": \[/);
     assert.match(roleRequest.messages[1].content, /"endStateTerms": \[/);
@@ -1262,10 +1439,10 @@ test("review caps confidence for literal typed values even when descriptor is me
     const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
 
     const descriptorRequest = requests.find((request) =>
-      String(request?.messages?.[0]?.content ?? "").includes("Else propose new terms (only if needed)")
+      String(request?.messages?.[0]?.content ?? "").includes("Step 1 — Extract signals")
     );
 
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 4);
     assert.ok(descriptorRequest);
     assert.match(descriptorRequest.messages[0].content, /Else propose new terms \(only if needed\)/);
     assert.match(descriptorRequest.messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
@@ -1645,6 +1822,8 @@ test("review module materializes review units, proposes descriptors, and saves r
     assert.deepEqual(proposedUnit.activeVocab, ["search"]);
     assert.deepEqual(proposedUnit.primaryTerms, ["search"]);
     assert.deepEqual(proposedUnit.prerequisiteTerms, ["login"]);
+    assert.ok(Array.isArray(proposedUnit.evidenceItems));
+    assert.ok((proposedUnit.evidenceItems?.length ?? 0) > 0);
     assert.ok(Array.isArray(proposedUnit.conceptResolutions));
     assert.ok(proposedUnit.conceptResolutions.some((concept) => concept.term === "search"));
     assert.ok(Array.isArray(proposedUnit.roleEvidence?.rationale));

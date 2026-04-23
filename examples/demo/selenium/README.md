@@ -35,3 +35,9 @@ Optional headless mode:
 ```bash
 HEADLESS=1 npm test
 ```
+
+Optional bounded parallelism:
+
+```bash
+DEMO_CONCURRENCY=10 npm test
+```

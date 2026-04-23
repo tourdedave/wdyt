@@ -17,6 +17,7 @@ import {
 import type {
   DescriptorStatus,
   FlowReviewRecord,
+  FlowEvidenceItem,
   FlowTermCandidate,
   FlowRoleEvidence,
   FlowTermRole,
@@ -31,6 +32,15 @@ import type {
 import { collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
 import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
 import { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } from "../shared/concept-resolver.js";
+import { rebalanceClassifiedRoles } from "../shared/role-rebalance.js";
+import {
+  buildEvidenceCandidates,
+  collectStructuredEvidenceItems,
+  filterResolvedConcepts,
+  normalizeConceptResolution,
+  normalizeEvidenceClassification,
+  partitionEvidenceItems,
+} from "../shared/semantic-stages.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -42,6 +52,8 @@ import { scoreProposalConfidence, validateProposal } from "../shared/proposal-va
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
 const reviewTermRolePromptPath = path.join(__dirname, "../prompts/review-term-role-system-prompt.txt");
+const reviewEvidenceClassificationPromptPath = path.join(__dirname, "../prompts/review-evidence-classification-system-prompt.txt");
+const reviewConceptResolutionPromptPath = path.join(__dirname, "../prompts/review-concept-resolution-system-prompt.txt");
 const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
 const DEFAULT_LLM_API_KEY = "ollama";
 const DEFAULT_LLM_MODEL = "mistral:instruct";
@@ -637,6 +649,8 @@ async function proposeDescriptor(
 
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const roleSystemPrompt = await readFile(reviewTermRolePromptPath, "utf8");
+  const evidenceClassificationSystemPrompt = await readFile(reviewEvidenceClassificationPromptPath, "utf8");
+  const conceptResolutionSystemPrompt = await readFile(reviewConceptResolutionPromptPath, "utf8");
   const approvedVocabulary = getApprovedVocabulary(vocabulary.values())
     .map((entry) => ({
       term: entry.term,
@@ -663,29 +677,67 @@ async function proposeDescriptor(
       ...[...flow.headings].sort(),
       ...[...flow.alerts].sort(),
       ...[...flow.targets].sort(),
-      ...[...flow.tests].sort(),
     ],
     stats,
     vocabulary.values(),
     registryMatches
   );
-  const sourceCandidates = dedupeFlowTermCandidates(
-    inferSourceAwareTermCandidates(
-      {
-        setupValues: [...[...flow.urls].filter((value) => !flow.finalUrls.has(value)).sort()],
-        actionValues: [...[...flow.targets].sort()],
-        endStateValues: [...[...flow.finalUrls].sort(), ...[...flow.titles].sort(), ...[...flow.headings].sort(), ...[...flow.alerts].sort()],
-        registryTerms: registryMatches,
-      },
-      stats,
-      vocabulary.values()
-    )
+  const rawEvidenceItems = collectStructuredEvidenceItems({
+    setupUrls: [...[...flow.urls].filter((value) => !flow.finalUrls.has(value)).sort()],
+    actionTargets: [...[...flow.targets].sort()],
+    finalUrls: [...[...flow.finalUrls].sort()],
+    titles: [...[...flow.titles].sort()],
+    headings: [...[...flow.headings].sort()],
+    alerts: [...[...flow.alerts].sort()],
+  });
+  const classifiedEvidenceItems = normalizeEvidenceClassification(
+    await requestJsonCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      systemPrompt: evidenceClassificationSystemPrompt,
+      userPrompt: JSON.stringify(
+        {
+          reviewId: flow.reviewId,
+          flowId: flow.flowId,
+          canonical: flow.canonical,
+          evidenceItems: rawEvidenceItems,
+        },
+        null,
+        2
+      ),
+    }),
+    rawEvidenceItems
   );
-  const resolvedConcepts = resolveFlowConcepts({
-    candidates: sourceCandidates,
+  const fallbackSourceCandidates = buildEvidenceCandidates(classifiedEvidenceItems, registryMatches, stats, vocabulary.values());
+  const classifiedEvidenceBuckets = partitionEvidenceItems(classifiedEvidenceItems);
+  const resolvedConcepts = filterResolvedConcepts(normalizeConceptResolution({
+    value: await requestJsonCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      systemPrompt: conceptResolutionSystemPrompt,
+      userPrompt: JSON.stringify(
+        {
+          reviewId: flow.reviewId,
+          flowId: flow.flowId,
+          canonical: flow.canonical,
+          evidenceItems: classifiedEvidenceItems,
+          registryMatches,
+          candidateConceptHints: [...new Set(fallbackSourceCandidates.map((candidate) => candidate.term))].sort((a, b) =>
+            a.localeCompare(b)
+          ),
+          approvedVocabularyRegistry: approvedVocabulary,
+        },
+        null,
+        2
+      ),
+    }),
+    evidenceItems: classifiedEvidenceItems,
+    fallbackCandidates: fallbackSourceCandidates,
     semanticIndex,
     vocabulary: vocabulary.values(),
-  });
+  }));
   const resolvedCandidates = dedupeFlowTermCandidates(resolvedConceptsToCandidates(resolvedConcepts));
   const flowTerms = [...new Set([...inferredFlowTerms, ...resolvedConcepts.map((concept) => concept.term)])].sort((a, b) =>
     a.localeCompare(b)
@@ -695,20 +747,19 @@ async function proposeDescriptor(
   const semanticNeighbors = Object.fromEntries(
     resolvedConcepts.map((concept) => [concept.term, concept.neighbors])
   );
-  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
-    concepts: resolvedConcepts,
-    prerequisiteTerms: roleHints.prerequisiteTerms,
-    primaryTerms: roleHints.primaryTerms,
-  });
   const roleEvidence = {
     reviewId: flow.reviewId,
     flowId: flow.flowId,
     canonical: flow.canonical,
+    evidenceItems: classifiedEvidenceItems,
     flowTerms,
     setupTerms: evidenceBuckets.setupTerms,
     actionTerms: evidenceBuckets.actionTerms,
     endStateTerms: evidenceBuckets.endStateTerms,
     registryTerms: evidenceBuckets.registryTerms,
+    setupEvidence: classifiedEvidenceBuckets.setupValues,
+    actionEvidence: classifiedEvidenceBuckets.actionValues,
+    endStateEvidence: classifiedEvidenceBuckets.endStateValues,
     semanticNeighbors,
     resolvedConcepts,
     heuristicPrerequisiteTerms: roleHints.prerequisiteTerms,
@@ -721,7 +772,8 @@ async function proposeDescriptor(
     alerts: summarizeSamples([...flow.alerts].sort(), 5),
     targets: summarizeSamples([...flow.targets].sort(), 5),
   };
-  const classifiedTerms = normalizeFlowTermRoleClassification(
+  const classifiedTerms = rebalanceClassifiedRoles(
+    normalizeFlowTermRoleClassification(
     await requestJsonCompletion({
       baseUrl,
       apiKey,
@@ -730,7 +782,14 @@ async function proposeDescriptor(
       userPrompt: JSON.stringify(roleEvidence, null, 2),
     }),
     roleHints
+    ),
+    resolvedConcepts
   );
+  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
+    concepts: resolvedConcepts,
+    prerequisiteTerms: classifiedTerms.prerequisiteTerms,
+    primaryTerms: classifiedTerms.primaryTerms,
+  });
   const descriptorFocusTerms =
     classifiedTerms.primaryTerms.length > 0
       ? [...classifiedTerms.primaryTerms, ...classifiedTerms.outcomeTerms].sort((a, b) => a.localeCompare(b))

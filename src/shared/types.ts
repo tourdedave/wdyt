@@ -152,6 +152,7 @@ export type ReviewUnitRecord = {
   primaryTerms?: string[];
   outcomeTerms?: string[];
   uncertainTerms?: string[];
+  evidenceItems?: FlowEvidenceItem[];
   conceptResolutions?: ResolvedFlowConcept[];
   roleEvidence?: FlowRoleEvidence;
   overlapTerms?: string[];
@@ -186,6 +187,20 @@ export type FlowTermRoleClassification = {
 
 export type FlowTermSource = "setup" | "action" | "end-state" | "registry" | "historical";
 
+export type FlowEvidenceBucket = "setup" | "action" | "end-state" | "noise";
+
+export type FlowEvidenceKind = "url" | "target" | "title" | "heading" | "alert";
+
+export type FlowEvidenceItem = {
+  id: string;
+  kind: FlowEvidenceKind;
+  value: string;
+  inferredBucket: Exclude<FlowEvidenceBucket, "noise">;
+  bucket: FlowEvidenceBucket;
+  confidence: number;
+  rationale?: string;
+};
+
 export type FlowTermCandidate = {
   term: string;
   source: FlowTermSource;
@@ -196,8 +211,9 @@ export type ResolvedFlowConcept = {
   rawTerms: string[];
   sources: FlowTermSource[];
   confidence: number;
-  strategy: "builtin" | "semantic-neighbor" | "literal";
+  strategy: "builtin" | "semantic-neighbor" | "literal" | "llm-resolved";
   neighbors: SemanticNeighbor[];
+  supportingItemIds?: string[];
 };
 
 export type FlowRoleEvidence = {

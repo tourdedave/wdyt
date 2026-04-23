@@ -13,6 +13,7 @@ import {
   writeJsonFile,
 } from "../shared/fs.js";
 import type {
+  FlowEvidenceItem,
   FlowTermCandidate,
   FlowDescriptorProposal,
   FlowRoleEvidence,
@@ -30,6 +31,15 @@ import type {
 import { analyzePrerequisites, collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
 import { buildSemanticIndex, dedupeFlowTermCandidates } from "../shared/semantic-index.js";
 import { resolveFlowConcepts, resolvedConceptsToCandidates, summarizeRoleEvidence } from "../shared/concept-resolver.js";
+import { rebalanceClassifiedRoles } from "../shared/role-rebalance.js";
+import {
+  buildEvidenceCandidates,
+  collectStructuredEvidenceItems,
+  filterResolvedConcepts,
+  normalizeConceptResolution,
+  normalizeEvidenceClassification,
+  partitionEvidenceItems,
+} from "../shared/semantic-stages.js";
 import {
   findApprovedVocabularyMatches,
   getApprovedVocabulary,
@@ -43,6 +53,8 @@ import { DEFAULT_LLM_API_KEY, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, requestJs
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
 const reviewTermRolePromptPath = path.join(__dirname, "../prompts/review-term-role-system-prompt.txt");
+const reviewEvidenceClassificationPromptPath = path.join(__dirname, "../prompts/review-evidence-classification-system-prompt.txt");
+const reviewConceptResolutionPromptPath = path.join(__dirname, "../prompts/review-concept-resolution-system-prompt.txt");
 
 let processingQueue = false;
 
@@ -257,6 +269,7 @@ function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyE
     primaryTerms: Array.isArray(unit.primaryTerms) ? unit.primaryTerms : [],
     outcomeTerms: Array.isArray(unit.outcomeTerms) ? unit.outcomeTerms : [],
     uncertainTerms: Array.isArray(unit.uncertainTerms) ? unit.uncertainTerms : [],
+    evidenceItems: Array.isArray(unit.evidenceItems) ? unit.evidenceItems : [],
     conceptResolutions: Array.isArray(unit.conceptResolutions) ? unit.conceptResolutions : [],
     roleEvidence: unit.roleEvidence,
     overlapTerms: normalizeOverlapTerms(activeVocab, vocabulary),
@@ -465,6 +478,7 @@ export async function buildReviewUnits() {
         primaryTerms: previous?.primaryTerms ?? [],
         outcomeTerms: previous?.outcomeTerms ?? [],
         uncertainTerms: previous?.uncertainTerms ?? [],
+        evidenceItems: previous?.evidenceItems ?? [],
         conceptResolutions: previous?.conceptResolutions ?? [],
         roleEvidence: previous?.roleEvidence,
         interpretationStatus: previous?.interpretationStatus,
@@ -492,6 +506,8 @@ async function proposeDescriptor(
   const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const roleSystemPrompt = await readFile(reviewTermRolePromptPath, "utf8");
+  const evidenceClassificationSystemPrompt = await readFile(reviewEvidenceClassificationPromptPath, "utf8");
+  const conceptResolutionSystemPrompt = await readFile(reviewConceptResolutionPromptPath, "utf8");
   const approvedVocabulary = getApprovedVocabulary(vocabulary)
     .map((entry) => ({
       term: entry.term,
@@ -518,29 +534,67 @@ async function proposeDescriptor(
       ...unit.headings,
       ...unit.alerts,
       ...unit.targets,
-      ...unit.tests,
     ],
     stats,
     vocabulary,
     [...registryMatches, ...(unit.activeVocab ?? []), ...(unit.proposedVocab ?? [])]
   );
-  const sourceCandidates = dedupeFlowTermCandidates(
-    inferSourceAwareTermCandidates(
-      {
-        setupValues: [...unit.urls.filter((value) => !unit.finalUrls.includes(value))],
-        actionValues: [...unit.targets],
-        endStateValues: [...unit.finalUrls, ...unit.titles, ...unit.headings, ...unit.alerts],
-        registryTerms: registryMatches,
-      },
-      stats,
-      vocabulary
-    )
+  const rawEvidenceItems = collectStructuredEvidenceItems({
+    setupUrls: [...unit.urls.filter((value) => !unit.finalUrls.includes(value))],
+    actionTargets: [...unit.targets],
+    finalUrls: [...unit.finalUrls],
+    titles: [...unit.titles],
+    headings: [...unit.headings],
+    alerts: [...unit.alerts],
+  });
+  const classifiedEvidenceItems = normalizeEvidenceClassification(
+    await requestJsonCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      systemPrompt: evidenceClassificationSystemPrompt,
+      userPrompt: JSON.stringify(
+        {
+          reviewId: unit.reviewId,
+          flowId: unit.flowId,
+          canonical: unit.canonical,
+          evidenceItems: rawEvidenceItems,
+        },
+        null,
+        2
+      ),
+    }),
+    rawEvidenceItems
   );
-  const resolvedConcepts = resolveFlowConcepts({
-    candidates: sourceCandidates,
+  const fallbackSourceCandidates = buildEvidenceCandidates(classifiedEvidenceItems, registryMatches, stats, vocabulary);
+  const classifiedEvidenceBuckets = partitionEvidenceItems(classifiedEvidenceItems);
+  const resolvedConcepts = filterResolvedConcepts(normalizeConceptResolution({
+    value: await requestJsonCompletion({
+      baseUrl,
+      apiKey,
+      model,
+      systemPrompt: conceptResolutionSystemPrompt,
+      userPrompt: JSON.stringify(
+        {
+          reviewId: unit.reviewId,
+          flowId: unit.flowId,
+          canonical: unit.canonical,
+          evidenceItems: classifiedEvidenceItems,
+          registryMatches,
+          candidateConceptHints: [...new Set(fallbackSourceCandidates.map((candidate) => candidate.term))].sort((a, b) =>
+            a.localeCompare(b)
+          ),
+          approvedVocabularyRegistry: approvedVocabulary,
+        },
+        null,
+        2
+      ),
+    }),
+    evidenceItems: classifiedEvidenceItems,
+    fallbackCandidates: fallbackSourceCandidates,
     semanticIndex,
     vocabulary,
-  });
+  }));
   const resolvedCandidates = dedupeFlowTermCandidates(resolvedConceptsToCandidates(resolvedConcepts));
   const flowTerms = [...new Set([...inferredFlowTerms, ...resolvedConcepts.map((concept) => concept.term)])].sort((a, b) =>
     a.localeCompare(b)
@@ -550,20 +604,19 @@ async function proposeDescriptor(
   const semanticNeighbors = Object.fromEntries(
     resolvedConcepts.map((concept) => [concept.term, concept.neighbors])
   );
-  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
-    concepts: resolvedConcepts,
-    prerequisiteTerms: roleHints.prerequisiteTerms,
-    primaryTerms: roleHints.primaryTerms,
-  });
   const roleEvidence = {
     reviewId: unit.reviewId,
     flowId: unit.flowId,
     canonical: unit.canonical,
+    evidenceItems: classifiedEvidenceItems,
     flowTerms,
     setupTerms: evidenceBuckets.setupTerms,
     actionTerms: evidenceBuckets.actionTerms,
     endStateTerms: evidenceBuckets.endStateTerms,
     registryTerms: evidenceBuckets.registryTerms,
+    setupEvidence: classifiedEvidenceBuckets.setupValues,
+    actionEvidence: classifiedEvidenceBuckets.actionValues,
+    endStateEvidence: classifiedEvidenceBuckets.endStateValues,
     semanticNeighbors,
     resolvedConcepts,
     heuristicPrerequisiteTerms: roleHints.prerequisiteTerms,
@@ -577,7 +630,8 @@ async function proposeDescriptor(
     targets: unit.targets.slice(0, 5),
   };
 
-  const classifiedTerms = normalizeFlowTermRoleClassification(
+  const classifiedTerms = rebalanceClassifiedRoles(
+    normalizeFlowTermRoleClassification(
     await requestJsonCompletion({
       baseUrl,
       apiKey,
@@ -586,7 +640,14 @@ async function proposeDescriptor(
       userPrompt: JSON.stringify(roleEvidence, null, 2),
     }),
     roleHints
+    ),
+    resolvedConcepts
   );
+  const roleEvidenceSummary: FlowRoleEvidence = summarizeRoleEvidence({
+    concepts: resolvedConcepts,
+    prerequisiteTerms: classifiedTerms.prerequisiteTerms,
+    primaryTerms: classifiedTerms.primaryTerms,
+  });
   const descriptorFocusTerms =
     classifiedTerms.primaryTerms.length > 0
       ? [...classifiedTerms.primaryTerms, ...classifiedTerms.outcomeTerms].sort((a, b) => a.localeCompare(b))
@@ -652,9 +713,82 @@ async function proposeDescriptor(
     primaryTerms: classifiedTerms.primaryTerms,
     outcomeTerms: classifiedTerms.outcomeTerms,
     uncertainTerms: classifiedTerms.uncertainTerms,
+    evidenceItems: classifiedEvidenceItems,
     conceptResolutions: resolvedConcepts,
     roleEvidence: roleEvidenceSummary,
   };
+}
+
+function getProposalWorkerConcurrency() {
+  const parsed = Number.parseInt(process.env.WDYT_REVIEW_CONCURRENCY ?? "10", 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return 10;
+  }
+
+  return Math.min(parsed, 16);
+}
+
+async function processProposalUnit(
+  unit: ReviewUnitRecord,
+  vocabulary: VocabularyEntry[],
+  stats: Map<string, VocabStats>,
+  semanticIndex: ReturnType<typeof buildSemanticIndex>
+) {
+  console.log(`[WDYT] proposing descriptor reviewId=${unit.reviewId}`);
+  const processingReviewId = unit.reviewId;
+  const markedUnit = await patchReviewUnit(processingReviewId, (current) => ({
+    ...current,
+    proposalState: "processing",
+    proposalError: undefined,
+    updatedAt: Date.now(),
+  }));
+
+  if (!markedUnit) {
+    console.warn(`[WDYT] proposal skipped missing reviewId=${processingReviewId}`);
+    return;
+  }
+
+  try {
+    const proposal = await proposeDescriptor(unit, vocabulary, stats, semanticIndex);
+    const proposedAt = Date.now();
+    const updatedUnit = await patchReviewUnit(processingReviewId, (current) => ({
+      ...current,
+      proposalState: "proposed",
+      proposedDescriptor: proposal.proposedDescriptor,
+      proposedConfidence: proposal.proposedConfidence,
+      proposedRationale: proposal.proposedRationale,
+      approvedVocabUsed: proposal.approvedVocabUsed,
+      proposedVocab: proposal.proposedVocab,
+      prerequisiteTerms: proposal.prerequisiteTerms,
+      primaryTerms: proposal.primaryTerms,
+      outcomeTerms: proposal.outcomeTerms,
+      uncertainTerms: proposal.uncertainTerms,
+      evidenceItems: proposal.evidenceItems,
+      conceptResolutions: proposal.conceptResolutions,
+      roleEvidence: proposal.roleEvidence,
+      activeDescriptor: proposal.proposedDescriptor,
+      activeVocab: [...new Set([...proposal.approvedVocabUsed, ...proposal.proposedVocab])].sort((a, b) =>
+        a.localeCompare(b)
+      ),
+      interpretationStatus: current.reprocessRequestedAt ? "reprocessed" : "auto-generated",
+      proposalError: undefined,
+      proposedAt,
+      updatedAt: proposedAt,
+      reprocessRequestedAt: undefined,
+    }));
+    console.log(
+      `[WDYT] proposal ready reviewId=${processingReviewId} descriptor=${JSON.stringify(updatedUnit?.proposedDescriptor ?? proposal.proposedDescriptor)}`
+    );
+  } catch (error) {
+    const proposalError = error instanceof Error ? error.message : "Unknown proposal error";
+    await patchReviewUnit(processingReviewId, (current) => ({
+      ...current,
+      proposalState: "error",
+      proposalError,
+      updatedAt: Date.now(),
+    }));
+    console.warn(`[WDYT] proposal failed reviewId=${processingReviewId}`, proposalError);
+  }
 }
 
 export async function queueProposalProcessing() {
@@ -672,67 +806,30 @@ export async function queueProposalProcessing() {
       const vocabulary = await loadVocabulary();
       const stats = buildGlobalVocabStats(reviewUnits, vocabulary);
       const semanticIndex = buildSemanticIndex(reviewUnits, vocabulary, stats);
-      const nextUnit = reviewUnits.find((unit) => unit.proposalState === "pending" || unit.proposalState === "error");
+      const pendingUnits = reviewUnits.filter((unit) => unit.proposalState === "pending" || unit.proposalState === "error");
 
-      if (!nextUnit) {
+      if (pendingUnits.length === 0) {
         console.log("[WDYT] proposal worker idle");
         break;
       }
 
-      console.log(`[WDYT] proposing descriptor reviewId=${nextUnit.reviewId}`);
-      const processingReviewId = nextUnit.reviewId;
-      const markedUnit = await patchReviewUnit(processingReviewId, (unit) => ({
-        ...unit,
-        proposalState: "processing",
-        proposalError: undefined,
-        updatedAt: Date.now(),
-      }));
+      const concurrency = Math.min(getProposalWorkerConcurrency(), pendingUnits.length);
+      console.log(`[WDYT] proposal worker batch count=${pendingUnits.length} concurrency=${concurrency}`);
 
-      if (!markedUnit) {
-        console.warn(`[WDYT] proposal skipped missing reviewId=${processingReviewId}`);
-        continue;
-      }
+      let nextIndex = 0;
+      const workers = Array.from({ length: concurrency }, async () => {
+        while (true) {
+          const unit = pendingUnits[nextIndex];
+          nextIndex += 1;
+          if (!unit) {
+            return;
+          }
 
-      try {
-        const proposal = await proposeDescriptor(nextUnit, vocabulary, stats, semanticIndex);
-        const proposedAt = Date.now();
-        const updatedUnit = await patchReviewUnit(processingReviewId, (unit) => ({
-          ...unit,
-          proposalState: "proposed",
-          proposedDescriptor: proposal.proposedDescriptor,
-          proposedConfidence: proposal.proposedConfidence,
-          proposedRationale: proposal.proposedRationale,
-          approvedVocabUsed: proposal.approvedVocabUsed,
-          proposedVocab: proposal.proposedVocab,
-          prerequisiteTerms: proposal.prerequisiteTerms,
-          primaryTerms: proposal.primaryTerms,
-          outcomeTerms: proposal.outcomeTerms,
-          uncertainTerms: proposal.uncertainTerms,
-          conceptResolutions: proposal.conceptResolutions,
-          roleEvidence: proposal.roleEvidence,
-          activeDescriptor: proposal.proposedDescriptor,
-          activeVocab: [...new Set([...proposal.approvedVocabUsed, ...proposal.proposedVocab])].sort((a, b) =>
-            a.localeCompare(b)
-          ),
-          interpretationStatus: unit.reprocessRequestedAt ? "reprocessed" : "auto-generated",
-          proposalError: undefined,
-          proposedAt,
-          updatedAt: proposedAt,
-          reprocessRequestedAt: undefined,
-        }));
-        console.log(
-          `[WDYT] proposal ready reviewId=${processingReviewId} descriptor=${JSON.stringify(updatedUnit?.proposedDescriptor ?? proposal.proposedDescriptor)}`
-        );
-      } catch (error) {
-        const proposalError = error instanceof Error ? error.message : "Unknown proposal error";
-        await patchReviewUnit(processingReviewId, (unit) => ({
-          ...unit,
-          proposalState: "error",
-          proposalError,
-          updatedAt: Date.now(),
-        }));
-        console.warn(`[WDYT] proposal failed reviewId=${processingReviewId}`, proposalError);
-      }
+          await processProposalUnit(unit, vocabulary, stats, semanticIndex);
+        }
+      });
+
+      await Promise.all(workers);
     }
   } finally {
     processingQueue = false;
@@ -791,6 +888,7 @@ export async function saveReviewUnitEdits(input: {
   reviewUnit.primaryTerms = [...reviewUnit.activeVocab];
   reviewUnit.outcomeTerms = [];
   reviewUnit.uncertainTerms = [];
+  reviewUnit.evidenceItems = [];
   reviewUnit.conceptResolutions = [];
   reviewUnit.roleEvidence = {
     prerequisiteTerms: [],
@@ -821,6 +919,7 @@ export async function requestReviewUnitReprocess(reviewId: string) {
   reviewUnit.primaryTerms = [];
   reviewUnit.outcomeTerms = [];
   reviewUnit.uncertainTerms = [];
+  reviewUnit.evidenceItems = [];
   reviewUnit.conceptResolutions = [];
   reviewUnit.roleEvidence = undefined;
   reviewUnit.reprocessRequestedAt = Date.now();

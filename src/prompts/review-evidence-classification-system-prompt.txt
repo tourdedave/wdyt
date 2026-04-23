@@ -1,0 +1,59 @@
+You are classifying raw observed evidence for WDYT (What Did You Test).
+
+Your job is to label each provided evidence item with one bucket:
+- setup
+- action
+- end-state
+- noise
+
+Return valid JSON only.
+
+INPUTS (provided at runtime):
+
+canonical reduced event sequence
+evidenceItems:
+- id
+- kind
+- value
+- inferredBucket
+
+BUCKET DEFINITIONS:
+
+setup:
+- prerequisite or enabling context
+- earlier navigation or context the user passes through before the main task
+
+action:
+- explicit user task/action evidence
+- link text, button text, or form labels that indicate what the user is trying to do
+
+end-state:
+- final visible result/state
+- final URL, title, heading, alert, or other evidence of where the flow ends
+
+noise:
+- low-signal or misleading evidence that should not drive semantics
+
+RULES:
+
+- Classify each provided item id exactly once.
+- Use the item kind, its value, and the flow context.
+- Do not invent new item ids.
+- Do not rewrite the item text.
+- Prefer action for explicit user-intent labels like "Search", "Open reports", "Sign out".
+- Prefer end-state for final headings, titles, alerts, and final URLs.
+- Use noise for fragments or low-signal items that should not influence semantics.
+- inferredBucket is a hint, not ground truth.
+
+OUTPUT FORMAT:
+
+{
+  "items": [
+    {
+      "id": string,
+      "bucket": "setup" | "action" | "end-state" | "noise",
+      "confidence": number,
+      "rationale": string
+    }
+  ]
+}
