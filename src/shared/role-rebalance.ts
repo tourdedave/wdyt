@@ -1,40 +1,119 @@
 import type { FlowTermRoleClassification, ResolvedFlowConcept } from "./types.js";
 
-const AUTH_TERMS = new Set(["login", "logout", "authentication"]);
+type SubflowFamily = {
+  id: string;
+  canonicalTerms: string[];
+  descriptorExcludedAliases: Record<string, string[]>;
+};
+
+const BUILT_IN_SUBFLOW_FAMILIES = [
+  {
+    id: "auth",
+    canonicalTerms: ["login", "logout", "authentication"],
+    descriptorExcludedAliases: {
+      login: [
+        "login",
+        "log in",
+        "logged in",
+        "sign in",
+        "signed in",
+        "authentication",
+        "authenticated",
+        "after login",
+        "after log in",
+        "after signing in",
+        "after sign in",
+        "after authentication",
+        "after being authenticated",
+        "post-login",
+        "post login",
+        "post-authentication",
+        "post authentication",
+      ],
+      logout: [
+        "logout",
+        "log out",
+        "logged out",
+        "sign out",
+        "signed out",
+        "after logout",
+        "after sign out",
+        "post-logout",
+        "post logout",
+      ],
+      authentication: [
+        "authentication",
+        "authenticated",
+        "after authentication",
+        "post-authentication",
+        "post authentication",
+      ],
+    },
+  },
+] satisfies SubflowFamily[];
 const OPERATIONAL_PRIMITIVE_PATTERNS = [
   /\b(?:button|click|form|submission|submit|field)\b/,
   /\b(?:input|entry|text entry)\b/,
+  /\b(?:navigate|navigation)\b/,
+  /\b(?:execute|run)\b/,
   /^(?:enter|initiate|submit)\s+/,
+  /^(?:execute|run)\s+/,
+  /^(?:open|back to)\s+/,
   /\bcredential(?:s)?\b/,
   /\blink\b/,
 ];
 
+function normalize(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getSubflowFamiliesForTerm(term: string) {
+  const normalizedTerm = normalize(term);
+  return BUILT_IN_SUBFLOW_FAMILIES.filter((family) => family.canonicalTerms.includes(normalizedTerm));
+}
+
+export function isSubflowTerm(term: string) {
+  return getSubflowFamiliesForTerm(term).length > 0;
+}
+
 export function isAuthTerm(term: string) {
-  return AUTH_TERMS.has(term);
+  return getSubflowFamiliesForTerm(term).some((family) => family.id === "auth");
+}
+
+export function shouldSuppressSubflowTermsInDescriptor(classification: FlowTermRoleClassification) {
+  return classification.primaryTerms.some((term) => !isSubflowTerm(term));
 }
 
 export function shouldSuppressAuthInDescriptor(classification: FlowTermRoleClassification) {
-  return classification.primaryTerms.some((term) => !isAuthTerm(term));
+  return shouldSuppressSubflowTermsInDescriptor(classification);
 }
 
 export function filterAuthTermsForDescriptor(terms: string[], classification: FlowTermRoleClassification) {
-  if (!shouldSuppressAuthInDescriptor(classification)) {
+  if (!shouldSuppressSubflowTermsInDescriptor(classification)) {
     return [...terms];
   }
 
-  return terms.filter((term) => !isAuthTerm(term));
+  return terms.filter((term) => !isSubflowTerm(term));
 }
 
 export function getDescriptorExcludedTerms(terms: string[], classification: FlowTermRoleClassification) {
-  if (!shouldSuppressAuthInDescriptor(classification)) {
+  if (!shouldSuppressSubflowTermsInDescriptor(classification)) {
     return [];
   }
 
-  return terms.filter((term) => isAuthTerm(term));
-}
+  const excluded = new Set<string>();
+  for (const term of terms) {
+    for (const family of getSubflowFamiliesForTerm(term)) {
+      const canonicalTerm = normalize(term);
+      excluded.add(canonicalTerm);
+      const aliases = family.descriptorExcludedAliases[canonicalTerm as keyof typeof family.descriptorExcludedAliases] ?? [];
+      for (const alias of aliases) {
+        excluded.add(alias);
+      }
+    }
+  }
 
-function normalize(value: string) {
-  return value.trim().toLowerCase();
+  return [...excluded].sort((a, b) => a.localeCompare(b));
 }
 
 function isOperationalTerm(term: string) {

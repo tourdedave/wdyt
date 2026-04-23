@@ -862,6 +862,152 @@ test("role rebalance keeps auth-only flows auth-led and compacts prerequisites",
   assert.deepEqual(logoutFlow.prerequisiteTerms, ["dashboard"]);
 });
 
+test("descriptor exclusions expand auth concepts into common auth phrasings", async () => {
+  const { getDescriptorExcludedTerms, isSubflowTerm } = await import(path.join(repoRoot, "dist", "shared", "role-rebalance.js"));
+
+  const excluded = getDescriptorExcludedTerms(
+    ["login", "reports"],
+    {
+      prerequisiteTerms: ["login"],
+      primaryTerms: ["reports"],
+      outcomeTerms: [],
+      uncertainTerms: [],
+    }
+  );
+
+  assert.ok(excluded.includes("login"));
+  assert.ok(excluded.includes("authentication"));
+  assert.ok(excluded.includes("after login"));
+  assert.ok(excluded.includes("after authentication"));
+  assert.ok(excluded.includes("signed in"));
+  assert.equal(isSubflowTerm("login"), true);
+  assert.equal(isSubflowTerm("reports"), false);
+});
+
+test("descriptor sanitization strips excluded auth phrasing from mixed-flow descriptors", async () => {
+  const {
+    sanitizeDescriptorExcludedTerms,
+    buildFallbackDescriptor,
+    buildProposalRetryFeedback,
+    isLowValueProposalTerm,
+    validateProposal,
+  } = await import(path.join(repoRoot, "dist", "shared", "proposal-validation.js"));
+
+  assert.equal(
+    sanitizeDescriptorExcludedTerms("Accessing reports after authentication", ["login", "after authentication"]),
+    "Accessing reports"
+  );
+  assert.equal(
+    sanitizeDescriptorExcludedTerms("Workspace details are accessed after login", ["login", "after login"]),
+    "Workspace details are accessed"
+  );
+  assert.equal(
+    buildFallbackDescriptor({
+      canonical: ["NAVIGATE"],
+      primaryTerms: ["reports"],
+      outcomeTerms: [],
+      urls: [],
+      finalUrls: [],
+      titles: [],
+      headings: [],
+      alerts: [],
+      targets: [],
+    }),
+    "Access reports"
+  );
+  assert.equal(
+    buildFallbackDescriptor({
+      canonical: ["NAVIGATE"],
+      primaryTerms: ["settings"],
+      outcomeTerms: [],
+      urls: [],
+      finalUrls: [],
+      titles: [],
+      headings: [],
+      alerts: [],
+      targets: [],
+    }),
+    "Access settings"
+  );
+  assert.equal(
+    buildFallbackDescriptor({
+      canonical: ["NAVIGATE"],
+      primaryTerms: ["workspace details"],
+      outcomeTerms: [],
+      urls: [],
+      finalUrls: [],
+      titles: [],
+      headings: [],
+      alerts: [],
+      targets: [],
+    }),
+    "View workspace details"
+  );
+  assert.equal(
+    buildFallbackDescriptor({
+      canonical: ["NAVIGATE"],
+      primaryTerms: ["search"],
+      outcomeTerms: ["search results"],
+      urls: [],
+      finalUrls: [],
+      titles: [],
+      headings: [],
+      alerts: [],
+      targets: [],
+    }),
+    "View search results"
+  );
+  assert.match(
+    buildProposalRetryFeedback([
+      "The descriptor narrates low-level UI mechanics or reduced event steps instead of the semantic task or outcome.",
+      "The descriptor makes an unsupported success or mutation claim.",
+    ]),
+    /Avoid navigation and UI mechanics/
+  );
+  const validation = validateProposal(
+    {
+      canonical: ["NAVIGATE"],
+      urls: [],
+      finalUrls: ["http://127.0.0.1:4010/settings"],
+      titles: ["Settings"],
+      headings: ["Settings"],
+      alerts: [],
+      targets: [],
+    },
+    {
+      descriptor: "Settings are updated successfully",
+      approvedVocab: [],
+      proposedVocab: ["settings"],
+      confidence: 0.7,
+      rationale: "test",
+    },
+    []
+  );
+  assert.ok(validation.issues.some((issue) => issue.includes("unsupported success or mutation claim")));
+  const passiveValidation = validateProposal(
+    {
+      canonical: ["NAVIGATE"],
+      urls: [],
+      finalUrls: ["http://127.0.0.1:4010/reports"],
+      titles: ["Reports"],
+      headings: ["Reports"],
+      alerts: [],
+      targets: [],
+    },
+    {
+      descriptor: "Navigation to reports page",
+      approvedVocab: [],
+      proposedVocab: ["navigation"],
+      confidence: 0.7,
+      rationale: "test",
+    },
+    []
+  );
+  assert.ok(passiveValidation.issues.some((issue) => issue.includes("low-level UI mechanics")));
+  assert.equal(isLowValueProposalTerm("execute search"), true);
+  assert.equal(isLowValueProposalTerm("navigation"), true);
+});
+
 test("role rebalance preserves no results as a distinct outcome concept", async () => {
   const { normalizeConceptResolution } = await import(path.join(repoRoot, "dist", "shared", "semantic-stages.js"));
   const { createInMemorySemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
@@ -1442,17 +1588,17 @@ test("review caps confidence for literal typed values even when descriptor is me
       String(request?.messages?.[0]?.content ?? "").includes("Step 1 — Extract signals")
     );
 
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 5);
     assert.ok(descriptorRequest);
     assert.match(descriptorRequest.messages[0].content, /Else propose new terms \(only if needed\)/);
     assert.match(descriptorRequest.messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
     assert.match(descriptorRequest.messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
-    assert.match(reviewOutput, /Proposed descriptor: User enters search query 'wdyt testing' and clicks submit on Google Search/);
+    assert.match(reviewOutput, /Proposed descriptor: Access search/);
     assert.match(reviewOutput, /Confidence: 0\.20/);
     assert.match(reviewOutput, /Proposed vocab: -/);
     assert.match(
       reviewFile,
-      /"proposedDescriptor": "User enters search query 'wdyt testing' and clicks submit on Google Search"/
+      /"proposedDescriptor": "Access search"/
     );
     assert.match(reviewFile, /"proposedConfidence": 0\.2/);
   } finally {

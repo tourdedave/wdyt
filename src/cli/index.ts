@@ -47,7 +47,15 @@ import {
   normalizeProposedVocabulary,
   resolveApprovedVocabularyTerm,
 } from "../shared/vocabulary.js";
-import { scoreProposalConfidence, validateProposal } from "../shared/proposal-validation.js";
+import {
+  buildFallbackDescriptor,
+  buildProposalRetryFeedback,
+  includesDescriptorExcludedTerm,
+  isLowValueProposalTerm,
+  sanitizeDescriptorExcludedTerms,
+  scoreProposalConfidence,
+  validateProposal,
+} from "../shared/proposal-validation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
@@ -249,11 +257,6 @@ function normalizeFlowDescriptorProposal(
     confidence,
     rationale,
   };
-}
-
-function isAuthLikeDescriptorTerm(term: string) {
-  const normalized = term.trim().toLowerCase();
-  return normalized === "login" || normalized === "logout" || normalized === "authentication";
 }
 
 function normalizeFlowTermRoleClassification(value: unknown, fallback: { prerequisiteTerms: string[]; primaryTerms: string[] }): FlowTermRoleClassification {
@@ -829,14 +832,14 @@ async function proposeDescriptor(
   };
   const userPrompt = JSON.stringify(evidence, null, 2);
 
-  async function generateProposal() {
+  async function generateProposal(retryReason?: string) {
     const parsed = normalizeFlowDescriptorProposal(
       await requestJsonCompletion({
         baseUrl,
         apiKey,
         model,
         systemPrompt,
-        userPrompt,
+        userPrompt: retryReason ? `${userPrompt}\n\nIMPORTANT RETRY INSTRUCTION:\n${retryReason}` : userPrompt,
       }),
       vocabulary.values()
     );
@@ -848,14 +851,37 @@ async function proposeDescriptor(
     return parsed;
   }
 
-  const parsed = await generateProposal();
+  let parsed = await generateProposal();
+  let validation = validateProposal(evidence, parsed, vocabulary.values());
+  const retryFeedback = buildProposalRetryFeedback(validation.issues);
+  if (retryFeedback) {
+    parsed = await generateProposal(retryFeedback);
+    validation = validateProposal(evidence, parsed, vocabulary.values());
+  }
+  if (validation.issues.some((issue) => issue.includes("The descriptor includes descriptor-excluded terms."))) {
+    parsed = {
+      ...parsed,
+      descriptor: sanitizeDescriptorExcludedTerms(parsed.descriptor, descriptorExcludedTerms),
+    };
+    validation = validateProposal(evidence, parsed, vocabulary.values());
+  }
+  if (
+    validation.issues.some((issue) =>
+      issue.includes("low-level UI mechanics") || issue.includes("unsupported success or mutation claim")
+    )
+  ) {
+    parsed = {
+      ...parsed,
+      descriptor: buildFallbackDescriptor(evidence),
+    };
+    validation = validateProposal(evidence, parsed, vocabulary.values());
+  }
   const filteredApprovedVocab = descriptorExcludedTerms.length > 0
-    ? parsed.approvedVocab.filter((term) => !isAuthLikeDescriptorTerm(term))
+    ? parsed.approvedVocab.filter((term) => !includesDescriptorExcludedTerm(term, descriptorExcludedTerms))
     : parsed.approvedVocab;
-  const filteredProposedVocab = descriptorExcludedTerms.length > 0
-    ? parsed.proposedVocab.filter((term) => !isAuthLikeDescriptorTerm(term))
-    : parsed.proposedVocab;
-  const validation = validateProposal(evidence, parsed, vocabulary.values());
+  const filteredProposedVocab = parsed.proposedVocab.filter((term) =>
+    !isLowValueProposalTerm(term) && !includesDescriptorExcludedTerm(term, descriptorExcludedTerms)
+  );
 
   return {
     descriptor: parsed.descriptor,

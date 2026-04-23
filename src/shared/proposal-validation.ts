@@ -2,9 +2,31 @@ import type { FlowDescriptorProposal, VocabularyEntry } from "./types.js";
 import { resolveApprovedVocabularyTerm } from "./vocabulary.js";
 
 const LOW_LEVEL_TERMS = new Set(["navigate", "input", "change", "click", "submit"]);
+const MECHANICAL_DESCRIPTOR_PATTERNS = [
+  /\bnavigat(?:e|es|ed|ing)\b/,
+  /\bnavigation\s+to\b/,
+  /\bperform(?:s|ed|ing)?\b/,
+  /\bexecute(?:s|d|ing)?\b/,
+  /\brun(?:s|ning)?\b/,
+  /\b(?:is|are)\s+displayed\b/,
+  /\bdisplayed\b/,
+  /\b(?:is|are)\s+performed\b/,
+  /\b(?:is|are)\s+accessed\b/,
+];
+const UNSUPPORTED_SUCCESS_PATTERNS = [
+  /\bupdated?\b/,
+  /\bsaved?\b/,
+  /\bsubmitted?\b/,
+  /\bcompleted?\b/,
+  /\bsuccessfully\b/,
+];
 
 export type ProposalEvidence = {
   canonical: string[];
+  descriptorExcludedTerms?: string[];
+  flowTerms?: string[];
+  primaryTerms?: string[];
+  outcomeTerms?: string[];
   urls: string[];
   finalUrls: string[];
   titles: string[];
@@ -15,6 +37,14 @@ export type ProposalEvidence = {
 
 function normalizeText(value: string) {
   return value.trim().toLowerCase();
+}
+
+export function isLowValueProposalTerm(term: string) {
+  const normalized = normalizeText(term);
+  return LOW_LEVEL_TERMS.has(normalized)
+    || /\b(?:navigation|navigate|execute|run)\b/.test(normalized)
+    || MECHANICAL_DESCRIPTOR_PATTERNS.some((pattern) => pattern.test(normalized))
+    || UNSUPPORTED_SUCCESS_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function extractTypedValues(targets: string[]) {
@@ -39,7 +69,24 @@ function extractTypedValues(targets: string[]) {
 
 function hasLowLevelNarration(descriptor: string) {
   const normalized = normalizeText(descriptor);
-  return [...LOW_LEVEL_TERMS].some((term) => normalized.includes(term));
+  return [...LOW_LEVEL_TERMS].some((term) => normalized.includes(term))
+    || MECHANICAL_DESCRIPTOR_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+function hasUnsupportedSuccessClaim(descriptor: string, evidence: ProposalEvidence) {
+  const normalized = normalizeText(descriptor);
+  if (!UNSUPPORTED_SUCCESS_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    return false;
+  }
+
+  const successEvidence = [
+    ...evidence.titles,
+    ...evidence.headings,
+    ...evidence.alerts,
+    ...evidence.finalUrls,
+  ].map((value) => normalizeText(value));
+
+  return !successEvidence.some((value) => /\b(?:success|successful|updated|saved|completed|done)\b/.test(value));
 }
 
 function clampConfidence(value: number) {
@@ -163,12 +210,118 @@ function includesAnySubstring(haystack: string, needles: string[]) {
   });
 }
 
+export function includesDescriptorExcludedTerm(value: string, excludedTerms: string[] | undefined) {
+  return includesAnySubstring(value, normalizeExcludedTerms(excludedTerms));
+}
+
+function normalizeExcludedTerms(value: string[] | undefined) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((term) => normalizeText(term))
+    .filter((term) => term.length >= 3);
+}
+
+function escapeRegex(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function cleanupDescriptorText(value: string) {
+  return value
+    .replace(/\b(?:after|post|following)\s*$/i, "")
+    .replace(/\s+([,.;:!?])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/^[,.;:!?-]+|[,.;:!?-]+$/g, "")
+    .trim();
+}
+
+export function sanitizeDescriptorExcludedTerms(descriptor: string, excludedTerms: string[] | undefined) {
+  const normalizedExcludedTerms = normalizeExcludedTerms(excludedTerms).sort((a, b) => b.length - a.length);
+  if (normalizedExcludedTerms.length === 0) {
+    return descriptor;
+  }
+
+  let sanitized = descriptor;
+  for (const term of normalizedExcludedTerms) {
+    sanitized = sanitized.replace(new RegExp(`\\b${escapeRegex(term)}\\b`, "gi"), " ");
+  }
+
+  sanitized = cleanupDescriptorText(sanitized);
+  return sanitized || descriptor;
+}
+
+function titleCaseTerm(term: string) {
+  return term.replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function preferViewVerb(term: string) {
+  return /\b(?:details|results|dashboard|screen|page)\b/.test(normalizeText(term));
+}
+
+export function buildFallbackDescriptor(evidence: ProposalEvidence) {
+  const primary = evidence.primaryTerms?.[0];
+  const outcome = evidence.outcomeTerms?.[0];
+
+  if (primary === "search" && outcome === "no results") {
+    return "Search returns no results";
+  }
+
+  if (primary === "search" && outcome === "search results") {
+    return "View search results";
+  }
+
+  if (primary && !outcome) {
+    return `${preferViewVerb(primary) ? "View" : "Access"} ${primary}`;
+  }
+
+  if (outcome && !primary) {
+    return `${preferViewVerb(outcome) ? "View" : "Access"} ${outcome}`;
+  }
+
+  if (primary && outcome) {
+    if (preferViewVerb(outcome)) {
+      return `View ${outcome}`;
+    }
+
+    return `${titleCaseTerm(primary)} returns ${outcome}`;
+  }
+
+  const fallbackTerm = evidence.flowTerms?.[0];
+  if (fallbackTerm) {
+    return `${preferViewVerb(fallbackTerm) ? "View" : "Access"} ${fallbackTerm}`;
+  }
+
+  return "Review flow";
+}
+
+export function buildProposalRetryFeedback(issues: string[]) {
+  const instructions = new Set<string>();
+
+  for (const issue of issues) {
+    if (issue.includes("descriptor-excluded terms")) {
+      instructions.add("Do not use any descriptorExcludedTerms in the descriptor or vocabulary unless the flow is truly about them.");
+    }
+    if (issue.includes("low-level UI mechanics") || issue.includes("low-level event mechanics")) {
+      instructions.add("Avoid navigation and UI mechanics. Prefer task-centric wording like 'Access reports' or 'View search results'.");
+    }
+    if (issue.includes("unsupported success")) {
+      instructions.add("Do not claim success, updates, saves, or completion unless the evidence explicitly shows that outcome.");
+    }
+  }
+
+  return [...instructions].join(" ");
+}
+
 function normalizeProposedTermIssues(proposedVocab: string[], evidence: ProposalEvidence, vocabulary: Iterable<VocabularyEntry>) {
   const issues: string[] = [];
   const typedValues = extractTypedValues(evidence.targets);
   const urls = [...evidence.urls, ...evidence.finalUrls];
+  const excludedTerms = normalizeExcludedTerms(evidence.descriptorExcludedTerms);
 
-  if (proposedVocab.some((term) => LOW_LEVEL_TERMS.has(normalizeText(term)))) {
+  if (proposedVocab.some((term) => isLowValueProposalTerm(term))) {
     issues.push("Proposed vocabulary includes low-level event mechanics instead of semantic concepts.");
   }
 
@@ -189,6 +342,14 @@ function normalizeProposedTermIssues(proposedVocab: string[], evidence: Proposal
     issues.push("Proposed vocabulary uses aliases or non-canonical approved terms instead of canonical registry terms.");
   }
 
+  if (proposedVocab.some((term) => includesAnySubstring(term, excludedTerms))) {
+    issues.push("Proposed vocabulary includes descriptor-excluded terms.");
+  }
+
+  if (proposedVocab.some((term) => UNSUPPORTED_SUCCESS_PATTERNS.some((pattern) => pattern.test(normalizeText(term))))) {
+    issues.push("Proposed vocabulary includes unsupported success or mutation terms.");
+  }
+
   return issues;
 }
 
@@ -200,6 +361,7 @@ export function validateProposal(
   const issues: string[] = [];
   const typedValues = extractTypedValues(evidence.targets);
   const urls = [...evidence.urls, ...evidence.finalUrls];
+  const excludedTerms = normalizeExcludedTerms(evidence.descriptorExcludedTerms);
 
   if (includesAnySubstring(proposal.descriptor, typedValues)) {
     issues.push("The descriptor includes a literal typed value from the evidence that should be generalized.");
@@ -213,8 +375,20 @@ export function validateProposal(
     issues.push("The descriptor narrates low-level UI mechanics or reduced event steps instead of the semantic task or outcome.");
   }
 
+  if (hasUnsupportedSuccessClaim(proposal.descriptor, evidence)) {
+    issues.push("The descriptor makes an unsupported success or mutation claim.");
+  }
+
+  if (includesAnySubstring(proposal.descriptor, excludedTerms)) {
+    issues.push("The descriptor includes descriptor-excluded terms.");
+  }
+
   if (proposal.approvedVocab.length === 0 && proposal.proposedVocab.length === 0) {
     issues.push("The proposal does not include any approved or proposed semantic vocabulary.");
+  }
+
+  if (proposal.approvedVocab.some((term) => includesAnySubstring(term, excludedTerms))) {
+    issues.push("Approved vocabulary includes descriptor-excluded terms.");
   }
 
   issues.push(...normalizeProposedTermIssues(proposal.proposedVocab, evidence, vocabulary));
