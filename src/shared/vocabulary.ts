@@ -203,7 +203,11 @@ function foldOverlapTerm(term: string) {
     return null;
   }
 
-  if (normalized === "success") {
+  if (normalized === "success" || normalized === "access") {
+    return null;
+  }
+
+  if (normalized.includes("repetition")) {
     return null;
   }
 

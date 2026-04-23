@@ -3225,7 +3225,7 @@ test("review page groups semantically similar repeated coverage with divergent a
       searchUnits.map((unit) => unit.overlapTerms),
       [
         ["search", "search results"],
-        ["query repetition", "search", "search results"],
+        ["search", "search results"],
       ]
     );
   } finally {

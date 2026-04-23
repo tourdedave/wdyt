@@ -265,6 +265,19 @@ function getActiveVocab(unit: Partial<ReviewUnitRecord>, vocabulary: VocabularyE
   return normalizeProposedVocabulary([...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])], vocabulary);
 }
 
+function deriveOverlapTerms(unit: Partial<ReviewUnitRecord>, activeVocab: string[], vocabulary: VocabularyEntry[]) {
+  const semanticTerms = [
+    ...(Array.isArray(unit.primaryTerms) ? unit.primaryTerms : []),
+    ...(Array.isArray(unit.outcomeTerms) ? unit.outcomeTerms : []),
+  ];
+
+  if (semanticTerms.length > 0) {
+    return normalizeOverlapTerms(semanticTerms, vocabulary);
+  }
+
+  return normalizeOverlapTerms(activeVocab, vocabulary);
+}
+
 function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyEntry[]) {
   const normalized = getActiveVocab(unit, vocabulary);
   const activeVocab = [...new Set([...normalized.approvedVocab, ...normalized.proposedVocab])].sort((a, b) => a.localeCompare(b));
@@ -282,7 +295,7 @@ function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyE
     evidenceItems: Array.isArray(unit.evidenceItems) ? unit.evidenceItems : [],
     conceptResolutions: Array.isArray(unit.conceptResolutions) ? unit.conceptResolutions : [],
     roleEvidence: unit.roleEvidence,
-    overlapTerms: normalizeOverlapTerms(activeVocab, vocabulary),
+    overlapTerms: deriveOverlapTerms(unit, activeVocab, vocabulary),
     interpretationStatus,
   };
 }
@@ -946,7 +959,7 @@ export async function saveReviewUnitEdits(input: {
     primaryTerms: [...reviewUnit.activeVocab],
     rationale: ["manual edit"],
   };
-  reviewUnit.overlapTerms = normalizeOverlapTerms(reviewUnit.activeVocab, vocabulary);
+  reviewUnit.overlapTerms = deriveOverlapTerms(reviewUnit, reviewUnit.activeVocab, vocabulary);
   reviewUnit.approvedVocabUsed = normalizedActive.approvedVocab;
   reviewUnit.proposedVocab = normalizedActive.proposedVocab;
 
