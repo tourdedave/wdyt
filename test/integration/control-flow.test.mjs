@@ -613,7 +613,7 @@ test("review unit views expose prerequisite concepts and primary terms", async (
   }
 });
 
-test("source-aware term extraction and semantic index preserve setup/action/terminal distinctions", async () => {
+test("source-aware term extraction and semantic index preserve setup/action/end-state distinctions", async () => {
   const { collectVocabStats, inferSourceAwareTermCandidates } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
   const { buildSemanticIndex, dedupeFlowTermCandidates } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
 
@@ -638,7 +638,7 @@ test("source-aware term extraction and semantic index preserve setup/action/term
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "login-success-settings"],
       actionValues: ['button("Search")', 'form("Search query Search")'],
-      terminalValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
+      endStateValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
       registryTerms: [],
     },
     stats,
@@ -660,12 +660,12 @@ test("source-aware term extraction and semantic index preserve setup/action/term
   }
 
   assert.ok(sourcesByTerm.get("dashboard")?.has("setup"));
-  assert.ok(sourcesByTerm.get("search results")?.has("terminal"));
+  assert.ok(sourcesByTerm.get("search results")?.has("end-state"));
   assert.ok(rawSourcesByTerm.get("search")?.has("action"));
-  assert.ok(rawSourcesByTerm.get("search results")?.has("terminal"));
+  assert.ok(rawSourcesByTerm.get("search results")?.has("end-state"));
   assert.ok(!rawCandidates.some((candidate) => candidate.term === "d"));
 
-  const neighbors = semanticIndex.search({ term: "search results", source: "terminal" }, 3);
+  const neighbors = semanticIndex.search({ term: "search results", source: "end-state" }, 3);
   assert.ok(neighbors.some((neighbor) => neighbor.term === "search"));
 });
 
@@ -696,7 +696,7 @@ test("concept resolver groups extracted terms into resolved concepts with eviden
       { term: "sign in", source: "action" },
       { term: "log in", source: "setup" },
       { term: "sign out", source: "action" },
-      { term: "workspace details", source: "terminal" },
+      { term: "workspace details", source: "end-state" },
     ],
     semanticIndex,
     vocabulary: [],
@@ -718,7 +718,7 @@ test("concept resolver groups extracted terms into resolved concepts with eviden
   assert.ok(evidence.rationale.some((line) => line.includes("logout: primary")));
 });
 
-test("competitive role scoring prefers terminal and action terms over setup context", async () => {
+test("competitive role scoring prefers end-state and action terms over setup context", async () => {
   const { collectVocabStats, inferSourceAwareTermCandidates, scoreFlowTermRoles } = await import(path.join(repoRoot, "dist", "shared", "flow-suppression.js"));
   const { buildSemanticIndex } = await import(path.join(repoRoot, "dist", "shared", "semantic-index.js"));
 
@@ -752,7 +752,7 @@ test("competitive role scoring prefers terminal and action terms over setup cont
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
       actionValues: ['a("Open settings")', 'button("Sign in")'],
-      terminalValues: ["Settings", "http://127.0.0.1:4010/settings"],
+      endStateValues: ["Settings", "http://127.0.0.1:4010/settings"],
       registryTerms: [],
     },
     stats,
@@ -766,7 +766,7 @@ test("competitive role scoring prefers terminal and action terms over setup cont
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
       actionValues: ['button("Search")', 'form("Search query Search")'],
-      terminalValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
+      endStateValues: ["Search Results", "http://127.0.0.1:4010/search/results?q=wdyt"],
       registryTerms: [],
     },
     stats,
@@ -780,7 +780,7 @@ test("competitive role scoring prefers terminal and action terms over setup cont
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
       actionValues: ['a("Open reports")', 'button("Sign in")'],
-      terminalValues: ["Reports", "http://127.0.0.1:4010/reports"],
+      endStateValues: ["Reports", "http://127.0.0.1:4010/reports"],
       registryTerms: [],
     },
     stats,
@@ -794,7 +794,7 @@ test("competitive role scoring prefers terminal and action terms over setup cont
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
       actionValues: ['a("Workspace")', 'button("Details")', 'button("Sign in")'],
-      terminalValues: ["Workspace", "http://127.0.0.1:4010/workspace/details"],
+      endStateValues: ["Workspace", "http://127.0.0.1:4010/workspace/details"],
       registryTerms: [],
     },
     stats,
@@ -808,7 +808,7 @@ test("competitive role scoring prefers terminal and action terms over setup cont
     {
       setupValues: ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"],
       actionValues: ['a("Sign out")', 'button("Sign in")'],
-      terminalValues: ["Demo Login", "Sign in", "http://127.0.0.1:4010/login"],
+      endStateValues: ["Demo Login", "Sign in", "http://127.0.0.1:4010/login"],
       registryTerms: [],
     },
     stats,
@@ -1153,7 +1153,7 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     assert.ok(roleRequest);
     assert.match(roleRequest.messages[1].content, /"setupTerms": \[/);
     assert.match(roleRequest.messages[1].content, /"actionTerms": \[/);
-    assert.match(roleRequest.messages[1].content, /"terminalTerms": \[/);
+    assert.match(roleRequest.messages[1].content, /"endStateTerms": \[/);
     assert.match(roleRequest.messages[1].content, /"semanticNeighbors": \{/);
     assert.ok(descriptorRequest);
     assert.match(descriptorRequest.messages[0].content, /Step 1 — Extract signals/);
@@ -1285,7 +1285,7 @@ test("review caps confidence for literal typed values even when descriptor is me
   }
 });
 
-test("review raises confidence for explicit successful terminal states", { timeout: 15_000 }, async () => {
+test("review raises confidence for explicit successful end-state signals", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-success-floor-"));
   const port = randomPort();
   const llmPort = randomPort();

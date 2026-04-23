@@ -216,7 +216,7 @@ export function inferSourceAwareTermCandidates(
   evidence: {
     setupValues: string[];
     actionValues: string[];
-    terminalValues: string[];
+    endStateValues: string[];
     registryTerms?: string[];
   },
   globalStats: Map<string, VocabStats>,
@@ -246,10 +246,10 @@ export function inferSourceAwareTermCandidates(
   );
   addExtractedBucketTerms(evidence.actionValues, "action");
   addBucketTerms(
-    inferEvidenceTerms(evidence.terminalValues, globalStats, vocabulary, [...(evidence.registryTerms ?? [])]),
-    "terminal"
+    inferEvidenceTerms(evidence.endStateValues, globalStats, vocabulary, [...(evidence.registryTerms ?? [])]),
+    "end-state"
   );
-  addExtractedBucketTerms(evidence.terminalValues, "terminal");
+  addExtractedBucketTerms(evidence.endStateValues, "end-state");
   addBucketTerms(evidence.registryTerms ?? [], "registry");
 
   return candidates;
@@ -276,22 +276,22 @@ export function scoreFlowTermRoles(
   }
 
   const hasAction = terms.some((term) => grouped.get(term)?.has("action"));
-  const hasTerminal = terms.some((term) => grouped.get(term)?.has("terminal"));
-  const terminalOnlyTerms = terms.filter((term) => {
+  const hasEndState = terms.some((term) => grouped.get(term)?.has("end-state"));
+  const endStateOnlyTerms = terms.filter((term) => {
     const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
-    return sources.has("terminal") && !sources.has("setup");
+    return sources.has("end-state") && !sources.has("setup");
   });
   const actionOnlyTerms = terms.filter((term) => {
     const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
     return sources.has("action") && !sources.has("setup");
   });
-  const setupTerminalTerms = terms.filter((term) => {
+  const setupEndStateTerms = terms.filter((term) => {
     const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
-    return sources.has("setup") && sources.has("terminal");
+    return sources.has("setup") && sources.has("end-state");
   });
   const fullLifecycleTerms = terms.filter((term) => {
     const sources = grouped.get(term) ?? new Set<FlowTermCandidate["source"]>();
-    return sources.has("setup") && sources.has("action") && sources.has("terminal");
+    return sources.has("setup") && sources.has("action") && sources.has("end-state");
   });
   const tokenizedTerms = new Map(terms.map((term) => [term, new Set(normalizeVocabularyValue(term).split(" ").filter(Boolean))]));
 
@@ -311,7 +311,7 @@ export function scoreFlowTermRoles(
       primaryScore += 3;
       prerequisiteScore += 0.2;
     }
-    if (sources.has("terminal")) {
+    if (sources.has("end-state")) {
       primaryScore += 2.5;
       outcomeScore += 3.5;
       prerequisiteScore -= 0.5;
@@ -329,22 +329,22 @@ export function scoreFlowTermRoles(
       prerequisiteScore += commonness * (sources.has("setup") ? 1.5 : 0.5);
     }
 
-    if ((hasAction || hasTerminal) && sources.has("setup") && !sources.has("action") && !sources.has("terminal")) {
+    if ((hasAction || hasEndState) && sources.has("setup") && !sources.has("action") && !sources.has("end-state")) {
       primaryScore -= 2.5;
     }
 
-    if (hasTerminal && !sources.has("terminal") && (sources.has("setup") || sources.has("action"))) {
+    if (hasEndState && !sources.has("end-state") && (sources.has("setup") || sources.has("action"))) {
       primaryScore -= 1.35;
     }
 
-    if (sources.has("terminal") && !sources.has("setup")) {
+    if (sources.has("end-state") && !sources.has("setup")) {
       primaryScore += 1.2;
       outcomeScore += 0.8;
     }
 
     const neighbors = semanticIndex.search({ term }, 5);
     for (const neighbor of neighbors) {
-      if (neighbor.source === "terminal") {
+      if (neighbor.source === "end-state") {
         outcomeScore += neighbor.score * 0.8;
         primaryScore += neighbor.score * 0.35;
       } else if (neighbor.source === "action") {
@@ -354,7 +354,7 @@ export function scoreFlowTermRoles(
       }
     }
 
-    if (terminalOnlyTerms.length > 0 && !sources.has("terminal") && !sources.has("registry")) {
+    if (endStateOnlyTerms.length > 0 && !sources.has("end-state") && !sources.has("registry")) {
       prerequisiteScore += 0.35;
     }
 
@@ -378,36 +378,36 @@ export function scoreFlowTermRoles(
       primaryScore -= 0.85;
       outcomeScore -= 0.25;
 
-      const longerTerminalTerms = longerRelatedTerms.filter((candidate) => grouped.get(candidate)?.has("terminal"));
-      if (tokens.size === 1 && longerTerminalTerms.length > 0) {
+      const longerEndStateTerms = longerRelatedTerms.filter((candidate) => grouped.get(candidate)?.has("end-state"));
+      if (tokens.size === 1 && longerEndStateTerms.length > 0) {
         primaryScore -= 1.2;
       }
     }
 
-    if (tokens.size > 1 && (sources.has("action") || sources.has("terminal"))) {
+    if (tokens.size > 1 && (sources.has("action") || sources.has("end-state"))) {
       primaryScore += 0.45;
-      outcomeScore += sources.has("terminal") ? 0.3 : 0;
+      outcomeScore += sources.has("end-state") ? 0.3 : 0;
     }
 
-    if (actionOnlyTerms.length > 0 && sources.has("action") && !sources.has("terminal")) {
+    if (actionOnlyTerms.length > 0 && sources.has("action") && !sources.has("end-state")) {
       primaryScore += 0.5;
     }
 
-    if (setupTerminalTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("terminal")) {
+    if (setupEndStateTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("end-state")) {
       primaryScore += 1.4;
       prerequisiteScore -= 0.4;
     }
 
-    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("terminal") && !sources.has("action")) {
+    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("end-state") && !sources.has("action")) {
       primaryScore -= 0.9;
     }
 
-    if (fullLifecycleTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("terminal")) {
+    if (fullLifecycleTerms.length > 0 && sources.has("action") && !sources.has("setup") && !sources.has("end-state")) {
       primaryScore += 1.1;
       prerequisiteScore -= 0.2;
     }
 
-    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("action") && sources.has("terminal")) {
+    if (actionOnlyTerms.length > 0 && sources.has("setup") && sources.has("action") && sources.has("end-state")) {
       primaryScore -= 1.4;
       prerequisiteScore += 0.35;
     }
@@ -443,7 +443,8 @@ export function scoreFlowTermRoles(
   const outcomeTerms = scored
     .filter(
       (entry) =>
-        entry.sources.has("terminal") &&
+        entry.sources.has("end-state") &&
+        // end-state evidence should generally dominate explicit result terms
         entry.outcomeScore >= entry.primaryScore + 0.35 &&
         entry.outcomeScore >= maxOutcome - 0.6
     )

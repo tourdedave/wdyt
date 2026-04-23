@@ -184,7 +184,7 @@ export type FlowTermRoleClassification = {
   uncertainTerms: string[];
 };
 
-export type FlowTermSource = "setup" | "action" | "terminal" | "registry" | "historical";
+export type FlowTermSource = "setup" | "action" | "end-state" | "registry" | "historical";
 
 export type FlowTermCandidate = {
   term: string;

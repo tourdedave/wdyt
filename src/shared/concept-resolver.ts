@@ -12,7 +12,7 @@ function scoreSourceStability(sources: Set<FlowTermSource>) {
   if (sources.has("action")) {
     score += 0.35;
   }
-  if (sources.has("terminal")) {
+  if (sources.has("end-state")) {
     score += 0.35;
   }
   if (sources.has("registry")) {

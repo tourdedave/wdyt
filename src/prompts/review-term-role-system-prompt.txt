@@ -14,7 +14,7 @@ canonical reduced event sequence (structural only)
 flowTerms (all semantic terms inferred from the flow)
 setupTerms (candidate terms from setup/navigation evidence)
 actionTerms (candidate terms from interaction/task evidence)
-terminalTerms (candidate terms from final-state evidence)
+endStateTerms (candidate terms from final-state evidence)
 registryTerms (canonical vocabulary matches, if any)
 semanticNeighbors (nearest semantic neighbors from the index, keyed by term)
 heuristicPrerequisiteTerms
@@ -40,7 +40,7 @@ primary:
 - examples: export report, view settings, open reports, search
 
 outcome:
-- a user-visible result or terminal state caused by the task
+- a user-visible result or final state caused by the task
 - examples: no results, invalid credentials, search results
 
 uncertain:
@@ -52,14 +52,14 @@ RULES:
 - Treat source buckets as evidence of role:
   - setupTerms are more likely prerequisite
   - actionTerms are more likely primary
-  - terminalTerms are more likely primary or outcome
+  - endStateTerms are more likely primary or outcome
 - Heuristic terms are hints, not ground truth.
 - Semantic neighbors are supporting evidence, not ground truth.
 - Do not classify a generic meta term as primary if a stronger domain/task term is present.
 - Terms like success, redirect, navigation, flow are usually not primary unless they are the only meaningful signal.
 - Bare success is usually not an outcome term by itself if a clearer destination or task-specific result is present.
 - Common terms like login can still be primary if the flow is actually about login.
-- Terms that only appear in setup/navigation context should not outrank stronger terminal or action terms.
+- Terms that only appear in setup/navigation context should not outrank stronger end-state or action terms.
 - Prefer false negatives over false positives: if unsure, use uncertain instead of suppressing the term as prerequisite.
 - Do not invent new terms.
 - Classify only the terms provided in flowTerms.

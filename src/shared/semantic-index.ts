@@ -39,7 +39,7 @@ function sourceCompatibilityBoost(querySource: FlowTermSource | undefined, candi
     return 0.2;
   }
 
-  if (querySource === "terminal" && candidateSource === "historical") {
+  if (querySource === "end-state" && candidateSource === "historical") {
     return 0.05;
   }
 

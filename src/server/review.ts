@@ -271,13 +271,13 @@ function buildGlobalVocabStats(units: ReviewUnitRecord[], vocabulary: Vocabulary
 function partitionTermCandidates(candidates: FlowTermCandidate[]) {
   const setupTerms = candidates.filter((candidate) => candidate.source === "setup").map((candidate) => candidate.term);
   const actionTerms = candidates.filter((candidate) => candidate.source === "action").map((candidate) => candidate.term);
-  const terminalTerms = candidates.filter((candidate) => candidate.source === "terminal").map((candidate) => candidate.term);
+  const endStateTerms = candidates.filter((candidate) => candidate.source === "end-state").map((candidate) => candidate.term);
   const registryTerms = candidates.filter((candidate) => candidate.source === "registry").map((candidate) => candidate.term);
 
   return {
     setupTerms: [...new Set(setupTerms)].sort((a, b) => a.localeCompare(b)),
     actionTerms: [...new Set(actionTerms)].sort((a, b) => a.localeCompare(b)),
-    terminalTerms: [...new Set(terminalTerms)].sort((a, b) => a.localeCompare(b)),
+    endStateTerms: [...new Set(endStateTerms)].sort((a, b) => a.localeCompare(b)),
     registryTerms: [...new Set(registryTerms)].sort((a, b) => a.localeCompare(b)),
   };
 }
@@ -529,7 +529,7 @@ async function proposeDescriptor(
       {
         setupValues: [...unit.urls.filter((value) => !unit.finalUrls.includes(value))],
         actionValues: [...unit.targets],
-        terminalValues: [...unit.finalUrls, ...unit.titles, ...unit.headings, ...unit.alerts],
+        endStateValues: [...unit.finalUrls, ...unit.titles, ...unit.headings, ...unit.alerts],
         registryTerms: registryMatches,
       },
       stats,
@@ -562,7 +562,7 @@ async function proposeDescriptor(
     flowTerms,
     setupTerms: evidenceBuckets.setupTerms,
     actionTerms: evidenceBuckets.actionTerms,
-    terminalTerms: evidenceBuckets.terminalTerms,
+    endStateTerms: evidenceBuckets.endStateTerms,
     registryTerms: evidenceBuckets.registryTerms,
     semanticNeighbors,
     resolvedConcepts,
