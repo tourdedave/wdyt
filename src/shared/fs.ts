@@ -23,10 +23,6 @@ export function getProcessedRunsPath() {
   return path.join(getDataDir(), "runs.processed.jsonl");
 }
 
-export function getFlowReviewsPath() {
-  return path.join(getDataDir(), "flow-reviews.json");
-}
-
 export function getVocabularyPath() {
   return path.join(getDataDir(), "vocabulary.json");
 }

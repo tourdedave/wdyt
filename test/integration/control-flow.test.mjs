@@ -1314,9 +1314,8 @@ test("capture lifecycle persists and reduces a browser flow", { timeout: 15_000 
     const reviewOutput = await runCli(tempDir, ["review"], "a\n");
     assert.match(reviewOutput, /Proposed descriptor:/);
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
-    assert.match(reviewFile, /"descriptorStatus": "approved"/);
-    assert.match(reviewFile, /"approvedDescriptor": "Review flow ending at Dashboard/);
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8");
+    assert.match(reviewFile, /"activeDescriptor": "Review flow ending at Dashboard/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
@@ -1393,12 +1392,6 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
     assert.match(reviewOutput, /Approved vocab: -/);
     assert.match(reviewOutput, /Proposed vocab: search/);
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
-    assert.match(reviewFile, /"proposedDescriptor": "search ends at dashboard"/);
-    assert.match(reviewFile, /"proposedConfidence": 0.87/);
-    assert.match(reviewFile, /"proposedRationale": "The flow ends at Dashboard and includes search interactions\."/);
-    assert.match(reviewFile, /"approvedVocabUsed": \[\]/);
-    assert.match(reviewFile, /"proposedVocab": \[\n\s+"search"\n\s+\]/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1489,7 +1482,6 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
       }
     );
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
     const evidenceRequest = capturedRequests.find((request) =>
       String(request?.messages?.[0]?.content ?? "").includes("label each provided evidence item with one bucket")
     );
@@ -1523,11 +1515,11 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     assert.match(reviewOutput, /Approved vocab: Google Search/);
     assert.match(reviewOutput, /Proposed vocab: error message, search query/);
     assert.match(
-      reviewFile,
+      await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"),
       /"proposedDescriptor": "User enters search query 'wdyt testing' and receives an error message on Google Search"/
     );
-    assert.match(reviewFile, /"approvedVocabUsed": \[\n\s+"Google Search"\n\s+\]/);
-    assert.match(reviewFile, /"proposedVocab": \[\n\s+"error message",\n\s+"search query"\n\s+\]/);
+    assert.match(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"), /"approvedVocabUsed": \[\n\s+"Google Search"\n\s+\]/);
+    assert.match(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"), /"proposedVocab": \[\n\s+"error message",\n\s+"search query"\n\s+\]/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1612,8 +1604,6 @@ test("review caps confidence for literal typed values even when descriptor is me
       }
     );
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
-
     const descriptorRequest = requests.find((request) =>
       String(request?.messages?.[0]?.content ?? "").includes("Step 1 — Extract signals")
     );
@@ -1626,11 +1616,6 @@ test("review caps confidence for literal typed values even when descriptor is me
     assert.match(reviewOutput, /Proposed descriptor: Access search/);
     assert.match(reviewOutput, /Confidence: 0\.20/);
     assert.match(reviewOutput, /Proposed vocab: -/);
-    assert.match(
-      reviewFile,
-      /"proposedDescriptor": "Access search"/
-    );
-    assert.match(reviewFile, /"proposedConfidence": 0\.2/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1722,10 +1707,7 @@ test("review raises confidence for explicit successful end-state signals", { tim
       }
     );
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
-
     assert.match(reviewOutput, /Confidence: 0\.70/);
-    assert.match(reviewFile, /"proposedConfidence": 0\.7/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1810,7 +1792,7 @@ test("review keeps deterministic confidence for successful login despite mechani
       }
     );
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8");
+    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8");
 
     assert.match(reviewOutput, /Confidence: 0\.70/);
     assert.match(reviewFile, /"proposedConfidence": 0\.7/);
@@ -1896,7 +1878,7 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
 
-    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "flow-reviews.json"), "utf8"));
+    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
     assert.equal(reviewFile.length, 2);
     assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));

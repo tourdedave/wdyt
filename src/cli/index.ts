@@ -6,17 +6,15 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import {
-  getFlowReviewsPath,
   getProcessedRunsPath,
   getRawRunsPath,
+  getReviewUnitsPath,
   getVocabularyPath,
   readJsonFile,
   readJsonLines,
   writeJsonFile,
 } from "../shared/fs.js";
 import type {
-  DescriptorStatus,
-  FlowReviewRecord,
   FlowEvidenceItem,
   FlowTermCandidate,
   FlowRoleEvidence,
@@ -27,6 +25,7 @@ import type {
   FlowDescriptorProposal,
   VocabStats,
   ProcessedRunRecord,
+  ReviewUnitRecord,
   VocabularyEntry,
 } from "../shared/types.js";
 import { collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
@@ -607,13 +606,63 @@ async function printFlows(options: { verbose: boolean }) {
   printFlowTable(toFlowRows(groupedFlows), options);
 }
 
-async function loadReviews() {
-  const records = await readJsonFile<FlowReviewRecord[]>(getFlowReviewsPath(), []);
+function sortStrings(values: string[]) {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+function materializeReviewUnitRecord(flow: ReviewUnit, existing?: ReviewUnitRecord): ReviewUnitRecord {
+  const approvedVocabUsed = existing?.approvedVocabUsed ?? [];
+  const proposedVocab = existing?.proposedVocab ?? [];
+  const activeVocab = existing?.activeVocab ?? sortStrings([...approvedVocabUsed, ...proposedVocab]);
+
+  return {
+    reviewId: flow.reviewId,
+    flowId: flow.flowId,
+    variantSignature: flow.variantSignature,
+    canonical: flow.canonical as ReviewUnitRecord["canonical"],
+    count: flow.count,
+    suites: [...flow.suites].sort(),
+    tests: [...flow.tests].sort(),
+    tools: [...flow.tools].sort(),
+    browsers: [...flow.browsers].sort(),
+    urls: [...flow.urls].sort(),
+    targets: [...flow.targets].sort(),
+    finalUrls: [...flow.finalUrls].sort(),
+    titles: [...flow.titles].sort(),
+    headings: [...flow.headings].sort(),
+    alerts: [...flow.alerts].sort(),
+    proposalState: existing?.proposalState ?? "pending",
+    proposedDescriptor: existing?.proposedDescriptor,
+    proposedConfidence: existing?.proposedConfidence,
+    proposedRationale: existing?.proposedRationale,
+    approvedVocabUsed,
+    proposedVocab,
+    activeDescriptor: existing?.activeDescriptor ?? existing?.proposedDescriptor,
+    activeVocab,
+    prerequisiteTerms: existing?.prerequisiteTerms,
+    primaryTerms: existing?.primaryTerms,
+    outcomeTerms: existing?.outcomeTerms,
+    uncertainTerms: existing?.uncertainTerms,
+    evidenceItems: existing?.evidenceItems,
+    conceptResolutions: existing?.conceptResolutions,
+    roleEvidence: existing?.roleEvidence,
+    overlapTerms: existing?.overlapTerms,
+    interpretationStatus: existing?.interpretationStatus,
+    proposalError: existing?.proposalError,
+    notes: existing?.notes,
+    updatedAt: existing?.updatedAt ?? Date.now(),
+    proposedAt: existing?.proposedAt,
+    reprocessRequestedAt: existing?.reprocessRequestedAt,
+  };
+}
+
+async function loadStoredReviewUnits() {
+  const records = await readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), []);
   return new Map(records.map((record) => [record.reviewId, record]));
 }
 
-async function saveReviews(reviews: Map<string, FlowReviewRecord>) {
-  await writeJsonFile(getFlowReviewsPath(), [...reviews.values()].sort((a, b) => a.reviewId.localeCompare(b.reviewId)));
+async function saveReviewUnits(units: Map<string, ReviewUnitRecord>) {
+  await writeJsonFile(getReviewUnitsPath(), [...units.values()].sort((a, b) => a.reviewId.localeCompare(b.reviewId)));
 }
 
 async function loadVocabulary() {
@@ -907,50 +956,48 @@ async function reviewFlows(options: { propose: boolean }) {
     return;
   }
 
-  const reviews = await loadReviews();
+  const storedReviewUnits = await loadStoredReviewUnits();
+  const reviewRecords = new Map(
+    reviewUnits.map((flow) => [flow.reviewId, materializeReviewUnitRecord(flow, storedReviewUnits.get(flow.reviewId))])
+  );
   const vocabulary = await loadVocabulary();
   const suppressionStats = collectVocabStats(
     reviewUnits.map((flow) => ({
-      activeDescriptor: reviews.get(flow.reviewId)?.approvedDescriptor ?? reviews.get(flow.reviewId)?.proposedDescriptor,
-      proposedDescriptor: reviews.get(flow.reviewId)?.proposedDescriptor,
-      activeVocab: [...(reviews.get(flow.reviewId)?.approvedVocabUsed ?? []), ...(reviews.get(flow.reviewId)?.proposedVocab ?? [])],
-      approvedVocabUsed: reviews.get(flow.reviewId)?.approvedVocabUsed ?? [],
-      proposedVocab: reviews.get(flow.reviewId)?.proposedVocab ?? [],
+      activeDescriptor: reviewRecords.get(flow.reviewId)?.activeDescriptor,
+      proposedDescriptor: reviewRecords.get(flow.reviewId)?.proposedDescriptor,
+      activeVocab: reviewRecords.get(flow.reviewId)?.activeVocab ?? [],
+      approvedVocabUsed: reviewRecords.get(flow.reviewId)?.approvedVocabUsed ?? [],
+      proposedVocab: reviewRecords.get(flow.reviewId)?.proposedVocab ?? [],
     })),
     vocabulary.values(),
   );
   const semanticIndex = buildSemanticIndex(
     reviewUnits.map((flow) => ({
-      activeVocab: [...(reviews.get(flow.reviewId)?.approvedVocabUsed ?? []), ...(reviews.get(flow.reviewId)?.proposedVocab ?? [])],
-      approvedVocabUsed: reviews.get(flow.reviewId)?.approvedVocabUsed ?? [],
-      proposedVocab: reviews.get(flow.reviewId)?.proposedVocab ?? [],
-      activeDescriptor: reviews.get(flow.reviewId)?.approvedDescriptor ?? reviews.get(flow.reviewId)?.proposedDescriptor,
-      proposedDescriptor: reviews.get(flow.reviewId)?.proposedDescriptor,
+      activeVocab: reviewRecords.get(flow.reviewId)?.activeVocab ?? [],
+      approvedVocabUsed: reviewRecords.get(flow.reviewId)?.approvedVocabUsed ?? [],
+      proposedVocab: reviewRecords.get(flow.reviewId)?.proposedVocab ?? [],
+      activeDescriptor: reviewRecords.get(flow.reviewId)?.activeDescriptor,
+      proposedDescriptor: reviewRecords.get(flow.reviewId)?.proposedDescriptor,
     })),
     vocabulary.values(),
     suppressionStats
   );
-  const pendingFlows = reviewUnits.filter((flow) => {
-    const review = reviews.get(flow.reviewId);
-    return !review || review.descriptorStatus === "pending";
-  });
-
-  if (pendingFlows.length === 0) {
-    console.log("No pending flows to review.");
+  if (reviewUnits.length === 0) {
+    console.log("No flows to review.");
     return;
   }
 
   const rl = createInterface({ input, output });
 
   try {
-    for (const flow of pendingFlows) {
-      const existing = reviews.get(flow.reviewId);
+    for (const flow of reviewUnits) {
+      const existing = reviewRecords.get(flow.reviewId);
       const proposal =
-        options.propose && !existing
+        options.propose && !existing?.proposedDescriptor
           ? await proposeDescriptor(flow, vocabulary, suppressionStats, semanticIndex)
           : {
               descriptor: existing?.proposedDescriptor ?? buildProposedDescriptor(flow),
-              approvedVocab: existing?.approvedVocabUsed ?? existing?.usedVocab ?? [],
+              approvedVocab: existing?.approvedVocabUsed ?? [],
               proposedVocab: existing?.proposedVocab ?? [],
               confidence: existing?.proposedConfidence ?? 0,
               rationale: existing?.proposedRationale ?? "No LLM proposal.",
@@ -993,44 +1040,48 @@ async function reviewFlows(options: { propose: boolean }) {
       const now = Date.now();
 
       if (action === "a") {
-        reviews.set(flow.reviewId, {
-          reviewId: flow.reviewId,
-          flowId: flow.flowId,
-          variantSignature: flow.variantSignature,
-          canonical: flow.canonical as FlowReviewRecord["canonical"],
+        reviewRecords.set(flow.reviewId, {
+          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
           proposedDescriptor: proposal.descriptor,
           proposedConfidence: proposal.confidence,
           proposedRationale: proposal.rationale,
-          descriptorStatus: "approved",
-          approvedDescriptor: proposal.descriptor,
+          proposalState: "proposed",
+          activeDescriptor: proposal.descriptor,
           approvedVocabUsed:
             proposal.approvedVocab.length > 0
               ? proposal.approvedVocab
               : collectUsedVocab(proposal.descriptor, vocabulary),
           proposedVocab: proposal.proposedVocab,
+          activeVocab: sortStrings([
+            ...(proposal.approvedVocab.length > 0
+              ? proposal.approvedVocab
+              : collectUsedVocab(proposal.descriptor, vocabulary)),
+            ...proposal.proposedVocab,
+          ]),
+          proposalError: undefined,
           updatedAt: now,
         });
-        await saveReviews(reviews);
+        await saveReviewUnits(reviewRecords);
         continue;
       }
 
       if (action === "r") {
         const notes = (await rl.question("Rejection notes (optional): ")).trim();
-        reviews.set(flow.reviewId, {
-          flowId: flow.flowId,
-          reviewId: flow.reviewId,
-          variantSignature: flow.variantSignature,
-          canonical: flow.canonical as FlowReviewRecord["canonical"],
+        reviewRecords.set(flow.reviewId, {
+          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
           proposedDescriptor: proposal.descriptor,
           proposedConfidence: proposal.confidence,
           proposedRationale: proposal.rationale,
-          descriptorStatus: "rejected",
+          proposalState: "error",
+          proposalError: notes || "Rejected via CLI review",
           notes: notes || undefined,
           approvedVocabUsed: proposal.approvedVocab,
           proposedVocab: proposal.proposedVocab,
+          activeDescriptor: undefined,
+          activeVocab: [],
           updatedAt: now,
         });
-        await saveReviews(reviews);
+        await saveReviewUnits(reviewRecords);
         continue;
       }
 
@@ -1057,23 +1108,23 @@ async function reviewFlows(options: { propose: boolean }) {
 
         const notes = (await rl.question("Notes (optional): ")).trim();
         const approvedVocabUsed = collectUsedVocab(approvedDescriptor, vocabulary);
-        reviews.set(flow.reviewId, {
-          flowId: flow.flowId,
-          reviewId: flow.reviewId,
-          variantSignature: flow.variantSignature,
-          canonical: flow.canonical as FlowReviewRecord["canonical"],
+        reviewRecords.set(flow.reviewId, {
+          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
           proposedDescriptor: proposal.descriptor,
           proposedConfidence: proposal.confidence,
           proposedRationale: proposal.rationale,
-          descriptorStatus: proposal.descriptor === approvedDescriptor ? "approved" : "overridden",
-          approvedDescriptor,
+          proposalState: "proposed",
+          activeDescriptor: approvedDescriptor,
           notes: notes || undefined,
           approvedVocabUsed,
           proposedVocab: [...new Set([...proposal.proposedVocab, ...promotedTerms])].sort((a, b) => a.localeCompare(b)),
+          activeVocab: sortStrings([...approvedVocabUsed, ...proposal.proposedVocab, ...promotedTerms]),
+          interpretationStatus: "edited",
+          proposalError: undefined,
           updatedAt: now,
         });
         await saveVocabulary(vocabulary);
-        await saveReviews(reviews);
+        await saveReviewUnits(reviewRecords);
         continue;
       }
 

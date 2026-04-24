@@ -66,25 +66,6 @@ export type ProcessedRunRecord = {
   };
 };
 
-export type DescriptorStatus = "pending" | "approved" | "rejected" | "overridden";
-
-export type FlowReviewRecord = {
-  reviewId: string;
-  flowId: string;
-  variantSignature?: string;
-  canonical: ReducedStep[];
-  proposedDescriptor: string;
-  proposedConfidence?: number;
-  proposedRationale?: string;
-  descriptorStatus: DescriptorStatus;
-  approvedDescriptor?: string;
-  notes?: string;
-  approvedVocabUsed: string[];
-  usedVocab?: string[];
-  proposedVocab: string[];
-  updatedAt: number;
-};
-
 export type VocabularyStatus = "approved" | "rejected" | "proposed";
 
 export type VocabularyEntry = {
