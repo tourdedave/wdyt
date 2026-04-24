@@ -2589,6 +2589,76 @@ test("critical flows normalize search plus results into covered search results",
   }
 });
 
+test("critical flows compare against semantic role terms when vocab is sparse", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-role-terms-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const originalCwd = process.cwd();
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "descriptor-search-results",
+            flowId: "descriptor-search-results",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["search-results"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            proposedDescriptor: "View search results",
+            proposedConfidence: 0.8,
+            proposedRationale: "Search completes with results.",
+            approvedVocabUsed: [],
+            proposedVocab: [],
+            activeDescriptor: "View search results",
+            activeVocab: [],
+            prerequisiteTerms: ["login"],
+            primaryTerms: ["search"],
+            outcomeTerms: ["search results"],
+            interpretationStatus: "auto-generated",
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    process.chdir(tempDir);
+    const { createCriticalFlow, loadCriticalFlowState } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
+
+    const created = await createCriticalFlow({
+      name: "Search and display results",
+      rawText: "Search and display results",
+      interpretedSteps: ["search", "view results"],
+      interpretedTerms: ["search", "search results"],
+      outcome: "results visible",
+    });
+
+    assert.equal(created.status, "covered");
+    assert.deepEqual(created.matchedDescriptorIds, ["descriptor-search-results"]);
+
+    const state = await loadCriticalFlowState();
+    assert.deepEqual(state.flows[0].matchedConcepts, ["search", "search results"]);
+    assert.deepEqual(state.flows[0].missingTerms, []);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("critical flows can be updated and deleted", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-edit-delete-"));
   const port = randomPort();

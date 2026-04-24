@@ -76,6 +76,28 @@ function normalizeDescriptorTerms(terms: string[], vocabulary: VocabularyEntry[]
   return canonicalizeSemanticTerms(terms, vocabulary);
 }
 
+function buildDescriptorComparisonTerms(
+  unit: Awaited<ReturnType<typeof loadReviewUnits>>[number],
+  vocabulary: VocabularyEntry[]
+) {
+  const roleTerms = [
+    ...(unit.primaryTerms ?? []),
+    ...(unit.outcomeTerms ?? []),
+  ];
+
+  const normalizedRoleTerms = normalizeDescriptorTerms(roleTerms, vocabulary);
+  if (normalizedRoleTerms.length > 0) {
+    const supplementalTerms = normalizeDescriptorTerms(
+      unit.activeVocab ?? [...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])],
+      vocabulary
+    );
+
+    return [...new Set([...normalizedRoleTerms, ...supplementalTerms])].sort((a, b) => a.localeCompare(b));
+  }
+
+  return normalizeDescriptorTerms(unit.activeVocab ?? [...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])], vocabulary);
+}
+
 export async function loadApprovedDescriptors() {
   const units = await loadReviewUnits();
   const vocabulary = await loadVocabulary();
@@ -85,7 +107,7 @@ export async function loadApprovedDescriptors() {
     .map((unit) => ({
       id: unit.reviewId,
       name: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
-      vocab: normalizeDescriptorTerms(unit.activeVocab ?? [...(unit.approvedVocabUsed ?? []), ...(unit.proposedVocab ?? [])], vocabulary),
+      vocab: buildDescriptorComparisonTerms(unit, vocabulary),
     }))
     .filter((descriptor) => descriptor.name.trim().length > 0);
 }
