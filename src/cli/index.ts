@@ -5,6 +5,8 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
+import { buildArtifactWithOptions } from "../artifact/buildArtifact.js";
+import { importArtifact } from "../artifact/importArtifact.js";
 import {
   getProcessedRunsPath,
   getRawRunsPath,
@@ -1138,6 +1140,23 @@ async function reviewFlows(options: { propose: boolean }) {
 async function main() {
   const [, , command, ...args] = process.argv;
 
+  const artifactUsage = [
+    "Usage:",
+    "  wdyt artifact",
+    "  wdyt artifact export [--output <path>]",
+    "  wdyt artifact import <zip-path>",
+    "",
+    "Commands:",
+    "  export    Create a snapshot zip of the current wdyt runtime data",
+    "  import    Restore wdyt runtime data from an artifact zip",
+    "",
+    "Options:",
+    "  -o, --output <path>   Output zip path or directory for export",
+    "",
+    "Default export location:",
+    "  <runtime-data-dir-parent>/.wdyt-artifacts/",
+  ].join("\n");
+
   if (command === "flows") {
     await printFlows({
       verbose: args.includes("--verbose"),
@@ -1152,7 +1171,53 @@ async function main() {
     return;
   }
 
-  console.error("Usage: wdyt flows [--verbose] | wdyt review [--propose]");
+  if (command === "artifact") {
+    const subcommand = args[0];
+
+    if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+      console.log(artifactUsage);
+      return;
+    }
+
+    if (subcommand === "import") {
+      const artifactPath = args[1];
+      if (!artifactPath) {
+        console.error(artifactUsage);
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(await importArtifact(artifactPath));
+      return;
+    }
+
+    if (subcommand === "export") {
+      let outputPath;
+      for (let index = 1; index < args.length; index += 1) {
+        const value = args[index];
+        if (value === "--output" || value === "-o") {
+          outputPath = args[index + 1];
+          index += 1;
+          continue;
+        }
+      }
+
+      if ((args.includes("--output") || args.includes("-o")) && !outputPath) {
+        console.error(artifactUsage);
+        process.exitCode = 1;
+        return;
+      }
+
+      console.log(await buildArtifactWithOptions({ outputPath }));
+      return;
+    }
+
+    console.error(artifactUsage);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.error("Usage: wdyt flows [--verbose] | wdyt review [--propose] | wdyt artifact");
   process.exitCode = 1;
 }
 

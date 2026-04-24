@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -240,6 +240,33 @@ async function runCli(workdir, args, stdinText = "", env = {}) {
   }
 
   return stdout.trim();
+}
+
+async function readZipEntries(zipPath) {
+  const buffer = await readFile(zipPath);
+  const entries = new Map();
+  let offset = 0;
+
+  while (offset + 30 <= buffer.length) {
+    const signature = buffer.readUInt32LE(offset);
+    if (signature !== 0x04034b50) {
+      break;
+    }
+
+    const compressionMethod = buffer.readUInt16LE(offset + 8);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const fileNameLength = buffer.readUInt16LE(offset + 26);
+    const extraLength = buffer.readUInt16LE(offset + 28);
+    const nameStart = offset + 30;
+    const dataStart = nameStart + fileNameLength + extraLength;
+    const fileName = buffer.subarray(nameStart, nameStart + fileNameLength).toString("utf8");
+
+    assert.equal(compressionMethod, 0);
+    entries.set(fileName, buffer.subarray(dataStart, dataStart + compressedSize));
+    offset = dataStart + compressedSize;
+  }
+
+  return entries;
 }
 
 async function startMockLlmServer(port, options = {}) {
@@ -1874,6 +1901,143 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     assert.ok(reviewFile.every((record) => record.reviewId === record.flowId || record.reviewId.startsWith(`${record.flowId}:`)));
   } finally {
     await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("artifact command packages current wdyt runtime state with manifest", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(path.join(dataDir, "runs.raw.jsonl"), `${JSON.stringify({ run: { id: "raw-1" } })}\n`, "utf8");
+    await writeFile(path.join(dataDir, "runs.processed.jsonl"), `${JSON.stringify({ runId: "processed-1" })}\n`, "utf8");
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify([{ reviewId: "unit-1", flowId: "flow-1" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "critical-flows.json"),
+      `${JSON.stringify([{ id: "critical-1", name: "Critical flow" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "nested.json"),
+      `${JSON.stringify({ nested: true }, null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(path.join(dataDir, "ignore.txt"), "not included\n", "utf8");
+
+    const artifactHelp = await runCli(tempDir, ["artifact"]);
+    assert.match(artifactHelp, /wdyt artifact export \[--output <path>\]/);
+    assert.match(artifactHelp, /wdyt artifact import <zip-path>/);
+
+    const zipPath = await runCli(tempDir, ["artifact", "export"]);
+    assert.match(zipPath, /\.zip$/);
+    assert.match(zipPath, /\.wdyt-artifacts\//);
+
+    const zipEntries = await readZipEntries(zipPath);
+    assert.ok(zipEntries.has("manifest.json"));
+    assert.ok(zipEntries.has("data/runs.raw.jsonl"));
+    assert.ok(zipEntries.has("data/runs.processed.jsonl"));
+    assert.ok(zipEntries.has("data/review-units.json"));
+    assert.ok(zipEntries.has("data/critical-flows.json"));
+    assert.ok(zipEntries.has("data/nested.json"));
+    assert.equal(zipEntries.has("data/ignore.txt"), false);
+
+    const manifest = JSON.parse(zipEntries.get("manifest.json").toString("utf8"));
+    assert.equal(manifest.schemaVersion, "1.0");
+    assert.equal(manifest.wdytVersion, "0.1.0");
+    assert.equal(manifest.entrypoints.rawRuns, "data/runs.raw.jsonl");
+    assert.equal(manifest.entrypoints.processedRuns, "data/runs.processed.jsonl");
+    assert.equal(manifest.entrypoints.reviewUnits, "data/review-units.json");
+    assert.equal(manifest.entrypoints.criticalFlows, "data/critical-flows.json");
+    assert.equal(manifest.stats.totalRawRecords, 1);
+    assert.equal(manifest.stats.totalProcessedRecords, 1);
+    assert.equal(manifest.stats.totalReviewUnits, 1);
+    assert.equal(manifest.stats.totalCriticalFlows, 1);
+    assert.ok(Array.isArray(manifest.files));
+    assert.ok(manifest.files.some((file) => file.path === "data/nested.json"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("artifact import restores runtime JSON artifacts from zip", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-import-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(path.join(dataDir, "runs.raw.jsonl"), `${JSON.stringify({ run: { id: "raw-1" } })}\n`, "utf8");
+    await writeFile(path.join(dataDir, "runs.processed.jsonl"), `${JSON.stringify({ runId: "processed-1" })}\n`, "utf8");
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify([{ reviewId: "unit-1", flowId: "flow-1" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "critical-flows.json"),
+      `${JSON.stringify([{ id: "critical-1", name: "Critical flow" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "nested.json"),
+      `${JSON.stringify({ nested: true }, null, 2)}\n`,
+      "utf8"
+    );
+
+    const zipPath = await runCli(tempDir, ["artifact", "export"]);
+
+    await writeFile(path.join(dataDir, "runs.raw.jsonl"), `${JSON.stringify({ run: { id: "raw-overwritten" } })}\n`, "utf8");
+    await rm(path.join(dataDir, "review-units.json"), { force: true });
+    await writeFile(path.join(dataDir, "stale.json"), `${JSON.stringify({ stale: true }, null, 2)}\n`, "utf8");
+
+    const importedDataDir = await runCli(tempDir, ["artifact", "import", zipPath]);
+    assert.match(importedDataDir, /\.wdyt$/);
+
+    assert.equal(await readFile(path.join(dataDir, "runs.raw.jsonl"), "utf8"), `${JSON.stringify({ run: { id: "raw-1" } })}\n`);
+    assert.equal(await readFile(path.join(dataDir, "runs.processed.jsonl"), "utf8"), `${JSON.stringify({ runId: "processed-1" })}\n`);
+    assert.equal(
+      await readFile(path.join(dataDir, "review-units.json"), "utf8"),
+      `${JSON.stringify([{ reviewId: "unit-1", flowId: "flow-1" }], null, 2)}\n`
+    );
+    assert.equal(
+      await readFile(path.join(dataDir, "critical-flows.json"), "utf8"),
+      `${JSON.stringify([{ id: "critical-1", name: "Critical flow" }], null, 2)}\n`
+    );
+    assert.equal(
+      await readFile(path.join(dataDir, "nested.json"), "utf8"),
+      `${JSON.stringify({ nested: true }, null, 2)}\n`
+    );
+
+    const staleExists = await stat(path.join(dataDir, "stale.json"))
+      .then(() => true)
+      .catch(() => false);
+    assert.equal(staleExists, false);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("artifact export supports an explicit output path", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-output-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(path.join(dataDir, "runs.raw.jsonl"), `${JSON.stringify({ run: { id: "raw-1" } })}\n`, "utf8");
+
+    const outputDir = path.join(tempDir, "exports");
+    const zipPath = await runCli(tempDir, ["artifact", "export", "--output", outputDir]);
+    assert.match(zipPath, /exports\/wdyt-artifact-.*\.zip$/);
+
+    const zipEntries = await readZipEntries(zipPath);
+    assert.ok(zipEntries.has("manifest.json"));
+    assert.ok(zipEntries.has("data/runs.raw.jsonl"));
+  } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
