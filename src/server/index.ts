@@ -221,6 +221,7 @@ function renderReviewPage() {
         .replaceAll('"', "&quot;");
       const getActiveUnits = () => state.units.filter((unit) => unit.proposalState === "proposed" || unit.activeDescriptor);
       const getOverlapVocab = (unit) => Array.isArray(unit.overlapTerms) ? unit.overlapTerms : [];
+      const getDescriptorKey = (unit) => String(unit.activeDescriptor || unit.proposedDescriptor || "").trim().toLowerCase();
       const getSharedOverlapCount = (leftValues, rightValues) => {
         const right = new Set((rightValues || []).map((value) => String(value).trim()).filter(Boolean));
         return (leftValues || []).filter((value) => right.has(String(value).trim())).length;
@@ -240,6 +241,19 @@ function renderReviewPage() {
 
         return maxCount <= 2 && shared === maxCount && maxCount > 0;
       };
+      const isSubsetOverlapMatch = (leftUnit, rightUnit) => {
+        const leftDescriptor = getDescriptorKey(leftUnit);
+        const rightDescriptor = getDescriptorKey(rightUnit);
+        if (!leftDescriptor || leftDescriptor !== rightDescriptor) {
+          return false;
+        }
+
+        const left = getOverlapVocab(leftUnit);
+        const right = getOverlapVocab(rightUnit);
+        const shared = getSharedOverlapCount(left, right);
+        const minCount = Math.min(left.length, right.length);
+        return minCount > 0 && shared === minCount;
+      };
       const getComparableUnits = () =>
         state.units.filter(
           (unit) =>
@@ -257,7 +271,7 @@ function renderReviewPage() {
           }
 
           const matchedGroup = groups.find((group) =>
-            group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)))
+            group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)) || isSubsetOverlapMatch(unit, candidate))
           );
 
           if (matchedGroup) {
@@ -626,6 +640,7 @@ function renderReviewSummaryPage() {
         .replaceAll('"', "&quot;");
       const getActiveUnits = (units) => units.filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor));
       const getOverlapVocab = (unit) => Array.isArray(unit.overlapTerms) ? unit.overlapTerms : [];
+      const getDescriptorKey = (unit) => String(unit.activeDescriptor || unit.proposedDescriptor || "").trim().toLowerCase();
       const getSharedOverlapCount = (leftValues, rightValues) => {
         const right = new Set((rightValues || []).map((value) => String(value).trim()).filter(Boolean));
         return (leftValues || []).filter((value) => right.has(String(value).trim())).length;
@@ -643,6 +658,19 @@ function renderReviewSummaryPage() {
         }
         return maxCount <= 2 && shared === maxCount && maxCount > 0;
       };
+      const isSubsetOverlapMatch = (leftUnit, rightUnit) => {
+        const leftDescriptor = getDescriptorKey(leftUnit);
+        const rightDescriptor = getDescriptorKey(rightUnit);
+        if (!leftDescriptor || leftDescriptor !== rightDescriptor) {
+          return false;
+        }
+
+        const left = getOverlapVocab(leftUnit);
+        const right = getOverlapVocab(rightUnit);
+        const shared = getSharedOverlapCount(left, right);
+        const minCount = Math.min(left.length, right.length);
+        return minCount > 0 && shared === minCount;
+      };
       const getOverlapGroups = (units) => {
         const groups = [];
         getActiveUnits(units)
@@ -655,7 +683,7 @@ function renderReviewSummaryPage() {
             }
 
             const matchedGroup = groups.find((group) =>
-              group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)))
+              group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)) || isSubsetOverlapMatch(unit, candidate))
             );
 
             if (matchedGroup) {

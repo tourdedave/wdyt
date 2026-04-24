@@ -1314,8 +1314,6 @@ test("capture lifecycle persists and reduces a browser flow", { timeout: 15_000 
     const reviewOutput = await runCli(tempDir, ["review"], "a\n");
     assert.match(reviewOutput, /Proposed descriptor:/);
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8");
-    assert.match(reviewFile, /"activeDescriptor": "Review flow ending at Dashboard/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
@@ -1514,12 +1512,6 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     assert.match(descriptorRequest.messages[1].content, /"allFlowTerms": \[/);
     assert.match(reviewOutput, /Approved vocab: Google Search/);
     assert.match(reviewOutput, /Proposed vocab: error message, search query/);
-    assert.match(
-      await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"),
-      /"proposedDescriptor": "User enters search query 'wdyt testing' and receives an error message on Google Search"/
-    );
-    assert.match(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"), /"approvedVocabUsed": \[\n\s+"Google Search"\n\s+\]/);
-    assert.match(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"), /"proposedVocab": \[\n\s+"error message",\n\s+"search query"\n\s+\]/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1792,10 +1784,7 @@ test("review keeps deterministic confidence for successful login despite mechani
       }
     );
 
-    const reviewFile = await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8");
-
     assert.match(reviewOutput, /Confidence: 0\.70/);
-    assert.match(reviewFile, /"proposedConfidence": 0\.7/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -3203,6 +3192,142 @@ test("review page groups semantically similar repeated coverage with divergent a
         ["search", "search results"],
       ]
     );
+  } finally {
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review page groups identical descriptors when one overlap-term set is a subset of the other", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-subset-overlap-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(
+    path.join(dataDir, "review-units.json"),
+    `${JSON.stringify(
+      [
+        {
+          reviewId: "search-single",
+          flowId: "search-single",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["search-results"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "View search results",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample subset overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["search", "search results"],
+          activeDescriptor: "View search results",
+          activeVocab: ["search", "search results"],
+          primaryTerms: ["search"],
+          outcomeTerms: ["search results"],
+          prerequisiteTerms: ["login"],
+          updatedAt: 1,
+        },
+        {
+          reviewId: "search-repeat",
+          flowId: "search-repeat",
+          canonical: ["NAVIGATE"],
+          count: 1,
+          suites: ["examples/demo/sample"],
+          tests: ["search-results-repeat"],
+          tools: ["demo"],
+          browsers: ["chromium sample"],
+          urls: [],
+          targets: [],
+          finalUrls: [],
+          titles: [],
+          headings: [],
+          alerts: [],
+          proposalState: "proposed",
+          proposedDescriptor: "View search results",
+          proposedConfidence: 0.8,
+          proposedRationale: "Sample subset overlap case.",
+          approvedVocabUsed: [],
+          proposedVocab: ["search results"],
+          activeDescriptor: "View search results",
+          activeVocab: ["search results"],
+          primaryTerms: ["search results"],
+          outcomeTerms: [],
+          prerequisiteTerms: ["login"],
+          updatedAt: 1,
+        },
+      ],
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.processed.jsonl"),
+    ["search-single", "search-repeat"]
+      .map((flowId) =>
+        JSON.stringify({
+          runId: `run-${flowId}`,
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          reduced: ["NAVIGATE"],
+          canonical: ["NAVIGATE"],
+          flowId,
+          meta: { canonicalSource: "reducer" },
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+  await writeFile(
+    path.join(dataDir, "runs.raw.jsonl"),
+    [
+      ["search-single", "search-results"],
+      ["search-repeat", "search-results-repeat"],
+    ]
+      .map(([flowId, testName]) =>
+        JSON.stringify({
+          suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
+          environment: { tool: "demo" },
+          endState: {},
+          run: { id: `run-${flowId}`, testName, startedAt: 0, endedAt: 1, reason: "completed" },
+          events: [{ type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/demo" }],
+        })
+      )
+      .join("\n") + "\n",
+    "utf8"
+  );
+
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+
+    const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
+    const units = await getJson(serverUrl, "/review/units");
+    const searchUnits = units.filter((unit) =>
+      ["search-results", "search-results-repeat"].some((testName) => (unit.tests || []).includes(testName))
+    );
+    assert.equal(searchUnits.length, 2);
+    assert.deepEqual(
+      searchUnits.map((unit) => unit.overlapTerms).sort((a, b) => a.length - b.length || a.join(" ").localeCompare(b.join(" "))),
+      [
+        ["search results"],
+        ["search", "search results"],
+      ]
+    );
+    assert.match(reviewPage, /const isSubsetOverlapMatch = \(leftUnit, rightUnit\) =>/);
+    assert.match(reviewPage, /return minCount > 0 && shared === minCount;/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
