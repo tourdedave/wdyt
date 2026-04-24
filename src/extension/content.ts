@@ -9,6 +9,13 @@ type PageBridgeMessage =
       };
     };
 
+type EndStateSnapshot = {
+  finalUrl: string;
+  title: string | null;
+  heading: string | null;
+  alertText: string | null;
+};
+
 const BRIDGE_EVENT = "wdyt:bridge";
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
 
@@ -31,6 +38,29 @@ function extractTarget(element: Element) {
 
 function sendRuntimeMessage(message: unknown) {
   chrome.runtime.sendMessage(message);
+}
+
+function readEndStateSnapshot(): EndStateSnapshot {
+  const heading = document.querySelector("h1")?.textContent?.trim() ?? null;
+  const alertText = document.querySelector('[role="alert"]')?.textContent?.replace(/\s+/g, " ").trim() ?? null;
+
+  return {
+    finalUrl: window.location.href,
+    title: document.title || null,
+    heading: heading || null,
+    alertText: alertText || null,
+  };
+}
+
+function snapshotEndState() {
+  if (isBootstrapPage()) {
+    return;
+  }
+
+  sendRuntimeMessage({
+    kind: "SNAPSHOT_END_STATE",
+    endState: readEndStateSnapshot(),
+  });
 }
 
 function sendCapturedDomEvent(type: Exclude<PageEventType, "navigate">, target: EventTarget | null) {
@@ -78,6 +108,8 @@ function setupCapture() {
   document.addEventListener("input", (event) => sendCapturedDomEvent("input", event.target), true);
   document.addEventListener("change", (event) => sendCapturedDomEvent("change", event.target), true);
   document.addEventListener("submit", (event) => sendCapturedDomEvent("submit", event.target), true);
+  window.addEventListener("pagehide", snapshotEndState, true);
+  window.addEventListener("beforeunload", snapshotEndState, true);
 
   document.addEventListener(BRIDGE_EVENT, (event) => {
     const customEvent = event as CustomEvent<PageBridgeMessage>;

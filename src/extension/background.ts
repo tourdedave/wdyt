@@ -31,6 +31,12 @@ type ActiveCapture = {
   events: BufferedEvent[];
   nextSeq: number;
   lastActivityAt: number;
+  lastObservedEndState?: {
+    finalUrl?: string;
+    title?: string | null;
+    heading?: string | null;
+    alertText?: string | null;
+  };
 };
 
 type AppendEventMessage = {
@@ -57,7 +63,17 @@ type FinalizeCaptureMessage = {
   reason?: "completed" | "timeout";
 };
 
-type ExtensionMessage = AppendEventMessage | GetStateMessage | BeginCaptureMessage | FinalizeCaptureMessage;
+type SnapshotEndStateMessage = {
+  kind: "SNAPSHOT_END_STATE";
+  endState: NonNullable<ActiveCapture["lastObservedEndState"]>;
+};
+
+type ExtensionMessage =
+  | AppendEventMessage
+  | GetStateMessage
+  | BeginCaptureMessage
+  | FinalizeCaptureMessage
+  | SnapshotEndStateMessage;
 
 const STORAGE_KEY = "backgroundState";
 const TIMEOUT_MS = 60_000;
@@ -192,6 +208,15 @@ function appendEvent(event: AppendEventMessage["event"]) {
   saveState();
 }
 
+function snapshotEndState(endState: SnapshotEndStateMessage["endState"]) {
+  if (!activeCapture) {
+    return;
+  }
+
+  activeCapture.lastObservedEndState = endState;
+  saveState();
+}
+
 function beginCapture(message: BeginCaptureMessage) {
   clearTimeoutAlarm();
   activeCapture = {
@@ -224,7 +249,7 @@ async function finalizeCapture(reason: "completed" | "timeout") {
   }
 
   const captureToPersist = activeCapture;
-  const endState = await captureEndState();
+  const endState = captureToPersist.lastObservedEndState ?? (await captureEndState());
   const payload = {
     suite: captureToPersist.suite,
     environment: captureToPersist.environment,
@@ -278,6 +303,12 @@ chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
 
   if (message.kind === "APPEND_EVENT") {
     appendEvent(message.event);
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (message.kind === "SNAPSHOT_END_STATE") {
+    snapshotEndState(message.endState);
     sendResponse({ ok: true });
     return;
   }
