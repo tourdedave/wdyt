@@ -13,11 +13,10 @@ Current suites:
 Smoke examples are intentionally small and focused on proving the WDYT loop:
 
 1. launch a browser with the built WDYT extension loaded
-2. call `POST /runs/start`
-3. open the WDYT extension bootstrap page returned by the server to bind the browser to that run
+2. open the WDYT bootstrap page with `action=start` to begin capture for a named suite/test
 4. perform a small interaction flow on a real page
-5. call `POST /runs/end`
-6. let the extension background poll for the ending state and flush the buffered run
+5. open the WDYT bootstrap page with `action=finalize`
+6. let the extension flush one buffered capture to `/ingest`
 7. inspect `wdyt flows` on the server side
 
 Prerequisites:

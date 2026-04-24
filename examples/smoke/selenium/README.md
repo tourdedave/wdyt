@@ -49,11 +49,10 @@ wdyt flows
 
 This example uses the same control flow as Playwright:
 
-- `POST /runs/start`
-- navigate to the returned WDYT bootstrap page
+- navigate to the WDYT bootstrap page with `action=start`
 - perform the Google search
-- `POST /runs/end`
-- wait briefly for background polling to flush the run
+- navigate to the WDYT bootstrap page with `action=finalize`
+- wait briefly for the extension to flush the run
 
 Note:
 

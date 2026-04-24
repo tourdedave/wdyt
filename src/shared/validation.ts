@@ -51,7 +51,7 @@ export function validateIngestPayload(payload: unknown): payload is IngestPayloa
     typeof suite.id === "string" &&
     typeof suite.name === "string" &&
     typeof suite.normalizedName === "string" &&
-    typeof run.id === "string" &&
+    (typeof run.id === "undefined" || typeof run.id === "string") &&
     typeof run.testName === "string" &&
     typeof run.startedAt === "number" &&
     typeof run.endedAt === "number" &&

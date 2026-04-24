@@ -96,23 +96,37 @@ function setupCapture() {
   });
 
   window.addEventListener("message", (event) => {
-    if (event.source !== window || !event.data || event.data.kind !== "WDYT_BIND_RUN") {
+    if (
+      event.source !== window ||
+      !event.data ||
+      (event.data.kind !== "WDYT_BEGIN_CAPTURE" && event.data.kind !== "WDYT_FINALIZE_CAPTURE")
+    ) {
       return;
     }
 
+    const runtimeMessage =
+      event.data.kind === "WDYT_BEGIN_CAPTURE"
+        ? {
+            kind: "BEGIN_CAPTURE",
+            serverUrl: event.data.serverUrl,
+            suiteName: event.data.suiteName,
+            testName: event.data.testName,
+            environment: event.data.environment,
+          }
+        : {
+            kind: "FINALIZE_CAPTURE",
+            reason: event.data.reason,
+          };
+
     chrome.runtime.sendMessage(
-      {
-        kind: "BIND_RUN",
-        serverUrl: event.data.serverUrl,
-        runId: event.data.runId,
-      },
+      runtimeMessage,
       (response) => {
         const result =
           (response as { ok?: boolean; browserSessionId?: string; error?: string } | undefined) ?? {};
 
         window.postMessage(
           {
-            kind: "WDYT_BIND_RESULT",
+            kind: "WDYT_CAPTURE_RESULT",
             ok: Boolean(result.ok),
             browserSessionId: result.browserSessionId,
             error: result.error,

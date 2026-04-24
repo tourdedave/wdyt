@@ -18,7 +18,7 @@ export type SuiteInfo = {
 };
 
 export type RunInfo = {
-  id: string;
+  id?: string;
   testName: string;
   startedAt: number;
   endedAt: number;
@@ -41,22 +41,6 @@ export type RunEndState = {
   title?: string | null;
   heading?: string | null;
   alertText?: string | null;
-};
-
-export type StartRunRequest = {
-  suiteName: string;
-  testName: string;
-  environment?: RunEnvironment;
-};
-
-export type StartRunResponse = {
-  runId: string;
-  bootstrapUrl: string;
-};
-
-export type EndRunRequest = {
-  runId: string;
-  reason?: "completed" | "timeout";
 };
 
 export type IngestPayload = {

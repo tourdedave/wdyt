@@ -11,7 +11,7 @@ type BufferedEvent = {
   };
 };
 
-type BoundRun = {
+type ActiveCapture = {
   serverUrl: string;
   suite: {
     id: string;
@@ -26,11 +26,8 @@ type BoundRun = {
     };
     tool?: string;
   };
-  run: {
-    id: string;
-    testName: string;
-    startedAt: number;
-  };
+  testName: string;
+  startedAt: number;
   events: BufferedEvent[];
   nextSeq: number;
   lastActivityAt: number;
@@ -47,33 +44,45 @@ type GetStateMessage = {
   kind: "GET_STATE";
 };
 
-type BindRunMessage = {
-  kind: "BIND_RUN";
+type BeginCaptureMessage = {
+  kind: "BEGIN_CAPTURE";
   serverUrl: string;
-  runId: string;
+  suiteName: string;
+  testName: string;
+  environment?: ActiveCapture["environment"];
 };
 
-type SyncRunMessage = {
-  kind: "SYNC_RUN";
-  serverUrl?: string;
+type FinalizeCaptureMessage = {
+  kind: "FINALIZE_CAPTURE";
+  reason?: "completed" | "timeout";
 };
 
-type ExtensionMessage = AppendEventMessage | GetStateMessage | BindRunMessage | SyncRunMessage;
+type ExtensionMessage = AppendEventMessage | GetStateMessage | BeginCaptureMessage | FinalizeCaptureMessage;
 
 const STORAGE_KEY = "backgroundState";
 const TIMEOUT_MS = 60_000;
 const EXTENSION_VERSION = chrome.runtime.getManifest().version;
-const SYNC_ALARM = "wdyt-sync";
-const DEFAULT_SERVER_URL = "http://127.0.0.1:3876";
 let browserSessionId: string = crypto.randomUUID();
 
-let activeRun: BoundRun | null = null;
+let activeCapture: ActiveCapture | null = null;
+
+function normalizeName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "-");
+}
+
+function createSuiteInfo(name: string) {
+  return {
+    id: normalizeName(name),
+    name,
+    normalizedName: normalizeName(name),
+  };
+}
 
 function saveState() {
   chrome.storage.local.set({
     [STORAGE_KEY]: {
       browserSessionId,
-      activeRun,
+      activeCapture,
     },
   });
 }
@@ -83,7 +92,7 @@ function loadState() {
     const stored = items[STORAGE_KEY] as
       | {
           browserSessionId?: string;
-          activeRun?: BoundRun | null;
+          activeCapture?: ActiveCapture | null;
         }
       | undefined;
 
@@ -91,10 +100,9 @@ function loadState() {
       browserSessionId = stored.browserSessionId;
     }
 
-    if (stored?.activeRun) {
-      activeRun = stored.activeRun;
-      scheduleTimeout(activeRun.lastActivityAt);
-      scheduleSync();
+    if (stored?.activeCapture) {
+      activeCapture = stored.activeCapture;
+      scheduleTimeout(activeCapture.lastActivityAt);
     }
 
     saveState();
@@ -108,49 +116,6 @@ function scheduleTimeout(fromTs: number) {
 
 function clearTimeoutAlarm() {
   chrome.alarms.clear("wdyt-timeout");
-}
-
-function scheduleSync() {
-  chrome.alarms.create(SYNC_ALARM, { when: Date.now() + 2_000 });
-}
-
-async function finalizeRun(reason: "completed" | "timeout") {
-  if (!activeRun) {
-    return;
-  }
-
-  const runToPersist = activeRun;
-  const endState = await captureEndState();
-  const payload = {
-    suite: runToPersist.suite,
-    environment: runToPersist.environment,
-    endState,
-    run: {
-      id: runToPersist.run.id,
-      testName: runToPersist.run.testName,
-      startedAt: runToPersist.run.startedAt,
-      endedAt: Date.now(),
-      reason,
-    },
-    events: runToPersist.events,
-  };
-
-  activeRun = null;
-  clearTimeoutAlarm();
-  chrome.alarms.clear(SYNC_ALARM);
-  saveState();
-
-  try {
-    await fetch(`${runToPersist.serverUrl}/ingest`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch (error) {
-    console.warn("WDYT ingest failed", error);
-  }
 }
 
 async function captureEndState() {
@@ -210,126 +175,89 @@ async function captureEndState() {
 }
 
 function appendEvent(event: AppendEventMessage["event"]) {
-  if (!activeRun) {
+  if (!activeCapture) {
     return;
   }
 
   const nextEvent: BufferedEvent = {
     ...event,
     ts: event.ts ?? Date.now(),
-    seq: activeRun.nextSeq,
+    seq: activeCapture.nextSeq,
   };
 
-  activeRun.events.push(nextEvent);
-  activeRun.nextSeq += 1;
-  activeRun.lastActivityAt = nextEvent.ts;
-  scheduleTimeout(activeRun.lastActivityAt);
+  activeCapture.events.push(nextEvent);
+  activeCapture.nextSeq += 1;
+  activeCapture.lastActivityAt = nextEvent.ts;
+  scheduleTimeout(activeCapture.lastActivityAt);
   saveState();
 }
 
-async function bindRun(message: BindRunMessage) {
-  const response = await fetch(`${message.serverUrl}/bindings/bind`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      browserSessionId,
-      runId: message.runId,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Bind failed with status ${response.status}`);
-  }
-
-  const result = (await response.json()) as {
-    suite: BoundRun["suite"];
-    environment?: BoundRun["environment"];
-    run: BoundRun["run"];
-  };
-
-  activeRun = {
+function beginCapture(message: BeginCaptureMessage) {
+  clearTimeoutAlarm();
+  activeCapture = {
     serverUrl: message.serverUrl,
-    suite: result.suite,
-    environment: result.environment,
-    run: result.run,
+    suite: createSuiteInfo(message.suiteName),
+    environment: message.environment,
+    testName: message.testName,
+    startedAt: Date.now(),
     events: [],
     nextSeq: 0,
     lastActivityAt: Date.now(),
   };
 
-  scheduleTimeout(activeRun.lastActivityAt);
-  scheduleSync();
+  scheduleTimeout(activeCapture.lastActivityAt);
   saveState();
 
   return {
     ok: true,
-    runId: activeRun.run.id,
     browserSessionId,
   };
 }
 
-async function syncRun(serverUrl = activeRun?.serverUrl ?? DEFAULT_SERVER_URL) {
-  if (!activeRun) {
+async function finalizeCapture(reason: "completed" | "timeout") {
+  if (!activeCapture) {
     return {
       ok: true,
-      bound: false,
       browserSessionId,
+      finalized: false,
     };
   }
 
-  const url = new URL("/bindings/current", serverUrl);
-  url.searchParams.set("browserSessionId", browserSessionId);
+  const captureToPersist = activeCapture;
+  const endState = await captureEndState();
+  const payload = {
+    suite: captureToPersist.suite,
+    environment: captureToPersist.environment,
+    endState,
+    run: {
+      testName: captureToPersist.testName,
+      startedAt: captureToPersist.startedAt,
+      endedAt: Date.now(),
+      reason,
+    },
+    events: captureToPersist.events,
+  };
 
-  const response = await fetch(url.toString());
+  activeCapture = null;
+  clearTimeoutAlarm();
+  saveState();
 
-  if (!response.ok) {
-    throw new Error(`Sync failed with status ${response.status}`);
+  try {
+    await fetch(`${captureToPersist.serverUrl}/ingest`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    console.warn("WDYT ingest failed", error);
   }
 
-  const result = (await response.json()) as
-    | { bound: false }
-    | {
-        bound: true;
-        run: BoundRun["run"];
-        status: "bound" | "ending";
-        endReason: "completed" | "timeout" | null;
-      };
-
-  if (!result.bound) {
-    return {
-      ok: true,
-      bound: false,
-      browserSessionId,
-    };
-  }
-
-  if (result.run.id !== activeRun.run.id) {
-    return {
-      ok: true,
-      bound: true,
-      browserSessionId,
-      runId: activeRun.run.id,
-    };
-  }
-
-  if (result.status === "ending") {
-    await finalizeRun(result.endReason ?? "completed");
-    return {
-      ok: true,
-      bound: false,
-      browserSessionId,
-      finalized: true,
-    };
-  }
-
-  scheduleSync();
   return {
     ok: true,
-    bound: true,
     browserSessionId,
-    runId: activeRun.run.id,
+    finalized: true,
   };
 }
 
@@ -337,14 +265,13 @@ chrome.runtime.onInstalled.addListener(loadState);
 chrome.runtime.onStartup.addListener(loadState);
 loadState();
 
-chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((rawMessage, _sender, sendResponse) => {
   const message = rawMessage as ExtensionMessage;
 
   if (message.kind === "GET_STATE") {
     sendResponse({
-      bound: activeRun !== null,
+      bound: activeCapture !== null,
       browserSessionId,
-      runId: activeRun?.run.id ?? null,
     });
     return;
   }
@@ -355,15 +282,17 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
     return;
   }
 
-  if (message.kind === "BIND_RUN") {
-    void bindRun(message)
-      .then((result) => sendResponse(result))
-      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }));
-    return true;
+  if (message.kind === "BEGIN_CAPTURE") {
+    try {
+      sendResponse(beginCapture(message));
+    } catch (error) {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : "Unknown error" });
+    }
+    return;
   }
 
-  if (message.kind === "SYNC_RUN") {
-    void syncRun(message.serverUrl)
+  if (message.kind === "FINALIZE_CAPTURE") {
+    void finalizeCapture(message.reason ?? "completed")
       .then((result) => sendResponse(result))
       .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "Unknown error" }));
     return true;
@@ -373,23 +302,18 @@ chrome.runtime.onMessage.addListener((rawMessage, sender, sendResponse) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === SYNC_ALARM) {
-    void syncRun();
-    return;
-  }
-
   if (alarm.name !== "wdyt-timeout") {
     return;
   }
 
-  if (!activeRun) {
+  if (!activeCapture) {
     return;
   }
 
-  if (Date.now() - activeRun.lastActivityAt >= TIMEOUT_MS) {
-    void finalizeRun("timeout");
+  if (Date.now() - activeCapture.lastActivityAt >= TIMEOUT_MS) {
+    void finalizeCapture("timeout");
     return;
   }
 
-  scheduleTimeout(activeRun.lastActivityAt);
+  scheduleTimeout(activeCapture.lastActivityAt);
 });

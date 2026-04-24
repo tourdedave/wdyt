@@ -10,43 +10,18 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const headless = process.env.HEADLESS === "1";
 
-async function startRun() {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      suiteName: "examples/smoke/playwright",
-      testName: "google search hello world",
-      environment: {
-        tool: "playwright",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Start run failed with status ${response.status}`);
+function buildBootstrapUrl(action, reason = "completed") {
+  const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
+  if (action === "start") {
+    url.searchParams.set("suiteName", "examples/smoke/playwright");
+    url.searchParams.set("testName", "google search hello world");
+    url.searchParams.set("tool", "playwright");
+  } else {
+    url.searchParams.set("reason", reason);
   }
-
-  return response.json();
-}
-
-async function endRun(runId) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/end`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      runId,
-      reason: "completed",
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`End run failed with status ${response.status}`);
-  }
+  return url.toString();
 }
 
 async function bootstrapBind(page, bootstrapUrl) {
@@ -66,9 +41,7 @@ async function main() {
 
   try {
     const page = context.pages()[0] ?? (await context.newPage());
-    const started = await startRun();
-
-    await bootstrapBind(page, started.bootstrapUrl);
+    await bootstrapBind(page, buildBootstrapUrl("start"));
     await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded" });
 
     const searchBox = page.locator('textarea[name="q"], input[name="q"]').first();
@@ -80,7 +53,7 @@ async function main() {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2_000);
 
-    await endRun(started.runId);
+    await bootstrapBind(page, buildBootstrapUrl("finalize"));
     await page.waitForTimeout(4_000);
   } finally {
     await context.close();

@@ -2,12 +2,11 @@ import http from "node:http";
 
 import { DEFAULT_SERVER_URL } from "../shared/constants.js";
 import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js";
-import type { BrowserInfo, EndRunRequest, StartRunRequest } from "../shared/types.js";
+import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
 import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
-import { bindRun, buildRunInfoForIngest, getBoundRun, markRunIngested, requestRunEnd, startRun, updateRunEnvironment } from "./state.js";
 
 const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.WDYT_PORT ?? "3876");
@@ -33,7 +32,14 @@ function getServerUrl(req: http.IncomingMessage) {
   return host ? `http://${host}` : DEFAULT_SERVER_URL;
 }
 
-function renderBootstrapPage() {
+function renderBootstrapPage(payload: {
+  action: "start" | "finalize";
+  serverUrl: string;
+  suiteName?: string;
+  testName?: string;
+  environment?: RunEnvironment;
+  reason?: "completed" | "timeout";
+}) {
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -58,9 +64,7 @@ function renderBootstrapPage() {
     <script>
       const statusEl = document.getElementById("status");
       const detailsEl = document.getElementById("details");
-      const params = new URLSearchParams(window.location.search);
-      const runId = params.get("runId");
-      const serverUrl = params.get("serverUrl");
+      const payload = ${JSON.stringify(payload)};
 
       const setStatus = (status, message) => {
         statusEl.textContent = message;
@@ -81,7 +85,7 @@ function renderBootstrapPage() {
         }
       };
 
-      if (!runId || !serverUrl) {
+      if (!payload.serverUrl || !payload.action) {
         finish("error", "Missing bootstrap parameters");
       } else {
         const timeoutId = setTimeout(() => {
@@ -90,31 +94,29 @@ function renderBootstrapPage() {
           }
         }, 5000);
 
+        const kind = payload.action === "start" ? "WDYT_BEGIN_CAPTURE" : "WDYT_FINALIZE_CAPTURE";
         const bindIntervalId = setInterval(() => {
           if (resolved) {
             clearInterval(bindIntervalId);
             return;
           }
 
-          window.postMessage(
-            {
-              kind: "WDYT_BIND_RUN",
-              runId,
-              serverUrl
-            },
-            "*"
-          );
+          window.postMessage({ kind, ...payload }, "*");
         }, 250);
 
         window.addEventListener("message", (event) => {
-          if (event.source !== window || !event.data || event.data.kind !== "WDYT_BIND_RESULT") {
+          if (event.source !== window || !event.data || event.data.kind !== "WDYT_CAPTURE_RESULT") {
             return;
           }
 
           if (event.data.ok) {
             clearTimeout(timeoutId);
             clearInterval(bindIntervalId);
-            finish("ok", "WDYT bound", \`runId=\${runId} browserSessionId=\${event.data.browserSessionId}\`);
+            finish(
+              "ok",
+              payload.action === "start" ? "WDYT capture started" : "WDYT capture finalized",
+              \`browserSessionId=\${event.data.browserSessionId}\`
+            );
             return;
           }
 
@@ -1545,105 +1547,6 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "POST" && requestPath === "/runs/start") {
-    try {
-      const body = (await readJsonBody(req)) as StartRunRequest | null;
-
-      if (!body || typeof body.suiteName !== "string" || typeof body.testName !== "string") {
-        writeJson(res, 400, { error: "Invalid start run payload" });
-        return;
-      }
-
-      const started = startRun(body);
-      const serverUrl = getServerUrl(req);
-      const bootstrapUrl =
-        `${serverUrl}/bootstrap` +
-        `?serverUrl=${encodeURIComponent(serverUrl)}` +
-        `&runId=${encodeURIComponent(started.runId)}`;
-
-      writeJson(res, 201, {
-        runId: started.runId,
-        bootstrapUrl,
-      });
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      writeJson(res, 500, { error: message });
-      return;
-    }
-  }
-
-  if (req.method === "POST" && requestPath === "/bindings/bind") {
-    try {
-      const body = (await readJsonBody(req)) as { runId?: string; browserSessionId?: string } | null;
-
-      if (!body || typeof body.runId !== "string" || typeof body.browserSessionId !== "string") {
-        writeJson(res, 400, { error: "Invalid bind payload" });
-        return;
-      }
-
-      const binding = bindRun({
-        runId: body.runId,
-        browserSessionId: body.browserSessionId,
-      });
-
-      if (!binding) {
-        writeJson(res, 404, { error: "Run not found" });
-        return;
-      }
-
-      writeJson(res, 200, { ok: true, ...binding });
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      writeJson(res, 409, { error: message });
-      return;
-    }
-  }
-
-  if (req.method === "GET" && requestPath === "/bindings/current") {
-    const requestUrl = new URL(req.url ?? "/bindings/current", getServerUrl(req));
-    const browserSessionId = requestUrl.searchParams.get("browserSessionId");
-
-    if (!browserSessionId) {
-      writeJson(res, 400, { error: "browserSessionId is required" });
-      return;
-    }
-
-    const binding = getBoundRun(browserSessionId);
-    writeJson(res, 200, binding ? { bound: true, ...binding } : { bound: false });
-    return;
-  }
-
-  if (req.method === "POST" && requestPath === "/runs/end") {
-    try {
-      const body = (await readJsonBody(req)) as EndRunRequest | null;
-      const reason = body?.reason ?? "completed";
-
-      if (!body || typeof body.runId !== "string" || (reason !== "completed" && reason !== "timeout")) {
-        writeJson(res, 400, { error: "Invalid end run payload" });
-        return;
-      }
-
-      const ended = requestRunEnd({
-        runId: body.runId,
-        reason,
-      });
-
-      if (!ended) {
-        writeJson(res, 404, { error: "Run not found" });
-        return;
-      }
-
-      writeJson(res, 200, ended);
-      return;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      writeJson(res, 500, { error: message });
-      return;
-    }
-  }
-
   if (req.method === "POST" && requestPath === "/ingest") {
     try {
       const body = await readJsonBody(req);
@@ -1653,21 +1556,13 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const runInfo = buildRunInfoForIngest(body.run.id, body.run.endedAt, body.run.reason);
-
-      if (!runInfo) {
-        writeJson(res, 404, { error: "Run not found for ingest" });
-        return;
-      }
-
       const processed = await persistRun({
         suite: body.suite,
-        run: runInfo,
+        run: body.run,
         environment: body.environment,
         endState: body.endState,
         events: body.events,
       });
-      markRunIngested(runInfo.id, runInfo.endedAt, runInfo.reason);
       await refreshReviewUnits();
 
       writeJson(res, 202, { ok: true, flowId: processed.flowId });
@@ -1681,18 +1576,33 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && requestPath === "/bootstrap") {
     const requestUrl = new URL(req.url ?? "/bootstrap", getServerUrl(req));
-    const runId = requestUrl.searchParams.get("runId");
+    const serverUrl = requestUrl.searchParams.get("serverUrl") ?? getServerUrl(req);
+    const action = requestUrl.searchParams.get("action");
+    const tool = requestUrl.searchParams.get("tool");
+    const reason = requestUrl.searchParams.get("reason");
+    const browser = inferBrowserInfo(req);
 
-    if (runId) {
-      const browser = inferBrowserInfo(req);
-
-      if (browser) {
-        updateRunEnvironment(runId, { browser });
-      }
+    if (action !== "start" && action !== "finalize") {
+      writeJson(res, 400, { error: "bootstrap action must be 'start' or 'finalize'" });
+      return;
     }
 
+    const environment = {
+      ...(tool ? { tool } : {}),
+      ...(browser ? { browser } : {}),
+    };
+
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(renderBootstrapPage());
+    res.end(
+      renderBootstrapPage({
+        action,
+        serverUrl,
+        suiteName: requestUrl.searchParams.get("suiteName") ?? undefined,
+        testName: requestUrl.searchParams.get("testName") ?? undefined,
+        environment: Object.keys(environment).length > 0 ? environment : undefined,
+        reason: reason === "timeout" ? "timeout" : "completed",
+      })
+    );
     return;
   }
 

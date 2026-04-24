@@ -11,43 +11,18 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const headless = process.env.HEADLESS === "1";
 
-async function startRun() {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      suiteName: "examples/smoke/selenium",
-      testName: "google search hello world",
-      environment: {
-        tool: "selenium",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Start run failed with status ${response.status}`);
+function buildBootstrapUrl(action, reason = "completed") {
+  const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
+  if (action === "start") {
+    url.searchParams.set("suiteName", "examples/smoke/selenium");
+    url.searchParams.set("testName", "google search hello world");
+    url.searchParams.set("tool", "selenium");
+  } else {
+    url.searchParams.set("reason", reason);
   }
-
-  return response.json();
-}
-
-async function endRun(runId) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/end`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      runId,
-      reason: "completed",
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`End run failed with status ${response.status}`);
-  }
+  return url.toString();
 }
 
 async function main() {
@@ -63,9 +38,7 @@ async function main() {
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
 
   try {
-    const started = await startRun();
-
-    await driver.get(started.bootstrapUrl);
+    await driver.get(buildBootstrapUrl("start"));
     await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
 
     await driver.get("https://www.google.com/ncr");
@@ -82,7 +55,8 @@ async function main() {
     await driver.wait(until.urlContains("/search"), 15_000);
     await driver.sleep(2_000);
 
-    await endRun(started.runId);
+    await driver.get(buildBootstrapUrl("finalize"));
+    await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
     await driver.sleep(4_000);
   } finally {
     await driver.quit();

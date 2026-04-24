@@ -14,43 +14,18 @@ const headless = process.env.HEADLESS === "1";
 const demoPassword = "wdyt-demo-2026!";
 const demoConcurrency = Math.max(1, Math.min(Number.parseInt(process.env.DEMO_CONCURRENCY ?? "10", 10) || 10, 10));
 
-async function startRun(testName) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      suiteName: "examples/demo/selenium",
-      testName,
-      environment: {
-        tool: "selenium",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Start run failed with status ${response.status}`);
+function buildBootstrapUrl(action, testName, reason = "completed") {
+  const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
+  if (action === "start") {
+    url.searchParams.set("suiteName", "examples/demo/selenium");
+    url.searchParams.set("testName", testName);
+    url.searchParams.set("tool", "selenium");
+  } else {
+    url.searchParams.set("reason", reason);
   }
-
-  return response.json();
-}
-
-async function endRun(runId) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/end`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      runId,
-      reason: "completed",
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`End run failed with status ${response.status}`);
-  }
+  return url.toString();
 }
 
 async function login(driver, username = "demo", password = demoPassword) {
@@ -80,14 +55,13 @@ async function logout(driver) {
 }
 
 async function withBoundDriver(driver, testName, testFn) {
-  const started = await startRun(testName);
-
   try {
-    await driver.get(started.bootstrapUrl);
+    await driver.get(buildBootstrapUrl("start", testName));
     await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
     await testFn();
   } finally {
-    await endRun(started.runId);
+    await driver.get(buildBootstrapUrl("finalize", testName));
+    await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
     await driver.sleep(2_500);
   }
 }

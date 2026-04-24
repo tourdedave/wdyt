@@ -79,6 +79,28 @@ async function getJson(serverUrl, pathname, headers = {}) {
   return body;
 }
 
+const TEST_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36";
+
+function buildBootstrapUrl(serverUrl, params) {
+  const url = new URL("/bootstrap", serverUrl);
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "string" && value.length > 0) {
+      url.searchParams.set(key, value);
+    }
+  }
+  return url.toString();
+}
+
+async function fetchBootstrap(serverUrl, params, userAgent = TEST_USER_AGENT) {
+  const response = await fetch(buildBootstrapUrl(serverUrl, params), {
+    headers: {
+      "user-agent": userAgent,
+    },
+  });
+  return response.text();
+}
+
 function spawnServer(workdir, port, extraEnv = {}) {
   const child = spawn(process.execPath, [serverEntry], {
     cwd: workdir,
@@ -1194,7 +1216,7 @@ test("competitive role scoring prefers end-state and action terms over setup con
   assert.ok(!logoutRoles.primaryTerms.includes("login"));
 });
 
-test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_000 }, async () => {
+test("capture lifecycle persists and reduces a browser flow", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-integration-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -1203,74 +1225,41 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
   try {
     await waitForHealth(serverUrl);
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    const startBootstrapUrl = buildBootstrapUrl(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "search flow",
-      environment: {
-        tool: "integration-test",
-      },
+      tool: "integration-test",
     });
-
-    assert.match(started.runId, /^[0-9a-f-]{36}$/);
     assert.equal(
-      started.bootstrapUrl,
-      `${serverUrl}/bootstrap?serverUrl=${encodeURIComponent(serverUrl)}&runId=${encodeURIComponent(started.runId)}`
+      startBootstrapUrl,
+      `${serverUrl}/bootstrap?action=start&serverUrl=${encodeURIComponent(serverUrl)}&suiteName=integration&testName=search+flow&tool=integration-test`
     );
 
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    assert.equal(bound.ok, true);
-    assert.equal(bound.run.id, started.runId);
-    assert.equal(bound.status, "bound");
-    assert.deepEqual(bound.environment, {
+    const bootstrapHtml = await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
+      suiteName: "integration",
+      testName: "search flow",
       tool: "integration-test",
-      browser: {
-        family: "chromium",
-        version: "146.0.7680.178",
-        source: "bootstrap-request",
-      },
     });
-
-    const currentBeforeEnd = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
-
-    assert.equal(currentBeforeEnd.bound, true);
-    assert.equal(currentBeforeEnd.run.id, started.runId);
-    assert.equal(currentBeforeEnd.status, "bound");
-    assert.deepEqual(currentBeforeEnd.environment, {
-      tool: "integration-test",
-      browser: {
-        family: "chromium",
-        version: "146.0.7680.178",
-        source: "bootstrap-request",
-      },
-    });
-
-    const ended = await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
-    });
-
-    assert.equal(ended.ok, true);
-
-    const currentAfterEnd = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
-
-    assert.equal(currentAfterEnd.bound, true);
-    assert.equal(currentAfterEnd.run.id, started.runId);
-    assert.equal(currentAfterEnd.status, "ending");
+    assert.match(bootstrapHtml, /WDYT initializing|WDYT capture started|WDYT bind timed out/);
 
     const ingested = await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/dashboard",
         title: "Dashboard",
@@ -1278,7 +1267,6 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
         alertText: null,
       },
       run: {
-        id: started.runId,
         testName: "search flow",
         startedAt: 0,
         endedAt: 1,
@@ -1297,15 +1285,11 @@ test("run lifecycle persists and reduces a bound browser flow", { timeout: 15_00
     assert.equal(ingested.ok, true);
     assert.match(ingested.flowId, /^[0-9a-f]{16}$/);
 
-    const currentAfterIngest = await getJson(serverUrl, "/bindings/current?browserSessionId=browser-session-1");
-
-    assert.deepEqual(currentAfterIngest, { bound: false });
-
     const rawRuns = await readFile(path.join(tempDir, ".wdyt", "runs.raw.jsonl"), "utf8");
     const processedRuns = await readFile(path.join(tempDir, ".wdyt", "runs.processed.jsonl"), "utf8");
 
     assert.match(rawRuns, /"id":"integration"/);
-    assert.match(rawRuns, new RegExp(`"id":"${started.runId}"`));
+    assert.match(rawRuns, /"id":"[0-9a-f-]{36}"/);
     assert.match(rawRuns, /"tool":"integration-test"/);
     assert.match(rawRuns, /"family":"chromium"/);
     assert.match(rawRuns, /"version":"146.0.7680.178"/);
@@ -1353,34 +1337,28 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
   try {
     await waitForHealth(serverUrl);
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "proposal flow",
-      environment: {
-        tool: "integration-test",
-      },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
+      tool: "integration-test",
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/dashboard",
         title: "Dashboard",
@@ -1388,7 +1366,6 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
         alertText: null,
       },
       run: {
-        id: started.runId,
         testName: "proposal flow",
         startedAt: 0,
         endedAt: 1,
@@ -1459,32 +1436,28 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
       aliases: ["google search", "google"],
     });
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "search error flow",
-      environment: { tool: "integration-test" },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
+      tool: "integration-test",
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "https://www.google.com/sorry/index?continue=https://www.google.com/search%3Fq%3Dwdyt%2Btesting",
         title: "Google Search",
@@ -1492,7 +1465,6 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
         alertText: "There was an error",
       },
       run: {
-        id: started.runId,
         testName: "search error flow",
         startedAt: 0,
         endedAt: 1,
@@ -1587,32 +1559,28 @@ test("review caps confidence for literal typed values even when descriptor is me
   try {
     await waitForHealth(serverUrl);
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "retry proposal flow",
-      environment: { tool: "integration-test" },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
+      tool: "integration-test",
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "https://www.google.com/sorry/index",
         title: "Google Search",
@@ -1620,7 +1588,6 @@ test("review caps confidence for literal typed values even when descriptor is me
         alertText: "There was an error",
       },
       run: {
-        id: started.runId,
         testName: "retry proposal flow",
         startedAt: 0,
         endedAt: 1,
@@ -1691,32 +1658,28 @@ test("review raises confidence for explicit successful end-state signals", { tim
   try {
     await waitForHealth(serverUrl);
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "search-results",
-      environment: { tool: "integration-test" },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
+      tool: "integration-test",
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/search/results?q=wdyt",
         title: "Search Results",
@@ -1724,7 +1687,6 @@ test("review raises confidence for explicit successful end-state signals", { tim
         alertText: null,
       },
       run: {
-        id: started.runId,
         testName: "search-results",
         startedAt: 0,
         endedAt: 1,
@@ -1791,32 +1753,28 @@ test("review keeps deterministic confidence for successful login despite mechani
   try {
     await waitForHealth(serverUrl);
 
-    const started = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "login-success-dashboard",
-      environment: { tool: "integration-test" },
-    });
-
-    await fetch(started.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: started.runId,
-    });
-
-    await postJson(serverUrl, "/runs/end", {
-      runId: started.runId,
-      reason: "completed",
+      tool: "integration-test",
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: bound.suite,
-      environment: bound.environment,
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+        browser: {
+          family: "chromium",
+          version: "146.0.7680.178",
+          source: "bootstrap-request",
+        },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/dashboard",
         title: "Dashboard",
@@ -1824,7 +1782,6 @@ test("review keeps deterministic confidence for successful login despite mechani
         alertText: null,
       },
       run: {
-        id: started.runId,
         testName: "login-success-dashboard",
         startedAt: 0,
         endedAt: 1,
@@ -1873,31 +1830,12 @@ test("review splits one canonical flow into separate outcome variants", { timeou
   try {
     await waitForHealth(serverUrl);
 
-    const startedA = await postJson(serverUrl, "/runs/start", {
+    await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "integration",
       testName: "login-success-dashboard",
-      environment: { tool: "integration-test" },
-    });
-    const startedB = await postJson(serverUrl, "/runs/start", {
-      suiteName: "integration",
-      testName: "login-invalid",
-      environment: { tool: "integration-test" },
-    });
-
-    await fetch(startedA.bootstrapUrl, {
-      headers: {
-        "user-agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.178 Safari/537.36",
-      },
-    }).then((response) => response.text());
-
-    const boundA = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-1",
-      runId: startedA.runId,
-    });
-    const boundB = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "browser-session-2",
-      runId: startedB.runId,
+      tool: "integration-test",
     });
 
     const sharedEvents = [
@@ -1912,8 +1850,11 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     ];
 
     await postJson(serverUrl, "/ingest", {
-      suite: boundA.suite,
-      environment: boundA.environment,
+      suite: { id: "integration", name: "integration", normalizedName: "integration" },
+      environment: {
+        tool: "integration-test",
+        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/dashboard",
         title: "Dashboard",
@@ -1921,7 +1862,6 @@ test("review splits one canonical flow into separate outcome variants", { timeou
         alertText: null,
       },
       run: {
-        id: startedA.runId,
         testName: "login-success-dashboard",
         startedAt: 0,
         endedAt: 1,
@@ -1931,8 +1871,11 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     });
 
     await postJson(serverUrl, "/ingest", {
-      suite: boundB.suite,
-      environment: boundB.environment,
+      suite: { id: "integration", name: "integration", normalizedName: "integration" },
+      environment: {
+        tool: "integration-test",
+        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+      },
       endState: {
         finalUrl: "http://127.0.0.1:4010/login",
         title: "Demo Login",
@@ -1940,7 +1883,6 @@ test("review splits one canonical flow into separate outcome variants", { timeou
         alertText: "Invalid username or password.",
       },
       run: {
-        id: startedB.runId,
         testName: "login-invalid",
         startedAt: 0,
         endedAt: 1,
@@ -2112,47 +2054,28 @@ test("API validation rejects missing required fields and accepts omitted optiona
   try {
     await waitForHealth(serverUrl);
 
-    const missingSuite = await postJsonAllowError(serverUrl, "/runs/start", {
-      testName: "missing suite",
-    });
-    assert.equal(missingSuite.status, 400);
-    assert.equal(missingSuite.body.error, "Invalid start run payload");
+    const missingAction = await fetch(`${serverUrl}/bootstrap`).then(async (response) => ({
+      status: response.status,
+      body: await response.json(),
+    }));
+    assert.equal(missingAction.status, 400);
+    assert.equal(missingAction.body.error, "bootstrap action must be 'start' or 'finalize'");
 
-    const missingTestName = await postJsonAllowError(serverUrl, "/runs/start", {
-      suiteName: "integration",
-    });
-    assert.equal(missingTestName.status, 400);
-    assert.equal(missingTestName.body.error, "Invalid start run payload");
-
-    const started = await postJson(serverUrl, "/runs/start", {
+    const validBootstrap = await fetchBootstrap(serverUrl, {
+      action: "start",
+      serverUrl,
       suiteName: "validation",
       testName: "optional metadata omitted",
     });
-    assert.match(started.runId, /^[0-9a-f-]{36}$/);
+    assert.match(validBootstrap, /WDYT initializing/);
 
-    const missingBrowserSession = await postJsonAllowError(serverUrl, "/bindings/bind", {
-      runId: started.runId,
+    const invalidIngest = await postJsonAllowError(serverUrl, "/ingest", {
+      suite: { id: "validation", name: "validation", normalizedName: "validation" },
+      run: { endedAt: 1, reason: "completed" },
+      events: [],
     });
-    assert.equal(missingBrowserSession.status, 400);
-    assert.equal(missingBrowserSession.body.error, "Invalid bind payload");
-
-    const bound = await postJson(serverUrl, "/bindings/bind", {
-      browserSessionId: "validation-browser",
-      runId: started.runId,
-    });
-
-    assert.equal(bound.ok, true);
-    assert.equal(bound.environment, undefined);
-
-    const missingRunIdOnEnd = await postJsonAllowError(serverUrl, "/runs/end", {
-      reason: "completed",
-    });
-    assert.equal(missingRunIdOnEnd.status, 400);
-    assert.equal(missingRunIdOnEnd.body.error, "Invalid end run payload");
-
-    const current = await getJson(serverUrl, "/bindings/current?browserSessionId=validation-browser");
-    assert.equal(current.bound, true);
-    assert.equal(current.environment, undefined);
+    assert.equal(invalidIngest.status, 400);
+    assert.equal(invalidIngest.body.error, "Invalid ingest payload");
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });

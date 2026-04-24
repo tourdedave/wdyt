@@ -12,43 +12,18 @@ const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
 const demoPassword = "wdyt-demo-2026!";
 
-async function startRun(testName) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/start`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      suiteName: "examples/demo/playwright",
-      testName,
-      environment: {
-        tool: "playwright",
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Start run failed with status ${response.status}`);
+function buildBootstrapUrl(action, testName, reason = "completed") {
+  const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
+  url.searchParams.set("action", action);
+  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
+  if (action === "start") {
+    url.searchParams.set("suiteName", "examples/demo/playwright");
+    url.searchParams.set("testName", testName);
+    url.searchParams.set("tool", "playwright");
+  } else {
+    url.searchParams.set("reason", reason);
   }
-
-  return response.json();
-}
-
-async function endRun(runId) {
-  const response = await fetch(`${DEFAULT_SERVER_URL}/runs/end`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      runId,
-      reason: "completed",
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`End run failed with status ${response.status}`);
-  }
+  return url.toString();
 }
 
 async function login(page, username = "demo", password = demoPassword) {
@@ -70,14 +45,14 @@ async function logout(page) {
 
 async function withBoundPage(context, testName, testFn) {
   const page = context.pages()[0] ?? (await context.newPage());
-  const started = await startRun(testName);
 
   try {
-    await page.goto(started.bootstrapUrl, { waitUntil: "domcontentloaded" });
+    await page.goto(buildBootstrapUrl("start", testName), { waitUntil: "domcontentloaded" });
     await page.locator('#status[data-status="ok"]').waitFor({ timeout: 15_000 });
     await testFn(page);
   } finally {
-    await endRun(started.runId);
+    await page.goto(buildBootstrapUrl("finalize", testName), { waitUntil: "domcontentloaded" });
+    await page.locator('#status[data-status="ok"]').waitFor({ timeout: 15_000 });
     await page.waitForTimeout(2_500);
   }
 }

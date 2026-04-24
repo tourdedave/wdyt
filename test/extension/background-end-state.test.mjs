@@ -56,52 +56,6 @@ test("background captures end-state fields before ingest", async () => {
     fetch: async (url, options = {}) => {
       fetchCalls.push({ url: String(url), options });
 
-      if (String(url).endsWith("/bindings/bind")) {
-        return {
-          ok: true,
-          async json() {
-            return {
-              suite: {
-                id: "suite-1",
-                name: "demo suite",
-                normalizedName: "demo-suite",
-              },
-              environment: {
-                browser: {
-                  family: "chromium",
-                  version: "149.0.0.0",
-                  source: "bootstrap-request",
-                },
-                tool: "selenium",
-              },
-              run: {
-                id: "run-1",
-                testName: "login-success-dashboard",
-                startedAt: 1,
-              },
-            };
-          },
-        };
-      }
-
-      if (String(url).includes("/bindings/current")) {
-        return {
-          ok: true,
-          async json() {
-            return {
-              bound: true,
-              run: {
-                id: "run-1",
-                testName: "login-success-dashboard",
-                startedAt: 1,
-              },
-              status: "ending",
-              endReason: "completed",
-            };
-          },
-        };
-      }
-
       if (String(url).endsWith("/ingest")) {
         return {
           ok: true,
@@ -176,26 +130,33 @@ test("background captures end-state fields before ingest", async () => {
 
   assert.ok(onMessage.listener, "background should register an onMessage listener");
 
-  const bindResult = await sendRuntimeMessage(onMessage.listener, {
-    kind: "BIND_RUN",
+  const startResult = await sendRuntimeMessage(onMessage.listener, {
+    kind: "BEGIN_CAPTURE",
     serverUrl: "http://127.0.0.1:3876",
-    runId: "run-1",
+    suiteName: "demo suite",
+    testName: "login-success-dashboard",
+    environment: {
+      browser: {
+        family: "chromium",
+        version: "149.0.0.0",
+        source: "bootstrap-request",
+      },
+      tool: "selenium",
+    },
   });
 
-  assert.equal(JSON.stringify(bindResult), JSON.stringify({
+  assert.equal(JSON.stringify(startResult), JSON.stringify({
     ok: true,
-    runId: "run-1",
     browserSessionId: "browser-session-1",
   }));
 
-  const syncResult = await sendRuntimeMessage(onMessage.listener, {
-    kind: "SYNC_RUN",
-    serverUrl: "http://127.0.0.1:3876",
+  const finalizeResult = await sendRuntimeMessage(onMessage.listener, {
+    kind: "FINALIZE_CAPTURE",
+    reason: "completed",
   });
 
-  assert.equal(JSON.stringify(syncResult), JSON.stringify({
+  assert.equal(JSON.stringify(finalizeResult), JSON.stringify({
     ok: true,
-    bound: false,
     browserSessionId: "browser-session-1",
     finalized: true,
   }));
@@ -211,8 +172,8 @@ test("background captures end-state fields before ingest", async () => {
     heading: "Dashboard",
     alertText: "Login failed",
   });
-  assert.equal(payload.run.id, "run-1");
+  assert.equal(payload.run.id, undefined);
+  assert.equal(payload.run.testName, "login-success-dashboard");
   assert.equal(payload.environment.tool, "selenium");
-  assert.ok(createdAlarms.some((alarm) => alarm.name === "wdyt-sync"));
-  assert.ok(clearedAlarms.includes("wdyt-sync"));
+  assert.ok(createdAlarms.some((alarm) => alarm.name === "wdyt-timeout"));
 });
