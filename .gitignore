@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wdit/
 .wdyt/
+.wdyt-artifacts/
 
 .DS_Store
 Thumbs.db
