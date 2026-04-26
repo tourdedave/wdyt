@@ -150,40 +150,45 @@ function getUniqueFlows(units: ReviewUnitRecord[]) {
 
 function formatCoverageLine(flow: CriticalFlowDetailRecord) {
   if (flow.status === "covered") {
-    return `${flow.name} — Covered`;
+    return `${flow.name} — ✅ Covered`;
   }
 
   if (flow.status === "missing") {
-    return `${flow.name} — Missing (no test evidence found)`;
+    return `${flow.name} — ❌ Missing — no evidence of this behavior in test execution`;
   }
 
   if (Array.isArray(flow.missingTerms) && flow.missingTerms.length > 0) {
-    return `${flow.name} — Partial (missing: ${flow.missingTerms.join(", ")})`;
+    return `${flow.name} — Partial — missing: ${flow.missingTerms.join(", ")}`;
   }
 
   return `${flow.name} — Partial`;
 }
 
-function formatCoverageSummary(flows: CriticalFlowDetailRecord[]) {
-  const covered = flows.filter((flow) => flow.status === "covered").length;
-  const partial = flows.filter((flow) => flow.status === "partial").length;
-  const missing = flows.filter((flow) => flow.status === "missing").length;
-  const parts = [
-    covered > 0 ? `${covered} covered` : "",
-    partial > 0 ? `${partial} partial` : "",
-    missing > 0 ? `${missing} missing` : "",
-  ].filter(Boolean);
+function getCoverageCounts(flows: CriticalFlowDetailRecord[]) {
+  return {
+    covered: flows.filter((flow) => flow.status === "covered").length,
+    missing: flows.filter((flow) => flow.status === "missing").length,
+  };
+}
 
-  if (parts.length === 0) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return `Coverage shows ${parts[0]}.`;
-  }
-  if (parts.length === 2) {
-    return `Coverage shows ${parts[0]} and ${parts[1]}.`;
-  }
-  return `Coverage shows ${parts[0]}, ${parts[1]}, and ${parts[2]}.`;
+function buildExecutiveSummaryHtml(data: SummaryReportData) {
+  const frequentBehaviors = data.observedBehaviors.filter((item) => item.count > 1).slice(0, 2);
+  const coverageCounts = getCoverageCounts(data.expectedBehaviors);
+
+  return `
+    <div class="summary-copy">
+      <p>
+        This run exercised <strong>${escapeHtml(data.observedBehaviors.length)}</strong> distinct behaviors${frequentBehaviors.length > 0 ? ", with the most frequent including:" : "."}
+      </p>
+      ${frequentBehaviors.length > 0 ? `
+      <ul class="summary-highlights">
+        ${frequentBehaviors.map((item) => `<li>${escapeHtml(item.title)} (${escapeHtml(item.count)})</li>`).join("")}
+      </ul>` : ""}
+      ${data.expectedBehaviors.length > 0 ? `
+      <p>
+        Coverage against expected behaviors shows <strong>${escapeHtml(coverageCounts.covered)}</strong> covered and <strong>${escapeHtml(coverageCounts.missing)}</strong> missing.
+      </p>` : ""}
+    </div>`;
 }
 
 export async function loadSummaryReportData(): Promise<SummaryReportData> {
@@ -195,12 +200,10 @@ export async function loadSummaryReportData(): Promise<SummaryReportData> {
     throw new Error("No wdyt data available for report export.");
   }
 
-  const coverageSummary = expectedBehaviors.length > 0 ? ` ${formatCoverageSummary(expectedBehaviors)}` : "";
-
   return {
     title: "What Did You Test?",
     subtitle: "Test Execution Summary",
-    executiveSummary: `This run exercised ${observedBehaviors.length} distinct behaviors.${coverageSummary}`.trim(),
+    executiveSummary: `This run exercised ${observedBehaviors.length} distinct behaviors.`,
     observedBehaviors,
     expectedBehaviors,
   };
@@ -221,6 +224,9 @@ export function buildReportHtml(data: SummaryReportData) {
     <meta charset="utf-8" />
     <title>${escapeHtml(data.title)} | ${escapeHtml(data.subtitle)}</title>
     <style>
+      @page {
+        margin: 40px;
+      }
       :root {
         color-scheme: light;
       }
@@ -233,6 +239,7 @@ export function buildReportHtml(data: SummaryReportData) {
         background: #ffffff;
         color: #111111;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.7;
       }
       main {
         max-width: 760px;
@@ -250,12 +257,24 @@ export function buildReportHtml(data: SummaryReportData) {
         font-size: 15px;
       }
       .summary {
-        margin: 24px 0 0;
+        margin: 28px 0 0;
         font-size: 16px;
-        line-height: 1.6;
+      }
+      .summary-copy p {
+        margin: 0;
+      }
+      .summary-copy p + p {
+        margin-top: 14px;
+      }
+      .summary-highlights {
+        margin: 14px 0 0;
+        padding-left: 22px;
+      }
+      .summary-highlights + p {
+        margin-top: 18px;
       }
       section {
-        margin-top: 30px;
+        margin-top: 48px;
       }
       h2 {
         margin: 0 0 12px;
@@ -281,7 +300,7 @@ export function buildReportHtml(data: SummaryReportData) {
         <h1>${escapeHtml(data.title)}</h1>
         <p class="subtitle">${escapeHtml(data.subtitle)}</p>
       </header>
-      <p class="summary">${escapeHtml(data.executiveSummary)}</p>
+      <div class="summary">${buildExecutiveSummaryHtml(data)}</div>
       <section>
         <h2>Observed Behaviors</h2>
         <ul>${observedBehaviorItems}</ul>

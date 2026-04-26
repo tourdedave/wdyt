@@ -548,7 +548,7 @@ function renderReviewSummaryPage() {
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
-      .header-shell { max-width: 1080px; margin: 0 auto; position: relative; }
+      .header-shell { position: relative; }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -558,7 +558,7 @@ function renderReviewSummaryPage() {
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
       .export-report { position: absolute; top: 50%; right: 0; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 10px 16px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; white-space: nowrap; }
       .export-report:hover { background: #195d3f; }
-      main { max-width: 1080px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 14px; }
+      main { padding: 24px 24px 48px; display: grid; gap: 14px; }
       .hero { display: grid; gap: 8px; }
       .hero h2 { margin: 0; font-size: 34px; }
       .hero p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.35; max-width: 760px; }
@@ -834,7 +834,7 @@ function renderReviewSummaryPage() {
 
               <section id="critical-flow-coverage" class="section-card">
               <div class="section-header">
-                <h3>Coverage Of Expected Behaviors</h3>
+                <h3>Coverage Against Expected Behaviors</h3>
               </div>
               <div class="metric-row">
                 <button class="metric-chip all \${coverageFilter === "all" ? "active" : ""}" data-coverage-filter="all">All: \${escapeHtml(String(criticalFlows.length))}</button>

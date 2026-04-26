@@ -2167,9 +2167,11 @@ test("artifact export supports pdf format", { timeout: 15_000 }, async () => {
     assert.match(reportBody, /%PDF-STUB/);
     assert.match(reportBody, /What Did You Test\?/);
     assert.match(reportBody, /Test Execution Summary/);
+    assert.match(reportBody, /This run exercised <strong>2<\/strong> distinct behaviors, with the most frequent including:/);
     assert.match(reportBody, /View dashboard \(2\)/);
+    assert.match(reportBody, /Coverage against expected behaviors shows <strong>1<\/strong> covered and <strong>1<\/strong> missing\./);
     assert.match(reportBody, /Coverage Against Expected Behaviors/);
-    assert.match(reportBody, /Forgot password — Missing \(no test evidence found\)/);
+    assert.match(reportBody, /Forgot password — ❌ Missing — no evidence of this behavior in test execution/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -2300,7 +2302,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /What Did You Test\? \| Summary/);
     assert.match(page, /See what was exercised based on observed evidence, and evaluate coverage of critical business flows\./);
     assert.match(page, /Export Report/);
-    assert.match(page, /Coverage Of Expected Behaviors/);
+    assert.match(page, /Coverage Against Expected Behaviors/);
     assert.match(page, /Observed Behaviors/);
     assert.match(page, /Covered/);
     assert.match(page, /Partial/);
@@ -2416,6 +2418,7 @@ test("summary page exports a shared pdf report", { timeout: 15_000 }, async () =
     const pdfBody = Buffer.from(await pdfResponse.arrayBuffer()).toString("utf8");
     assert.match(pdfBody, /%PDF-STUB/);
     assert.match(pdfBody, /What Did You Test\?/);
+    assert.match(pdfBody, /This run exercised <strong>1<\/strong> distinct behaviors, with the most frequent including:/);
     assert.match(pdfBody, /Coverage Against Expected Behaviors/);
     assert.match(pdfBody, /View dashboard \(2\)/);
   } finally {
