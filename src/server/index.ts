@@ -940,6 +940,7 @@ function renderCriticalFlowsPage() {
       .intro p, .detail-header p, .meta { color: var(--muted); margin: 0; line-height: 1.5; }
       .example-list { margin: 12px 0 0; padding-left: 18px; }
       .form-grid { display: grid; gap: 12px; }
+      .field-label { display: block; margin-bottom: 8px; font-size: 15px; font-weight: 700; color: var(--ink); }
       textarea, input, button { font: inherit; }
       textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
       textarea { min-height: 96px; resize: vertical; }
@@ -948,7 +949,8 @@ function renderCriticalFlowsPage() {
       button.primary { background: var(--accent); color: white; }
       button.ghost-link { background: transparent; padding: 0; color: var(--accent); text-decoration: underline; }
       button:disabled { opacity: 0.6; cursor: wait; }
-      .interpretation, .callout, .detail-block, .suggestions { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .interpretation, .callout, .suggestions { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .interpretation label + label { display: block; margin-top: 14px; }
       .duplicate-warning { border: 1px solid rgba(183,110,27,0.35); background: rgba(183,110,27,0.08); border-radius: 12px; padding: 14px; }
       .duplicate-warning h3 { margin: 0 0 8px; font-size: 18px; }
       .duplicate-match { border-top: 1px solid rgba(216,207,191,0.8); padding-top: 12px; margin-top: 12px; }
@@ -963,15 +965,18 @@ function renderCriticalFlowsPage() {
       .modal-shell { position: relative; padding-top: 18px; }
       .modal-close { position: absolute; top: 0; right: 0; border: 1px solid rgba(216,207,191,0.9); background: rgba(255,253,248,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(29,26,22,0.08); }
       .modal-close:hover { color: var(--ink); border-color: var(--line); }
-      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-      .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-width: 0; }
-      .list-block h3 { margin: 0 0 10px; font-size: 15px; }
+      .detail-status { margin-top: 2px; }
+      .detail-actions { margin-top: 10px; }
+      .detail-section { padding-top: 18px; border-top: 1px solid rgba(216,207,191,0.75); }
+      .detail-section h3 { margin: 0 0 10px; font-size: 20px; }
+      .detail-section p { margin: 0; }
+      .detail-support { margin-top: 8px; color: var(--muted); }
       ul { margin: 0; padding-left: 18px; }
       li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; }
       .pills { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
       .pill { border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 8px 12px; cursor: pointer; }
       .empty-note { color: var(--muted); }
-      @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .grid { grid-template-columns: 1fr; } }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } }
     </style>
   </head>
   <body>
@@ -993,7 +998,7 @@ function renderCriticalFlowsPage() {
       <section><div id="detail" class="panel">Loading…</div></section>
     </main>
     <script>
-      let state = { flows: [], suggestions: [], hasDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null };
+      let state = { flows: [], suggestions: [], hasDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", loadError: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null, editingBaseline: null };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -1003,7 +1008,25 @@ function renderCriticalFlowsPage() {
       const summarizeItems = (values) => Array.isArray(values) && values.length > 0
         ? values.map((value) => \`<li>\${escapeHtml(value.name || value)}</li>\`).join("")
         : "<li>-</li>";
-      const normalizeCompareValue = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+      const normalizeCompareValue = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\\s+/g, " ").trim();
+      const normalizeBehaviorLines = (value) => String(value || "")
+        .split("\\n")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      const serializeParsedFlow = (value) => JSON.stringify({
+        name: value?.name || "",
+        rawText: value?.rawText || "",
+        interpretedSteps: Array.isArray(value?.interpretedSteps) ? value.interpretedSteps : [],
+        interpretedTerms: Array.isArray(value?.interpretedTerms) ? value.interpretedTerms : [],
+        outcome: value?.outcome || "",
+      });
+      const hasEditedFlowChanges = () => {
+        if (!state.editingFlowId || !state.parsedDraft || !state.editingBaseline) {
+          return false;
+        }
+
+        return serializeParsedFlow(state.parsedDraft) !== serializeParsedFlow(state.editingBaseline);
+      };
       const computeOverlapScore = (leftValues, rightValues) => {
         const left = [...new Set((leftValues || []).map(normalizeCompareValue).filter(Boolean))];
         const right = new Set((rightValues || []).map(normalizeCompareValue).filter(Boolean));
@@ -1094,30 +1117,40 @@ function renderCriticalFlowsPage() {
       };
 
       async function loadState() {
-        const params = new URLSearchParams(window.location.search);
-        const initialGapTerm = params.get("gapTerm");
-        const initialFlowId = params.get("flowId");
-        const response = await fetch("/critical-flows/state");
-        const nextState = await response.json();
-        state.flows = nextState.flows;
-        state.suggestions = nextState.suggestions;
-        state.hasDescriptors = nextState.hasDescriptors;
-        if (initialFlowId && nextState.flows.some((flow) => flow.id === initialFlowId)) {
-          state.selectedId = initialFlowId;
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const initialGapTerm = params.get("gapTerm");
+          const initialFlowId = params.get("flowId");
+          const response = await fetch("/critical-flows/state");
+          const nextState = await response.json();
+          if (!response.ok) {
+            throw new Error(nextState.error || "Unable to load expected behaviors.");
+          }
+
+          state.loadError = "";
+          state.flows = nextState.flows;
+          state.suggestions = nextState.suggestions;
+          state.hasDescriptors = nextState.hasDescriptors;
+          if (initialFlowId && nextState.flows.some((flow) => flow.id === initialFlowId)) {
+            state.selectedId = initialFlowId;
+          }
+          if (initialGapTerm && nextState.flows.some((flow) => (flow.missingTerms || []).includes(initialGapTerm))) {
+            state.activeGapTerm = initialGapTerm;
+            state.selectedId = nextState.flows.find((flow) => (flow.missingTerms || []).includes(initialGapTerm))?.id ?? state.selectedId;
+          }
+          if (state.activeGapTerm && !getGapSummary().some((entry) => entry.term === state.activeGapTerm)) {
+            state.activeGapTerm = null;
+          }
+          if (!state.selectedId && state.flows[0]) {
+            state.selectedId = state.flows[0].id;
+          }
+          if (state.selectedId && !state.flows.some((flow) => flow.id === state.selectedId)) {
+            state.selectedId = state.flows[0]?.id ?? null;
+          }
+        } catch (error) {
+          state.loadError = error instanceof Error ? error.message : "Unable to load expected behaviors.";
         }
-        if (initialGapTerm && nextState.flows.some((flow) => (flow.missingTerms || []).includes(initialGapTerm))) {
-          state.activeGapTerm = initialGapTerm;
-          state.selectedId = nextState.flows.find((flow) => (flow.missingTerms || []).includes(initialGapTerm))?.id ?? state.selectedId;
-        }
-        if (state.activeGapTerm && !getGapSummary().some((entry) => entry.term === state.activeGapTerm)) {
-          state.activeGapTerm = null;
-        }
-        if (!state.selectedId && state.flows[0]) {
-          state.selectedId = state.flows[0].id;
-        }
-        if (state.selectedId && !state.flows.some((flow) => flow.id === state.selectedId)) {
-          state.selectedId = state.flows[0]?.id ?? null;
-        }
+
         render();
       }
 
@@ -1185,14 +1218,15 @@ function renderCriticalFlowsPage() {
         });
       }
 
-      function renderListBlock(title, values) {
-        return \`<div class="list-block"><h3>\${escapeHtml(title)}</h3><ul>\${summarizeItems(values)}</ul></div>\`;
-      }
-
       function renderDraftArea(options = {}) {
         const compact = options.compact === true;
         const parsed = state.parsedDraft;
+        const interpretedBehavior = parsed
+          ? [...new Set([...(parsed.interpretedSteps || []), ...(parsed.interpretedTerms || [])])].filter(Boolean)
+          : [];
         const duplicateMatches = getLikelyDuplicates(parsed);
+        const canSaveParsed = Boolean(parsed) && interpretedBehavior.length > 0;
+        const showSaveAction = state.editingFlowId ? hasEditedFlowChanges() && canSaveParsed : canSaveParsed;
         const examples = state.suggestions.length === 0 ? \`
           <ul class="example-list">
             <li>Log in successfully</li>
@@ -1200,7 +1234,7 @@ function renderCriticalFlowsPage() {
             <li>Create and export a report</li>
             <li>Invite a new user</li>
           </ul>\` : "";
-        const suggestions = state.hasDescriptors && state.suggestions.length > 0
+        const suggestions = !state.editingFlowId && state.hasDescriptors && state.suggestions.length > 0
           ? \`<div class="suggestions">
               <strong>Suggested from reviewed tests</strong>
               <div class="pills">
@@ -1219,9 +1253,10 @@ function renderCriticalFlowsPage() {
             \${suggestions}
             <div class="form-grid">
               <label>
-                <div>Expected behavior</div>
+                <span class="field-label">Input</span>
                 <textarea id="criticalFlowInput" placeholder="Log in and export a report to CSV">\${escapeHtml(state.draftText)}</textarea>
               </label>
+              <p class="meta">Inputs are interpreted into comparable behavior terms for matching against observed execution.</p>
               <div class="button-row">
                 <button class="primary" id="interpretFlow" \${state.isWorking ? "disabled" : ""}>Interpret</button>
                 \${compact ? '<button type="button" id="cancelCriticalFlow">Cancel</button>' : ""}
@@ -1230,10 +1265,14 @@ function renderCriticalFlowsPage() {
             </div>
             \${parsed ? \`
               <div class="interpretation">
-                <strong>Interpreted as</strong>
-                <ul>\${parsed.interpretedSteps.map((step) => \`<li>\${escapeHtml(step)}</li>\`).join("")}</ul>
-                <p><strong>Interpreted terms:</strong> \${escapeHtml(parsed.interpretedTerms.join(", "))}</p>
-                <p><strong>Outcome:</strong> \${escapeHtml(parsed.outcome || "-")}</p>
+                <label>
+                  <span class="field-label">Display name</span>
+                  <input id="criticalFlowNameInput" aria-label="Display name" value="\${escapeHtml(parsed.name || state.draftText)}" />
+                </label>
+                <label>
+                  <span class="field-label">Interpreted behavior</span>
+                  <textarea id="interpretedBehaviorInput" aria-label="Interpreted behavior">\${escapeHtml(interpretedBehavior.join("\\n"))}</textarea>
+                </label>
                 \${duplicateMatches.length > 0 ? \`
                   <div class="duplicate-warning">
                     <h3>Possible duplicate detected</h3>
@@ -1252,7 +1291,7 @@ function renderCriticalFlowsPage() {
                   </div>\`
                 : ""}
                 <div class="button-row">
-                  <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Expected Behavior"}</button>
+                  \${showSaveAction ? \`<button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Expected Behavior"}</button>\` : ""}
                   \${duplicateMatches.length > 0 ? '<span class="meta">Save Anyway</span>' : ""}
                 </div>
               </div>\`
@@ -1268,43 +1307,53 @@ function renderCriticalFlowsPage() {
       }
 
       function renderSelectedFlow(flow) {
-        const missingTitle = flow.status === "partial" ? "Potential missing coverage" : "Potential missing coverage";
-        const missingPanel = flow.missingTerms.length > 0
+        const interpretedBehavior = [...new Set([...(flow.interpretedSteps || []), ...(flow.interpretedTerms || [])])]
+          .filter(Boolean);
+        const statusText = flow.status === "covered"
+          ? "✅ Covered"
+          : flow.status === "partial"
+            ? "⚠️ Partial"
+            : "❌ Missing";
+        const explanationSection = flow.status === "missing"
           ? \`
-            <div class="list-block">
-              <h3>\${escapeHtml(missingTitle)}</h3>
-              <p class="meta">No reviewed test evidence currently matches:</p>
-              <ul>\${summarizeItems(flow.missingTerms)}</ul>
-              <p class="meta">These concepts were not found in reviewed descriptor vocabulary. This may indicate missing test coverage, missing reviewed runs, or vocabulary mismatch.</p>
+            <div class="detail-section">
+              <h3>Why it’s missing</h3>
+              <p>No test evidence was found for this behavior.</p>
+              <p class="detail-support">This may indicate missing test coverage or a mismatch in behavior naming.</p>
             </div>\`
-          : "";
+          : flow.status === "partial" && flow.missingTerms.length > 0
+            ? \`
+            <div class="detail-section">
+              <h3>What’s still missing</h3>
+              <ul>\${summarizeItems(flow.missingTerms)}</ul>
+              <p class="detail-support">These parts of the behavior were not found in observed test execution.</p>
+            </div>\`
+            : "";
         return \`
           <div class="stack">
             <div class="detail-header">
               <h2>\${escapeHtml(flow.name)}</h2>
-              <p class="meta">Coverage status: <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusLabel(flow.status))}</span></p>
-            </div>
-            <div class="detail-block">
-              <p><strong>Original raw text:</strong> \${escapeHtml(flow.rawText)}</p>
-              <p><strong>Outcome:</strong> \${escapeHtml(flow.outcome || "-")}</p>
-              <div class="button-row" style="margin-top: 14px;">
+              <p class="detail-status">Status: <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusText)}</span></p>
+              <div class="button-row detail-actions">
                 <button type="button" id="editCriticalFlow">Edit</button>
                 <button type="button" id="deleteCriticalFlow">Delete</button>
               </div>
             </div>
-            <div class="grid">
-              \${renderListBlock("Interpreted Steps", flow.interpretedSteps)}
-              \${renderListBlock("Interpreted Terms", flow.interpretedTerms)}
-              \${renderListBlock("Matched Concepts", flow.matchedConcepts)}
-              \${missingPanel}
-              \${renderListBlock("Matching Descriptors", flow.matchedDescriptors.map((descriptor) => descriptor.name))}
+            <div class="detail-section">
+              <h3>Interpreted Behavior</h3>
+              <ul>\${summarizeItems(interpretedBehavior)}</ul>
             </div>
-            \${flow.status === "missing" ? '<p class="empty-note">No reviewed test evidence matches this critical flow yet.</p>' : ""}
+            \${explanationSection}
           </div>\`;
       }
 
       function renderDetail() {
         const detail = document.getElementById("detail");
+        if (state.loadError) {
+          detail.innerHTML = \`<p class="error">\${escapeHtml(state.loadError)}</p>\`;
+          return;
+        }
+
         const selectedFlow = state.flows.find((flow) => flow.id === state.selectedId);
         const hasFlows = state.flows.length > 0;
         detail.innerHTML =
@@ -1338,6 +1387,7 @@ function renderCriticalFlowsPage() {
             state.selectedId = targetId;
             state.showDraftForm = false;
             state.editingFlowId = null;
+            state.editingBaseline = null;
             state.parsedDraft = null;
             state.error = "";
             state.isWorking = false;
@@ -1348,6 +1398,7 @@ function renderCriticalFlowsPage() {
         detail.querySelector("#openCriticalFlowForm")?.addEventListener("click", () => {
           state.showDraftForm = true;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.draftText = "";
           state.parsedDraft = null;
           state.error = "";
@@ -1357,6 +1408,7 @@ function renderCriticalFlowsPage() {
         detail.querySelector("#cancelCriticalFlow")?.addEventListener("click", () => {
           state.showDraftForm = false;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
@@ -1366,6 +1418,7 @@ function renderCriticalFlowsPage() {
         detail.querySelector("#closeCriticalFlowModal")?.addEventListener("click", () => {
           state.showDraftForm = false;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
@@ -1379,6 +1432,7 @@ function renderCriticalFlowsPage() {
 
           state.showDraftForm = false;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
@@ -1392,6 +1446,7 @@ function renderCriticalFlowsPage() {
 
           state.showDraftForm = false;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.parsedDraft = null;
           state.error = "";
           state.isWorking = false;
@@ -1408,6 +1463,13 @@ function renderCriticalFlowsPage() {
           state.editingFlowId = selectedFlow.id;
           state.draftText = selectedFlow.rawText;
           state.parsedDraft = {
+            name: selectedFlow.name,
+            rawText: selectedFlow.rawText,
+            interpretedSteps: selectedFlow.interpretedSteps,
+            interpretedTerms: selectedFlow.interpretedTerms,
+            outcome: selectedFlow.outcome,
+          };
+          state.editingBaseline = {
             name: selectedFlow.name,
             rawText: selectedFlow.rawText,
             interpretedSteps: selectedFlow.interpretedSteps,
@@ -1438,6 +1500,7 @@ function renderCriticalFlowsPage() {
 
           state.showDraftForm = false;
           state.editingFlowId = null;
+          state.editingBaseline = null;
           state.parsedDraft = null;
           state.error = "";
           state.selectedId = state.flows.find((flow) => flow.id !== selectedFlow.id)?.id ?? null;
@@ -1447,6 +1510,38 @@ function renderCriticalFlowsPage() {
         detail.querySelector("#interpretFlow")?.addEventListener("click", async () => {
           const input = document.getElementById("criticalFlowInput");
           await interpretDraft(input.value);
+        });
+
+        detail.querySelector("#criticalFlowNameInput")?.addEventListener("input", (event) => {
+          if (!state.parsedDraft) {
+            return;
+          }
+
+          state.parsedDraft = {
+            ...state.parsedDraft,
+            name: event.target.value,
+          };
+        });
+
+        detail.querySelector("#criticalFlowNameInput")?.addEventListener("change", () => {
+          render();
+        });
+
+        detail.querySelector("#interpretedBehaviorInput")?.addEventListener("input", (event) => {
+          if (!state.parsedDraft) {
+            return;
+          }
+
+          const nextValues = normalizeBehaviorLines(event.target.value);
+          state.parsedDraft = {
+            ...state.parsedDraft,
+            interpretedSteps: nextValues,
+            interpretedTerms: nextValues,
+          };
+        });
+
+        detail.querySelector("#interpretedBehaviorInput")?.addEventListener("change", () => {
+          render();
         });
 
         detail.querySelector("#saveCriticalFlow")?.addEventListener("click", async () => {
@@ -1475,6 +1570,7 @@ function renderCriticalFlowsPage() {
             state.isWorking = false;
             state.showDraftForm = false;
             state.editingFlowId = null;
+            state.editingBaseline = null;
             state.selectedId = payload.id;
             await loadState();
           } catch (error) {

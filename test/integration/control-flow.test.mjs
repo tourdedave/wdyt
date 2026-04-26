@@ -2896,13 +2896,15 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     assert.match(page, /Coverage Gaps/);
     assert.match(page, /Missing:/);
     assert.match(page, /Missing in/);
-    assert.match(page, /Potential missing coverage/);
-    assert.match(page, /No reviewed test evidence currently matches:/);
-    assert.match(page, /No reviewed test evidence matches this critical flow yet\./);
-    assert.match(
-      page,
-      /These concepts were not found in reviewed descriptor vocabulary\. This may indicate missing test coverage, missing reviewed runs, or vocabulary mismatch\./
-    );
+    assert.match(page, /Interpreted Behavior/);
+    assert.match(page, /Why it’s missing/);
+    assert.match(page, /No test evidence was found for this behavior\./);
+    assert.match(page, /This may indicate missing test coverage or a mismatch in behavior naming\./);
+    assert.doesNotMatch(page, /Interpreted Terms/);
+    assert.doesNotMatch(page, /Matched Concepts/);
+    assert.doesNotMatch(page, /Matching Descriptors/);
+    assert.doesNotMatch(page, /Original raw text:/);
+    assert.doesNotMatch(page, /Potential missing coverage/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
