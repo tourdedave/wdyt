@@ -4,6 +4,7 @@ import { DEFAULT_SERVER_URL } from "../shared/constants.js";
 import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js";
 import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
+import { loadSummaryReportData, renderReportPdf } from "../report/summary-report.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
 import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
@@ -151,6 +152,8 @@ function renderReviewPage() {
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
+      .header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+      .header-copy { min-width: 0; }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -545,6 +548,7 @@ function renderReviewSummaryPage() {
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
+      .header-shell { max-width: 1080px; margin: 0 auto; position: relative; }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -552,6 +556,8 @@ function renderReviewSummaryPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+      .export-report { position: absolute; top: 50%; right: 0; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 10px 16px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; white-space: nowrap; }
+      .export-report:hover { background: #195d3f; }
       main { max-width: 1080px; margin: 0 auto; padding: 24px 20px 48px; display: grid; gap: 14px; }
       .hero { display: grid; gap: 8px; }
       .hero h2 { margin: 0; font-size: 34px; }
@@ -607,6 +613,7 @@ function renderReviewSummaryPage() {
       .unique-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
+        .export-report { position: static; transform: none; margin-top: 12px; }
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .repeat-list { grid-template-columns: 1fr; }
       }
@@ -614,13 +621,20 @@ function renderReviewSummaryPage() {
   </head>
   <body>
     <header>
-      <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>See what was exercised based on observed evidence, and evaluate coverage of critical business flows.</p>
-      <nav>
-        <a href="/review">Observed Behaviors</a>
-        <a href="/critical-flows">Expected Behaviors</a>
-        <a class="active" href="/review/summary">Summary</a>
-      </nav>
+      <div class="header-shell">
+        <div class="header-bar">
+          <div class="header-copy">
+            <h1><a href="/review/summary">What Did You Test?</a></h1>
+            <p>See what was exercised based on observed evidence, and evaluate coverage of critical business flows.</p>
+            <nav>
+              <a href="/review">Observed Behaviors</a>
+              <a href="/critical-flows">Expected Behaviors</a>
+              <a class="active" href="/review/summary">Summary</a>
+            </nav>
+          </div>
+        </div>
+        <a class="export-report" href="/report/summary.pdf">Export Report</a>
+      </div>
     </header>
     <main>
       <div id="summary">Loading…</div>
@@ -1624,6 +1638,24 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderReviewSummaryPage());
     return;
+  }
+
+  if (req.method === "GET" && requestPath === "/report/summary.pdf") {
+    try {
+      const reportData = await loadSummaryReportData();
+      const pdfMode = process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer";
+      const pdfBuffer = await renderReportPdf(reportData, { mode: pdfMode });
+      res.writeHead(200, {
+        "content-type": "application/pdf",
+        "content-disposition": 'attachment; filename="wdyt-report.pdf"',
+      });
+      res.end(pdfBuffer);
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
   }
 
   if (req.method === "GET" && requestPath === "/critical-flows") {

@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import { buildArtifactWithOptions } from "../artifact/buildArtifact.js";
 import { importArtifact } from "../artifact/importArtifact.js";
+import { exportPdf, loadSummaryReportData } from "../report/summary-report.js";
 import {
   getProcessedRunsPath,
   getRawRunsPath,
@@ -1143,7 +1144,7 @@ async function main() {
   const artifactUsage = [
     "Usage:",
     "  wdyt artifact",
-    "  wdyt artifact export [--output <path>]",
+    "  wdyt artifact export [--format zip|pdf] [--output <path>]",
     "  wdyt artifact import <zip-path>",
     "",
     "Commands:",
@@ -1151,10 +1152,12 @@ async function main() {
     "  import    Restore wdyt runtime data from an artifact zip",
     "",
     "Options:",
+    "  -f, --format <format>  Export format: zip (default) or pdf",
     "  -o, --output <path>   Output zip path or directory for export",
     "",
     "Default export location:",
-    "  <runtime-data-dir-parent>/.wdyt-artifacts/",
+    "  zip: <runtime-data-dir-parent>/.wdyt-artifacts/",
+    "  pdf: ./wdyt-report.pdf",
   ].join("\n");
 
   if (command === "flows") {
@@ -1193,8 +1196,14 @@ async function main() {
 
     if (subcommand === "export") {
       let outputPath;
+      let format = "zip";
       for (let index = 1; index < args.length; index += 1) {
         const value = args[index];
+        if (value === "--format" || value === "-f") {
+          format = args[index + 1] ?? "";
+          index += 1;
+          continue;
+        }
         if (value === "--output" || value === "-o") {
           outputPath = args[index + 1];
           index += 1;
@@ -1202,7 +1211,28 @@ async function main() {
         }
       }
 
+      if ((args.includes("--format") || args.includes("-f")) && !format) {
+        console.error(artifactUsage);
+        process.exitCode = 1;
+        return;
+      }
+
       if ((args.includes("--output") || args.includes("-o")) && !outputPath) {
+        console.error(artifactUsage);
+        process.exitCode = 1;
+        return;
+      }
+
+      if (format === "pdf") {
+        const targetPath = outputPath ?? "./wdyt-report.pdf";
+        const pdfMode = process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer";
+        const reportData = await loadSummaryReportData();
+        await exportPdf(reportData, targetPath, { mode: pdfMode });
+        console.log(`Report generated: ${targetPath}`);
+        return;
+      }
+
+      if (format !== "zip") {
         console.error(artifactUsage);
         process.exitCode = 1;
         return;

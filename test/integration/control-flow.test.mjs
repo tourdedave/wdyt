@@ -1931,7 +1931,7 @@ test("artifact command packages current wdyt runtime state with manifest", { tim
     await writeFile(path.join(dataDir, "ignore.txt"), "not included\n", "utf8");
 
     const artifactHelp = await runCli(tempDir, ["artifact"]);
-    assert.match(artifactHelp, /wdyt artifact export \[--output <path>\]/);
+    assert.match(artifactHelp, /wdyt artifact export \[--format zip\|pdf\] \[--output <path>\]/);
     assert.match(artifactHelp, /wdyt artifact import <zip-path>/);
 
     const zipPath = await runCli(tempDir, ["artifact", "export"]);
@@ -2037,6 +2037,139 @@ test("artifact export supports an explicit output path", { timeout: 15_000 }, as
     const zipEntries = await readZipEntries(zipPath);
     assert.ok(zipEntries.has("manifest.json"));
     assert.ok(zipEntries.has("data/runs.raw.jsonl"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("artifact export supports pdf format", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-pdf-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "flow-dashboard-a",
+            flowId: "flow-dashboard-a",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-a"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-dashboard-b",
+            flowId: "flow-dashboard-b",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-b"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-settings",
+            flowId: "flow-settings",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["settings"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["settings"],
+            activeDescriptor: "Access settings",
+            activeVocab: ["settings"],
+            overlapTerms: ["settings"],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "critical-flows.json"),
+      `${JSON.stringify(
+        [
+          {
+            id: "expected-dashboard",
+            name: "View dashboard",
+            rawText: "View dashboard",
+            interpretedSteps: ["view dashboard"],
+            interpretedTerms: ["dashboard"],
+            status: "covered",
+            matchedDescriptorIds: ["flow-dashboard-a", "flow-dashboard-b"],
+            updatedAt: 1,
+          },
+          {
+            id: "expected-password",
+            name: "Forgot password",
+            rawText: "Forgot password",
+            interpretedSteps: ["forgot password"],
+            interpretedTerms: ["forgot password"],
+            status: "missing",
+            matchedDescriptorIds: [],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const result = await runCli(tempDir, ["artifact", "export", "--format", "pdf"], "", {
+      WDYT_PDF_STUB: "1",
+    });
+    assert.match(result, /Report generated: \.\/wdyt-report\.pdf/);
+
+    const reportBody = await readFile(path.join(tempDir, "wdyt-report.pdf"), "utf8");
+    assert.match(reportBody, /%PDF-STUB/);
+    assert.match(reportBody, /What Did You Test\?/);
+    assert.match(reportBody, /Test Execution Summary/);
+    assert.match(reportBody, /View dashboard \(2\)/);
+    assert.match(reportBody, /Coverage Against Expected Behaviors/);
+    assert.match(reportBody, /Forgot password — Missing \(no test evidence found\)/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -2166,6 +2299,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     const page = await fetch(`${serverUrl}/review/summary`).then((response) => response.text());
     assert.match(page, /What Did You Test\? \| Summary/);
     assert.match(page, /See what was exercised based on observed evidence, and evaluate coverage of critical business flows\./);
+    assert.match(page, /Export Report/);
     assert.match(page, /Coverage Of Expected Behaviors/);
     assert.match(page, /Observed Behaviors/);
     assert.match(page, /Covered/);
@@ -2180,6 +2314,114 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/critical-flows">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
   } finally {
     await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("summary page exports a shared pdf report", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-pdf-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  let child;
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    ({ child } = spawnServer(tempDir, port, {
+      WDYT_PDF_STUB: "1",
+    }));
+    await waitForHealth(serverUrl);
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "flow-dashboard-a",
+            flowId: "flow-dashboard-a",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-a"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-dashboard-b",
+            flowId: "flow-dashboard-b",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-b"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "critical-flows.json"),
+      `${JSON.stringify(
+        [
+          {
+            id: "expected-dashboard",
+            name: "View dashboard",
+            rawText: "View dashboard",
+            interpretedSteps: ["view dashboard"],
+            interpretedTerms: ["dashboard"],
+            status: "covered",
+            matchedDescriptorIds: ["flow-dashboard-a", "flow-dashboard-b"],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const pdfResponse = await fetch(`${serverUrl}/report/summary.pdf`);
+    assert.equal(pdfResponse.status, 200);
+    assert.match(pdfResponse.headers.get("content-type") || "", /application\/pdf/);
+    assert.match(pdfResponse.headers.get("content-disposition") || "", /wdyt-report\.pdf/);
+
+    const pdfBody = Buffer.from(await pdfResponse.arrayBuffer()).toString("utf8");
+    assert.match(pdfBody, /%PDF-STUB/);
+    assert.match(pdfBody, /What Did You Test\?/);
+    assert.match(pdfBody, /Coverage Against Expected Behaviors/);
+    assert.match(pdfBody, /View dashboard \(2\)/);
+  } finally {
+    if (child) {
+      await stopChildProcess(child);
+    }
     await rm(tempDir, { recursive: true, force: true });
   }
 });
