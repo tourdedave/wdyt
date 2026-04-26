@@ -200,10 +200,10 @@ function renderReviewPage() {
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Review flow variants, refine interpretations, and reprocess them when needed.</p>
+      <p>Review and refine observed behaviors before evaluating coverage.</p>
       <nav>
-        <a class="active" href="/review">Review</a>
-        <a href="/critical-flows">Critical Flows</a>
+        <a class="active" href="/review">Observed Behaviors</a>
+        <a href="/critical-flows">Expected Behaviors</a>
         <a href="/review/summary">Summary</a>
       </nav>
     </header>
@@ -605,8 +605,6 @@ function renderReviewSummaryPage() {
       .unique-bullet { color: var(--accent-2); font-size: 16px; line-height: 1.35; }
       .unique-link { color: inherit; text-decoration: none; font-size: 17px; line-height: 1.35; }
       .unique-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
-      .unique-marker { color: var(--accent-2); font-weight: 700; margin-left: 3px; }
-      .unique-legend { margin-top: 8px; color: var(--muted); font-size: 12px; }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -617,20 +615,15 @@ function renderReviewSummaryPage() {
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Executive summary</p>
+      <p>See what was exercised based on observed evidence, and evaluate coverage of critical business flows.</p>
       <nav>
-        <a href="/review">Review</a>
-        <a href="/critical-flows">Critical Flows</a>
+        <a href="/review">Observed Behaviors</a>
+        <a href="/critical-flows">Expected Behaviors</a>
         <a class="active" href="/review/summary">Summary</a>
       </nav>
     </header>
     <main>
-      <div class="hero">
-        <h2>Executive Overview</h2>
-        <p>Coverage first, repeated evidence second, distinct observed behaviors last.</p>
-      </div>
       <div id="summary">Loading…</div>
-      <p><a class="back" href="/review">Back to review</a></p>
     </main>
     <script>
       const escapeHtml = (value) => String(value)
@@ -763,8 +756,10 @@ function renderReviewSummaryPage() {
             count: 1,
             prerequisites: unit.prerequisites || [],
           }));
-        return [...representatives, ...singletons].sort((a, b) => a.title.localeCompare(b.title));
+        return [...representatives, ...singletons].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
       };
+      const formatUniqueFlowLabel = (item) =>
+        item.count > 1 ? \`\${item.title} (\${item.count})\` : item.title;
       const renderKpiCard = (label, value, href, tone = "", filter = "") => \`
         <a class="kpi-card \${escapeHtml(tone)}" href="\${escapeHtml(href)}" \${filter ? \`data-kpi-filter="\${escapeHtml(filter)}"\` : ""}>
           <div class="kpi-label">\${escapeHtml(label)}</div>
@@ -799,16 +794,33 @@ function renderReviewSummaryPage() {
           target.innerHTML = \`
             <div class="summary-stack">
               <div class="kpi-grid">
-              \${renderKpiCard("Covered", coveredCount, "#critical-flow-coverage", coveredCount > 0 ? "covered" : "", "covered")}
-              \${renderKpiCard("Partial", partialCount, "#critical-flow-coverage", partialCount > 0 ? "partial" : "", "partial")}
-              \${renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "missing")}
-              \${renderKpiCard("Unique Flows", uniqueFlows.length, "#unique-flows-observed")}
-              \${renderKpiCard("Repeated Coverage", overlapGroups.length, "#repeated-coverage", overlapGroups.length > 0 ? "repeated" : "")}
+              \${renderKpiCard("Observed Behaviors", uniqueFlows.length, "#unique-flows-observed")}
+              \${criticalFlows.length > 0 ? renderKpiCard("Covered", coveredCount, "#critical-flow-coverage", coveredCount > 0 ? "covered" : "", "covered") : ""}
+              \${criticalFlows.length > 0 ? renderKpiCard("Partial", partialCount, "#critical-flow-coverage", partialCount > 0 ? "partial" : "", "partial") : ""}
+              \${criticalFlows.length > 0 ? renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "missing") : ""}
             </div>
+
+              <section id="unique-flows-observed" class="section-card">
+              <div class="section-header">
+                <h3>Observed Behaviors</h3>
+              </div>
+              \${uniqueFlows.length > 0 ? \`
+                <div class="unique-list">
+                  \${uniqueFlows.map((item) => \`
+                    <div class="unique-item">
+                      <span class="unique-bullet">•</span>
+                      \${item.kind === "cluster"
+                        ? \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}&overlapKey=\${encodeURIComponent(item.key)}">\${escapeHtml(formatUniqueFlowLabel(item))}</a>\`
+                        : \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">\${escapeHtml(formatUniqueFlowLabel(item))}</a>\`}
+                    </div>\`).join("")}
+                </div>
+              \`
+              : '<p class="empty-note">No observed behaviors yet.</p>'}
+              </section>
 
               <section id="critical-flow-coverage" class="section-card">
               <div class="section-header">
-                <h3>Critical Flow Coverage</h3>
+                <h3>Coverage Of Expected Behaviors</h3>
               </div>
               <div class="metric-row">
                 <button class="metric-chip all \${coverageFilter === "all" ? "active" : ""}" data-coverage-filter="all">All: \${escapeHtml(String(criticalFlows.length))}</button>
@@ -824,41 +836,9 @@ function renderReviewSummaryPage() {
                       <div class="flow-summary-meta \${escapeHtml(flow.status)}">\${escapeHtml(getFlowStatusText(flow))}</div>
                     </a>\`).join("")}
                 </div>\`
-              : '<p class="empty-note">No critical flows match this filter.</p>'}
-              </section>
-
-              <section id="repeated-coverage" class="section-card">
-              <div class="section-header">
-                <h3>Repeated Coverage</h3>
-              </div>
-              \${overlapGroups.length > 0 ? \`
-                <div class="repeat-list">
-                  \${overlapGroups.map((group) => \`
-                    <a class="repeat-link" href="/review?overlapKey=\${encodeURIComponent(group.key)}">
-                      <div class="repeat-title">\${escapeHtml(getOverlapTitle(group))}</div>
-                      <div class="repeat-meta">Appears in \${escapeHtml(String(group.units.length))} reviewed flows</div>
-                    </a>\`).join("")}
-                </div>\`
-              : '<p class="empty-note">No repeated coverage clusters detected yet.</p>'}
-              </section>
-
-              <section id="unique-flows-observed" class="section-card">
-              <div class="section-header">
-                <h3>Unique Flows Observed</h3>
-              </div>
-              \${uniqueFlows.length > 0 ? \`
-                <div class="unique-list">
-                  \${uniqueFlows.map((item) => \`
-                    <div class="unique-item">
-                      <span class="unique-bullet">•</span>
-                      \${item.kind === "cluster"
-                        ? \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}&overlapKey=\${encodeURIComponent(item.key)}">\${escapeHtml(item.title)}<span class="unique-marker">*</span></a>\`
-                        : \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">\${escapeHtml(item.title)}</a>\`}
-                    </div>\`).join("")}
-                </div>
-                \${uniqueFlows.some((item) => item.kind === "cluster") ? '<div class="unique-legend">* Represented in more than one reviewed flow</div>' : ''}
-              \`
-              : '<p class="empty-note">No unique flows observed yet.</p>'}
+              : criticalFlows.length === 0
+                ? '<p class="empty-note">No expected behaviors defined.</p><p class="empty-note">Define expected behaviors to evaluate coverage against what was exercised.</p><p><a class="back" href="/critical-flows">Define Expected Behaviors</a></p>'
+                : '<p class="empty-note">No critical flows match this filter.</p>'}
               </section>
             </div>\`;
 
@@ -981,17 +961,17 @@ function renderCriticalFlowsPage() {
   <body>
     <header>
       <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Define the flows that matter most, then compare them against interpreted reviewed tests.</p>
+      <p>Define expected behaviors and evaluate them against observed execution evidence.</p>
       <nav>
-        <a href="/review">Review</a>
-        <a class="active" href="/critical-flows">Critical Flows</a>
+        <a href="/review">Observed Behaviors</a>
+        <a class="active" href="/critical-flows">Expected Behaviors</a>
         <a href="/review/summary">Summary</a>
       </nav>
     </header>
     <main>
       <aside>
         <div id="gapSummary"></div>
-        <p class="rail-title">Saved Critical Flows</p>
+        <p class="rail-title">Saved Expected Behaviors</p>
         <div id="flows"></div>
       </aside>
       <section><div id="detail" class="panel">Loading…</div></section>
@@ -1217,13 +1197,13 @@ function renderCriticalFlowsPage() {
           <div class="stack">
             <div class="intro">
               <h2>What are the most important things your application must do?</h2>
-              <p>Capture each critical business flow one at a time, then compare it against interpreted reviewed tests.</p>
+              <p>Define expected behaviors and compare them against what was exercised during testing.</p>
               \${examples}
             </div>
             \${suggestions}
             <div class="form-grid">
               <label>
-                <div>Critical flow</div>
+                <div>Expected behavior</div>
                 <textarea id="criticalFlowInput" placeholder="Log in and export a report to CSV">\${escapeHtml(state.draftText)}</textarea>
               </label>
               <div class="button-row">
@@ -1256,7 +1236,7 @@ function renderCriticalFlowsPage() {
                   </div>\`
                 : ""}
                 <div class="button-row">
-                  <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Critical Flow"}</button>
+                  <button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Expected Behavior"}</button>
                   \${duplicateMatches.length > 0 ? '<span class="meta">Save Anyway</span>' : ""}
                 </div>
               </div>\`
@@ -1313,7 +1293,7 @@ function renderCriticalFlowsPage() {
         const hasFlows = state.flows.length > 0;
         detail.innerHTML =
           (hasFlows
-            ? \`<div class="add-flow-bar"><button type="button" class="add-flow-button" id="openCriticalFlowForm">+ Add Critical Flow</button></div>\`
+            ? \`<div class="add-flow-bar"><button type="button" class="add-flow-button" id="openCriticalFlowForm">+ Add Expected Behavior</button></div>\`
             : renderDraftArea()) +
           (selectedFlow ? renderSelectedFlow(selectedFlow) : "") +
           (hasFlows && state.showDraftForm

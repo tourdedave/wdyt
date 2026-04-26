@@ -2165,15 +2165,19 @@ test("summary page renders executive overview shell with reordered navigation", 
 
     const page = await fetch(`${serverUrl}/review/summary`).then((response) => response.text());
     assert.match(page, /What Did You Test\? \| Summary/);
-    assert.match(page, /Executive Overview/);
-    assert.match(page, /Critical Flow Coverage/);
-    assert.match(page, /Repeated Coverage/);
-    assert.match(page, /Unique Flows Observed/);
+    assert.match(page, /See what was exercised based on observed evidence, and evaluate coverage of critical business flows\./);
+    assert.match(page, /Coverage Of Expected Behaviors/);
+    assert.match(page, /Observed Behaviors/);
     assert.match(page, /Covered/);
     assert.match(page, /Partial/);
     assert.match(page, /Missing/);
-    assert.match(page, /Unique Flows/);
-    assert.match(page, /Review<\/a>\s*<a href="\/critical-flows">Critical Flows<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
+    assert.match(page, /Observed Behaviors/);
+    assert.doesNotMatch(page, /Repeated Coverage/);
+    assert.match(page, /const formatUniqueFlowLabel = \(item\) =>/);
+    assert.match(page, /item\.count > 1 \? `\$\{item\.title\} \(\$\{item\.count\}\)` : item\.title/);
+    assert.doesNotMatch(page, /\* repeated coverage/);
+    assert.doesNotMatch(page, /number = how many flows/);
+    assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/critical-flows">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
@@ -2245,6 +2249,7 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
 
     const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
     assert.match(page, /Critical Flows/);
+    assert.match(page, /Define expected behaviors and evaluate them against observed execution evidence\./);
     assert.match(page, /What are the most important things your application must do\?/);
     assert.match(page, /Learn how to capture a test/);
 
