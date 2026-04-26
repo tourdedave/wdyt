@@ -582,6 +582,7 @@ function renderReviewSummaryPage() {
       .section-card:first-child::before { display: none; }
       .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(216,207,191,0.65); }
       .section-header h3 { margin: 0; font-size: 24px; }
+      .section-note { margin: 0 0 10px; color: var(--muted); font-size: 14px; line-height: 1.4; }
       .metric-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
       .metric-chip { padding: 5px 9px; border-radius: 999px; background: #f3ecdf; font-size: 12px; }
       button.metric-chip { border: 1px solid transparent; cursor: pointer; font: inherit; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
@@ -818,6 +819,7 @@ function renderReviewSummaryPage() {
               <div class="section-header">
                 <h3>Observed Behaviors</h3>
               </div>
+              <p class="section-note">Behaviors exercised during testing. Counts indicate repeated coverage across multiple test scenarios.</p>
               \${uniqueFlows.length > 0 ? \`
                 <div class="unique-list">
                   \${uniqueFlows.map((item) => \`

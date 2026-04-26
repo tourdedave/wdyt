@@ -2171,6 +2171,7 @@ test("artifact export supports pdf format", { timeout: 15_000 }, async () => {
     assert.match(reportBody, /View dashboard \(2\)/);
     assert.match(reportBody, /Coverage against expected behaviors shows <strong>1<\/strong> covered and <strong>1<\/strong> missing\./);
     assert.match(reportBody, /Coverage Against Expected Behaviors/);
+    assert.match(reportBody, /Behaviors exercised during testing\. Counts indicate repeated coverage across multiple test scenarios\./);
     assert.match(reportBody, /Forgot password — ❌ Missing — no evidence of this behavior in test execution/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
@@ -2304,6 +2305,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /Export Report/);
     assert.match(page, /Coverage Against Expected Behaviors/);
     assert.match(page, /Observed Behaviors/);
+    assert.match(page, /Behaviors exercised during testing\. Counts indicate repeated coverage across multiple test scenarios\./);
     assert.match(page, /Covered/);
     assert.match(page, /Partial/);
     assert.match(page, /Missing/);
@@ -2420,6 +2422,7 @@ test("summary page exports a shared pdf report", { timeout: 15_000 }, async () =
     assert.match(pdfBody, /What Did You Test\?/);
     assert.match(pdfBody, /This run exercised <strong>1<\/strong> distinct behaviors, with the most frequent including:/);
     assert.match(pdfBody, /Coverage Against Expected Behaviors/);
+    assert.match(pdfBody, /Behaviors exercised during testing\. Counts indicate repeated coverage across multiple test scenarios\./);
     assert.match(pdfBody, /View dashboard \(2\)/);
   } finally {
     if (child) {

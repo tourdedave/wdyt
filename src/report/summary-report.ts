@@ -281,6 +281,12 @@ export function buildReportHtml(data: SummaryReportData) {
         font-size: 18px;
         line-height: 1.3;
       }
+      .section-note {
+        margin: -2px 0 14px;
+        color: #5f6368;
+        font-size: 14px;
+        line-height: 1.5;
+      }
       ul {
         margin: 0;
         padding-left: 22px;
@@ -303,6 +309,7 @@ export function buildReportHtml(data: SummaryReportData) {
       <div class="summary">${buildExecutiveSummaryHtml(data)}</div>
       <section>
         <h2>Observed Behaviors</h2>
+        <p class="section-note">Behaviors exercised during testing. Counts indicate repeated coverage across multiple test scenarios.</p>
         <ul>${observedBehaviorItems}</ul>
       </section>
       ${data.expectedBehaviors.length > 0 ? `
