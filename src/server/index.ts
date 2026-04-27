@@ -866,8 +866,8 @@ function renderReviewSummaryPage() {
       html { scroll-behavior: smooth; }
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
-      .header-shell { position: relative; }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: relative; z-index: 30; isolation: isolate; }
+      .header-shell { position: relative; z-index: 1; }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -875,8 +875,8 @@ function renderReviewSummaryPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      .export-menu { position: absolute; top: 50%; right: 0; transform: translateY(-50%); }
-      .export-menu[open] { z-index: 20; }
+      .export-menu { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 31; }
+      .export-menu[open] { z-index: 40; }
       .export-trigger {
         list-style: none;
         display: inline-flex;
@@ -898,6 +898,7 @@ function renderReviewSummaryPage() {
         position: absolute;
         top: calc(100% + 10px);
         right: 0;
+        z-index: 41;
         min-width: 220px;
         padding: 8px;
         border: 1px solid var(--line);
