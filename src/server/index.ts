@@ -25,6 +25,8 @@ import { persistRun } from "./storage.js";
 
 const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.WDYT_PORT ?? "3876");
+const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
+const GETTING_STARTED_PATH = "/getting-started";
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -125,6 +127,44 @@ function renderEmptyStatePage() {
         background: rgba(31,111,74,0.08);
       }
       .dropzone p { margin: 0 0 14px; font-size: 16px; }
+      .upload-actions { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+      .secondary-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--ink);
+        text-decoration: none;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .secondary-button:hover { background: rgba(255,255,255,0.6); }
+      .upload-button[disabled],
+      .secondary-button[disabled] {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .selected-files {
+        margin-top: 14px;
+        padding: 14px 16px;
+        border: 1px solid rgba(216,207,191,0.9);
+        border-radius: 14px;
+        background: rgba(255,255,255,0.5);
+      }
+      .selected-files strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+      .selected-files ul {
+        margin: 0;
+        padding-left: 18px;
+        color: var(--muted);
+      }
+      .selected-files li + li { margin-top: 4px; }
       .meta { margin-top: 12px; color: var(--muted); font-size: 14px; min-height: 20px; }
       .error { color: #9f1d1d; }
       input[type="file"] { display: none; }
@@ -142,7 +182,7 @@ function renderEmptyStatePage() {
           <section class="panel">
             <h2>Capture test data</h2>
             <p>Run your tests with wdyt enabled to capture behavior and generate an artifact.</p>
-            <a class="button-link" href="/critical-flows/capture-guide" target="_blank" rel="noreferrer">View Getting Started guide</a>
+            <a class="button-link" href="${GETTING_STARTED_PATH}" target="_blank" rel="noreferrer">View Getting Started guide</a>
             <p class="helper">After running your tests, you’ll be able to review observed behaviors and evaluate coverage.</p>
           </section>
 
@@ -156,6 +196,11 @@ function renderEmptyStatePage() {
               <label class="picker-button" for="artifactFiles">Select files</label>
               <input id="artifactFiles" type="file" accept=".zip,application/zip" multiple />
             </div>
+            <div id="selectedFiles" class="selected-files" hidden></div>
+            <div class="upload-actions">
+              <button id="uploadArtifacts" class="picker-button upload-button" type="button" disabled>Upload selected files</button>
+              <button id="clearArtifacts" class="secondary-button" type="button" disabled>Clear selection</button>
+            </div>
             <div id="uploadStatus" class="meta"></div>
           </section>
         </div>
@@ -164,11 +209,51 @@ function renderEmptyStatePage() {
     <script>
       const dropzone = document.getElementById("dropzone");
       const fileInput = document.getElementById("artifactFiles");
+      const selectedFilesEl = document.getElementById("selectedFiles");
+      const uploadButton = document.getElementById("uploadArtifacts");
+      const clearButton = document.getElementById("clearArtifacts");
       const statusEl = document.getElementById("uploadStatus");
+      let selectedFiles = [];
 
       const setStatus = (message, isError = false) => {
         statusEl.textContent = message;
         statusEl.className = isError ? "meta error" : "meta";
+      };
+
+      const getFileKey = (file) => [file.name, file.size, file.lastModified].join("::");
+
+      const renderSelectedFiles = () => {
+        if (selectedFiles.length === 0) {
+          selectedFilesEl.hidden = true;
+          selectedFilesEl.innerHTML = "";
+          uploadButton.disabled = true;
+          clearButton.disabled = true;
+          return;
+        }
+
+        selectedFilesEl.hidden = false;
+        selectedFilesEl.innerHTML = \`
+          <strong>\${selectedFiles.length} artifact\${selectedFiles.length === 1 ? "" : "s"} selected</strong>
+          <ul>\${selectedFiles.map((file) => \`<li>\${file.name}</li>\`).join("")}</ul>
+        \`;
+        uploadButton.disabled = false;
+        clearButton.disabled = false;
+      };
+
+      const addFiles = (files) => {
+        const zipFiles = [...(files || [])].filter((file) => file.name.toLowerCase().endsWith(".zip"));
+        if (zipFiles.length === 0) {
+          setStatus("Select one or more artifact (.zip) files.", true);
+          return;
+        }
+
+        const nextFiles = new Map(selectedFiles.map((file) => [getFileKey(file), file]));
+        zipFiles.forEach((file) => {
+          nextFiles.set(getFileKey(file), file);
+        });
+        selectedFiles = [...nextFiles.values()];
+        renderSelectedFiles();
+        setStatus(\`\${selectedFiles.length} artifact\${selectedFiles.length === 1 ? "" : "s"} ready to upload.\`);
       };
 
       const toBase64 = async (file) => {
@@ -181,22 +266,19 @@ function renderEmptyStatePage() {
         return btoa(binary);
       };
 
-      const importFiles = async (files) => {
-        if (!files || files.length === 0) {
-          return;
-        }
-
-        const zipFiles = [...files].filter((file) => file.name.toLowerCase().endsWith(".zip"));
-        if (zipFiles.length === 0) {
+      const importFiles = async () => {
+        if (selectedFiles.length === 0) {
           setStatus("Select one or more artifact (.zip) files.", true);
           return;
         }
 
-        setStatus(\`Uploading \${zipFiles.length} artifact\${zipFiles.length === 1 ? "" : "s"}…\`);
+        setStatus(\`Uploading \${selectedFiles.length} artifact\${selectedFiles.length === 1 ? "" : "s"}…\`);
+        uploadButton.disabled = true;
+        clearButton.disabled = true;
 
         try {
           const payload = {
-            files: await Promise.all(zipFiles.map(async (file) => ({
+            files: await Promise.all(selectedFiles.map(async (file) => ({
               name: file.name,
               contentBase64: await toBase64(file),
             }))),
@@ -215,12 +297,24 @@ function renderEmptyStatePage() {
           setStatus("Artifacts imported. Opening observed behaviors…");
           window.location.assign("/review");
         } catch (error) {
+          renderSelectedFiles();
           setStatus(error instanceof Error ? error.message : "Unable to import artifacts.", true);
         }
       };
 
       fileInput.addEventListener("change", () => {
-        importFiles(fileInput.files);
+        addFiles(fileInput.files);
+        fileInput.value = "";
+      });
+
+      uploadButton.addEventListener("click", () => {
+        importFiles();
+      });
+
+      clearButton.addEventListener("click", () => {
+        selectedFiles = [];
+        renderSelectedFiles();
+        setStatus("");
       });
 
       ["dragenter", "dragover"].forEach((eventName) => {
@@ -238,7 +332,7 @@ function renderEmptyStatePage() {
       });
 
       dropzone.addEventListener("drop", (event) => {
-        importFiles(event.dataTransfer.files);
+        addFiles(event.dataTransfer.files);
       });
     </script>
   </body>
@@ -418,7 +512,7 @@ function renderReviewPage() {
       <p>Review and refine observed behaviors before evaluating coverage.</p>
       <nav>
         <a class="active" href="/review">Observed Behaviors</a>
-        <a href="/critical-flows">Expected Behaviors</a>
+        <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
         <a href="/review/summary">Summary</a>
       </nav>
     </header>
@@ -535,14 +629,26 @@ function renderReviewPage() {
         if (unit.proposalState === "error") return "proposal failed";
         return null;
       };
+      const redirectToLaunchpad = () => {
+        window.location.assign("/review");
+      };
 
       async function loadState() {
         const params = new URLSearchParams(window.location.search);
         const initialReviewId = params.get("reviewId");
         const initialOverlapKey = params.get("overlapKey");
-        const [unitsRes, vocabRes] = await Promise.all([fetch("/review/units"), fetch("/review/vocabulary")]);
+        const [unitsRes, vocabRes, runtimeRes] = await Promise.all([
+          fetch("/review/units"),
+          fetch("/review/vocabulary"),
+          fetch("/runtime/state"),
+        ]);
         const nextUnits = await unitsRes.json();
         state.vocabulary = await vocabRes.json();
+        const runtimeState = await runtimeRes.json();
+        if (!runtimeState.hasData) {
+          redirectToLaunchpad();
+          return;
+        }
         if (state.editingId && nextUnits.some((unit) => unit.reviewId === state.editingId)) {
           state.units = nextUnits;
           renderList();
@@ -882,7 +988,7 @@ function renderReviewSummaryPage() {
             <p>See what was exercised based on observed evidence, and evaluate coverage of critical business flows.</p>
             <nav>
               <a href="/review">Observed Behaviors</a>
-              <a href="/critical-flows">Expected Behaviors</a>
+              <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
               <a class="active" href="/review/summary">Summary</a>
             </nav>
           </div>
@@ -1025,6 +1131,9 @@ function renderReviewSummaryPage() {
         }
         return "Missing — no reviewed test evidence found";
       };
+      const redirectToLaunchpad = () => {
+        window.location.assign("/review");
+      };
       const getUniqueFlows = (units, overlapGroups) => {
         const clusteredIds = new Set(overlapGroups.flatMap((group) => group.units.map((unit) => unit.reviewId)));
         const representatives = overlapGroups.map((group) => ({
@@ -1055,10 +1164,15 @@ function renderReviewSummaryPage() {
         </a>\`;
 
       async function loadSummary() {
-        const [units, criticalFlowState] = await Promise.all([
+        const [units, criticalFlowState, runtimeState] = await Promise.all([
           fetch("/review/units").then((response) => response.json()),
-          fetch("/critical-flows/state").then((response) => response.json()),
+          fetch("${EXPECTED_BEHAVIORS_PATH}/state").then((response) => response.json()),
+          fetch("/runtime/state").then((response) => response.json()),
         ]);
+        if (!runtimeState.hasData) {
+          redirectToLaunchpad();
+          return;
+        }
         const activeUnits = getActiveUnits(units);
         const overlapGroups = getOverlapGroups(units);
         const uniqueFlows = getUniqueFlows(units, overlapGroups);
@@ -1120,13 +1234,13 @@ function renderReviewSummaryPage() {
               \${filteredFlows.length > 0 ? \`
                 <div class="flow-summary-list">
                   \${filteredFlows.map((flow) => \`
-                    <a class="flow-summary-card" href="/critical-flows?flowId=\${encodeURIComponent(flow.id)}">
+                    <a class="flow-summary-card" href="${EXPECTED_BEHAVIORS_PATH}?flowId=\${encodeURIComponent(flow.id)}">
                       <div class="flow-summary-title">\${escapeHtml(flow.name)}</div>
                       <div class="flow-summary-meta \${escapeHtml(flow.status)}">\${escapeHtml(getFlowStatusText(flow))}</div>
                     </a>\`).join("")}
                 </div>\`
               : criticalFlows.length === 0
-                ? '<p class="empty-note">No expected behaviors defined.</p><p class="empty-note">Define expected behaviors to evaluate coverage against what was exercised.</p><p><a class="back" href="/critical-flows">Define Expected Behaviors</a></p>'
+                ? '<p class="empty-note">No expected behaviors defined.</p><p class="empty-note">Define expected behaviors to evaluate coverage against what was exercised.</p><p><a class="back" href="${EXPECTED_BEHAVIORS_PATH}">Define Expected Behaviors</a></p>'
                 : '<p class="empty-note">No critical flows match this filter.</p>'}
               </section>
             </div>\`;
@@ -1258,7 +1372,7 @@ function renderCriticalFlowsPage() {
       <p>Define expected behaviors and evaluate them against observed execution evidence.</p>
       <nav>
         <a href="/review">Observed Behaviors</a>
-        <a class="active" href="/critical-flows">Expected Behaviors</a>
+        <a class="active" href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
         <a href="/review/summary">Summary</a>
       </nav>
     </header>
@@ -1349,7 +1463,7 @@ function renderCriticalFlowsPage() {
         render();
 
         try {
-          const response = await fetch("/critical-flows/interpret", {
+          const response = await fetch("${EXPECTED_BEHAVIORS_PATH}/interpret", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ rawText: state.draftText }),
@@ -1385,8 +1499,11 @@ function renderCriticalFlowsPage() {
           return "";
         }
 
-        const [first, ...rest] = flow.missingTerms;
-        return rest.length > 0 ? \`\${first} +\${rest.length} more\` : first;
+      const [first, ...rest] = flow.missingTerms;
+      return rest.length > 0 ? \`\${first} +\${rest.length} more\` : first;
+      };
+      const redirectToLaunchpad = () => {
+        window.location.assign("/review");
       };
 
       async function loadState() {
@@ -1394,8 +1511,16 @@ function renderCriticalFlowsPage() {
           const params = new URLSearchParams(window.location.search);
           const initialGapTerm = params.get("gapTerm");
           const initialFlowId = params.get("flowId");
-          const response = await fetch("/critical-flows/state");
+          const [response, runtimeResponse] = await Promise.all([
+            fetch("${EXPECTED_BEHAVIORS_PATH}/state"),
+            fetch("/runtime/state"),
+          ]);
           const nextState = await response.json();
+          const runtimeState = await runtimeResponse.json();
+          if (!runtimeState.hasData) {
+            redirectToLaunchpad();
+            return;
+          }
           if (!response.ok) {
             throw new Error(nextState.error || "Unable to load expected behaviors.");
           }
@@ -1468,7 +1593,7 @@ function renderCriticalFlowsPage() {
       function renderList() {
         const container = document.getElementById("flows");
         if (state.flows.length === 0) {
-          container.innerHTML = '<p class="empty-note">No critical flows saved yet.</p>';
+          container.innerHTML = '<p class="empty-note">No expected behaviors saved yet.</p>';
           return;
         }
 
@@ -1551,7 +1676,7 @@ function renderCriticalFlowsPage() {
                     <h3>Possible duplicate detected</h3>
                     <p class="meta">\${duplicateMatches.some((match) => match.exactDuplicate)
                       ? "This flow appears to already exist:"
-                      : "This flow appears similar to an existing critical flow:"}</p>
+                      : "This behavior appears similar to an existing expected behavior:"}</p>
                     \${duplicateMatches.map((match) => \`
                       <div class="duplicate-match">
                         <div class="duplicate-label">\${match.exactDuplicate ? "Existing flow" : "Similar flow"}</div>
@@ -1571,9 +1696,9 @@ function renderCriticalFlowsPage() {
             : ""}
             \${state.flows.length > 0 && !state.hasDescriptors ? \`
               <div class="callout">
-                <p>We&apos;ll compare reviewed tests against these critical flows automatically.</p>
+                <p>We&apos;ll compare reviewed tests against these expected behaviors automatically.</p>
                 <p>Next step: Capture and review a test run to start measuring coverage.</p>
-                <div class="button-row"><a href="/critical-flows/capture-guide"><button type="button">Learn how to capture a test</button></a></div>
+                <div class="button-row"><a href="${GETTING_STARTED_PATH}"><button type="button">Learn how to capture a test</button></a></div>
               </div>\`
             : ""}
           </div>\`;
@@ -1763,7 +1888,7 @@ function renderCriticalFlowsPage() {
             return;
           }
 
-          const response = await fetch(\`/critical-flows/\${encodeURIComponent(selectedFlow.id)}\`, { method: "DELETE" });
+          const response = await fetch(\`${EXPECTED_BEHAVIORS_PATH}/\${encodeURIComponent(selectedFlow.id)}\`, { method: "DELETE" });
           if (!response.ok) {
             const payload = await response.json().catch(() => ({}));
             state.error = payload.error || "Unable to delete critical flow.";
@@ -1828,7 +1953,7 @@ function renderCriticalFlowsPage() {
 
           try {
             const response = await fetch(
-              state.editingFlowId ? \`/critical-flows/\${encodeURIComponent(state.editingFlowId)}\` : "/critical-flows",
+              state.editingFlowId ? \`${EXPECTED_BEHAVIORS_PATH}/\${encodeURIComponent(state.editingFlowId)}\` : "${EXPECTED_BEHAVIORS_PATH}",
               {
               method: state.editingFlowId ? "PUT" : "POST",
               headers: { "content-type": "application/json" },
@@ -1881,9 +2006,8 @@ function renderCaptureGuidePage() {
   <body>
     <main>
       <h1>Learn How To Capture A Test</h1>
-      <p>This route is a placeholder for the critical-flows onboarding path.</p>
+      <p>This page is a placeholder for the getting started guide.</p>
       <p>TODO: Add product-specific guidance for capturing and reviewing the first test run.</p>
-      <p><a href="/critical-flows">Back to Critical Flows</a></p>
     </main>
   </body>
 </html>`;
@@ -2069,7 +2193,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "GET" && requestPath === "/critical-flows") {
+  if (req.method === "GET" && requestPath === EXPECTED_BEHAVIORS_PATH) {
     if (!(await hasAnyRuntimeData())) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(renderEmptyStatePage());
@@ -2080,7 +2204,7 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && requestPath === "/critical-flows/capture-guide") {
+  if (req.method === "GET" && requestPath === GETTING_STARTED_PATH) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderCaptureGuidePage());
     return;
@@ -2091,13 +2215,18 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && requestPath === "/critical-flows/state") {
+  if (req.method === "GET" && requestPath === `${EXPECTED_BEHAVIORS_PATH}/state`) {
     writeJson(res, 200, await loadCriticalFlowState());
     return;
   }
 
   if (req.method === "GET" && requestPath === "/review/vocabulary") {
     writeJson(res, 200, await readJsonFile(getVocabularyPath(), []));
+    return;
+  }
+
+  if (req.method === "GET" && requestPath === "/runtime/state") {
+    writeJson(res, 200, { hasData: await hasAnyRuntimeData() });
     return;
   }
 
@@ -2189,7 +2318,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "POST" && requestPath === "/critical-flows/interpret") {
+  if (req.method === "POST" && requestPath === `${EXPECTED_BEHAVIORS_PATH}/interpret`) {
     try {
       const body = (await readJsonBody(req)) as { rawText?: string } | null;
 
@@ -2235,7 +2364,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "POST" && requestPath === "/critical-flows") {
+  if (req.method === "POST" && requestPath === EXPECTED_BEHAVIORS_PATH) {
     try {
       const body = await readJsonBody(req);
 
@@ -2259,9 +2388,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "PUT" && requestPath?.startsWith("/critical-flows/")) {
+  if (req.method === "PUT" && requestPath?.startsWith(`${EXPECTED_BEHAVIORS_PATH}/`)) {
     try {
-      const criticalFlowId = decodeURIComponent(requestPath.slice("/critical-flows/".length));
+      const criticalFlowId = decodeURIComponent(requestPath.slice(`${EXPECTED_BEHAVIORS_PATH}/`.length));
       const body = await readJsonBody(req);
 
       if (
@@ -2290,9 +2419,9 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (req.method === "DELETE" && requestPath?.startsWith("/critical-flows/")) {
+  if (req.method === "DELETE" && requestPath?.startsWith(`${EXPECTED_BEHAVIORS_PATH}/`)) {
     try {
-      const criticalFlowId = decodeURIComponent(requestPath.slice("/critical-flows/".length));
+      const criticalFlowId = decodeURIComponent(requestPath.slice(`${EXPECTED_BEHAVIORS_PATH}/`.length));
       const deleted = await deleteCriticalFlow(criticalFlowId);
       if (!deleted) {
         writeJson(res, 404, { error: "Critical flow not found" });

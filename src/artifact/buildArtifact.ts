@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -68,13 +68,12 @@ async function collectRuntimeArtifacts(rootDir: string) {
         continue;
       }
 
-      const fileStat = await stat(absolutePath);
       const content = await readFile(absolutePath);
       const relativePath = path.relative(rootDir, absolutePath);
       files.push({
         absolutePath,
         zipPath: toZipPath("data", relativePath),
-        size: fileStat.size,
+        size: content.length,
         content,
       });
     }

@@ -2665,7 +2665,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /item\.count > 1 \? `\$\{item\.title\} \(\$\{item\.count\}\)` : item\.title/);
     assert.doesNotMatch(page, /\* repeated coverage/);
     assert.doesNotMatch(page, /number = how many flows/);
-    assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/critical-flows">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
+    assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/expected-behaviors">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
   } finally {
     if (child) {
       await stopChildProcess(child);
@@ -2857,29 +2857,29 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
   try {
     await waitForHealth(serverUrl);
 
-    const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
+    const page = await fetch(`${serverUrl}/expected-behaviors`).then((response) => response.text());
     assert.match(page, /Get started with wdyt/);
     assert.match(page, /Capture test data/);
     assert.match(page, /Upload an artifact/);
     assert.match(page, /View Getting Started guide/);
 
-    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+    const interpreted = await postJson(serverUrl, "/expected-behaviors/interpret", {
       rawText: "User can log in and export a report to CSV",
     });
     assert.deepEqual(interpreted.interpretedSteps, ["login", "export report"]);
     assert.deepEqual(interpreted.interpretedTerms, ["csv", "export report", "login"]);
     assert.equal(interpreted.outcome, "report exported");
 
-    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+    const created = await postJson(serverUrl, "/expected-behaviors", interpreted);
     assert.equal(created.status, "missing");
     assert.deepEqual(created.matchedDescriptorIds, []);
 
-    const state = await getJson(serverUrl, "/critical-flows/state");
+    const state = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(state.hasDescriptors ?? state.hasApprovedDescriptors, false);
     assert.equal(state.flows.length, 1);
     assert.equal(state.flows[0].status, "missing");
 
-    const captureGuide = await fetch(`${serverUrl}/critical-flows/capture-guide`).then((response) => response.text());
+    const captureGuide = await fetch(`${serverUrl}/getting-started`).then((response) => response.text());
     assert.match(captureGuide, /TODO: Add product-specific guidance/);
   } finally {
     llmServer.close();
@@ -3068,7 +3068,7 @@ test("critical flows suggest active descriptors and match composite coverage", {
   try {
     await waitForHealth(serverUrl);
 
-    const initialState = await getJson(serverUrl, "/critical-flows/state");
+    const initialState = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(initialState.hasDescriptors ?? initialState.hasApprovedDescriptors, true);
     assert.deepEqual(initialState.suggestions, [
       "Create a report",
@@ -3076,10 +3076,10 @@ test("critical flows suggest active descriptors and match composite coverage", {
       "Sign in successfully",
     ]);
 
-    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+    const interpreted = await postJson(serverUrl, "/expected-behaviors/interpret", {
       rawText: "User can log in and create and export a report",
     });
-    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+    const created = await postJson(serverUrl, "/expected-behaviors", interpreted);
 
     assert.equal(created.status, "covered");
     assert.deepEqual(created.matchedDescriptorIds.sort(), [
@@ -3088,7 +3088,7 @@ test("critical flows suggest active descriptors and match composite coverage", {
       "descriptor-login",
     ]);
 
-    const state = await getJson(serverUrl, "/critical-flows/state");
+    const state = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(state.flows.length, 1);
     assert.equal(state.flows[0].status, "covered");
     assert.deepEqual(state.flows[0].matchedConcepts, ["create report", "export report", "login"]);
@@ -3243,18 +3243,18 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
   try {
     await waitForHealth(serverUrl);
 
-    const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
+    const interpreted = await postJson(serverUrl, "/expected-behaviors/interpret", {
       rawText: "User can log in and create and export a report",
     });
-    const created = await postJson(serverUrl, "/critical-flows", interpreted);
+    const created = await postJson(serverUrl, "/expected-behaviors", interpreted);
     assert.equal(created.status, "partial");
 
-    const state = await getJson(serverUrl, "/critical-flows/state");
+    const state = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(state.flows[0].status, "partial");
     assert.deepEqual(state.flows[0].matchedConcepts, ["create report", "login"]);
     assert.deepEqual(state.flows[0].missingTerms, ["export report"]);
 
-    const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
+    const page = await fetch(`${serverUrl}/expected-behaviors`).then((response) => response.text());
     assert.match(page, /Coverage Gaps/);
     assert.match(page, /Missing:/);
     assert.match(page, /Missing in/);
@@ -3507,7 +3507,7 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
   try {
     await waitForHealth(serverUrl);
 
-    const created = await postJson(serverUrl, "/critical-flows", {
+    const created = await postJson(serverUrl, "/expected-behaviors", {
       name: "Create a report",
       rawText: "Create a report",
       interpretedSteps: ["create report"],
@@ -3516,7 +3516,7 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
     });
     assert.equal(created.status, "covered");
 
-    const updated = await fetch(`${serverUrl}/critical-flows/${encodeURIComponent(created.id)}`, {
+    const updated = await fetch(`${serverUrl}/expected-behaviors/${encodeURIComponent(created.id)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -3531,17 +3531,17 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
     assert.equal(updated.name, "Create and export a report");
     assert.equal(updated.status, "partial");
 
-    const stateAfterUpdate = await getJson(serverUrl, "/critical-flows/state");
+    const stateAfterUpdate = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(stateAfterUpdate.flows.length, 1);
     assert.equal(stateAfterUpdate.flows[0].status, "partial");
     assert.deepEqual(stateAfterUpdate.flows[0].missingTerms, ["export report"]);
 
-    const deleted = await fetch(`${serverUrl}/critical-flows/${encodeURIComponent(created.id)}`, {
+    const deleted = await fetch(`${serverUrl}/expected-behaviors/${encodeURIComponent(created.id)}`, {
       method: "DELETE",
     }).then((response) => response.json());
     assert.equal(deleted.ok, true);
 
-    const stateAfterDelete = await getJson(serverUrl, "/critical-flows/state");
+    const stateAfterDelete = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(stateAfterDelete.flows.length, 0);
   } finally {
     llmServer.close();
