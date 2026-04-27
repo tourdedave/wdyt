@@ -586,6 +586,7 @@ function renderReviewPage() {
           if (matchedGroup) {
             matchedGroup.units.push(unit);
             matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
+            matchedGroup.key = matchedGroup.vocab.join("||");
             return;
           }
 

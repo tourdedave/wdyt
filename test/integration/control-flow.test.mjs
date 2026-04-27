@@ -4197,6 +4197,7 @@ test("review page groups identical descriptors when one overlap-term set is a su
     );
     assert.match(reviewPage, /const isSubsetOverlapMatch = \(leftUnit, rightUnit\) =>/);
     assert.match(reviewPage, /return minCount > 0 && shared === minCount;/);
+    assert.match(reviewPage, /matchedGroup\.key = matchedGroup\.vocab\.join\("\|\|"\);/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
