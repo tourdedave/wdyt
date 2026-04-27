@@ -153,21 +153,27 @@ function formatCoverageLine(flow: CriticalFlowDetailRecord) {
     return `${flow.name} — ✅ Covered`;
   }
 
-  if (flow.status === "missing") {
+  if (flow.status === "not_covered") {
     return `${flow.name} — ❌ Missing — no evidence of this behavior in test execution`;
   }
 
-  if (Array.isArray(flow.missingTerms) && flow.missingTerms.length > 0) {
-    return `${flow.name} — Partial — missing: ${flow.missingTerms.join(", ")}`;
+  if (Array.isArray(flow.missingQualifiers) && flow.missingQualifiers.length > 0) {
+    return `${flow.name} — ⚠️ Partially Covered — missing qualifiers: ${flow.missingQualifiers
+      .map((term) => term.replaceAll("_", " "))
+      .join(", ")}`;
   }
 
-  return `${flow.name} — Partial`;
+  if (Array.isArray(flow.missingTerms) && flow.missingTerms.length > 0) {
+    return `${flow.name} — ⚠️ Partially Covered — missing: ${flow.missingTerms.join(", ")}`;
+  }
+
+  return `${flow.name} — ⚠️ Partially Covered`;
 }
 
 function getCoverageCounts(flows: CriticalFlowDetailRecord[]) {
   return {
     covered: flows.filter((flow) => flow.status === "covered").length,
-    missing: flows.filter((flow) => flow.status === "missing").length,
+    missing: flows.filter((flow) => flow.status === "not_covered").length,
   };
 }
 

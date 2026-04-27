@@ -1121,15 +1121,15 @@ function renderReviewSummaryPage() {
       };
       const getFlowStatusText = (flow) => {
         if (flow.status === "covered") {
-          return "Covered";
+          return "✅ Covered";
         }
         if (flow.status === "partial") {
-          const missing = (flow.missingTerms || []).filter(Boolean);
+          const missing = (flow.missingQualifiers || []).filter(Boolean);
           return missing.length > 0
-            ? \`Partial — missing: \${missing.join(", ")}\`
-            : "Partial — some reviewed evidence is still missing";
+            ? \`⚠️ Partially Covered — missing qualifiers: \${missing.map((term) => term.replaceAll("_", " ")).join(", ")}\`
+            : "⚠️ Partially Covered";
         }
-        return "Missing — no reviewed test evidence found";
+        return "❌ Not Covered — no evidence of this behavior in test execution";
       };
       const redirectToLaunchpad = () => {
         window.location.assign("/review");
@@ -1179,7 +1179,7 @@ function renderReviewSummaryPage() {
         const criticalFlows = criticalFlowState.flows || [];
         const coveredCount = criticalFlows.filter((flow) => flow.status === "covered").length;
         const partialCount = criticalFlows.filter((flow) => flow.status === "partial").length;
-        const missingCount = criticalFlows.filter((flow) => flow.status === "missing").length;
+        const missingCount = criticalFlows.filter((flow) => flow.status === "not_covered").length;
         const target = document.getElementById("summary");
         let coverageFilter = "all";
 
@@ -1199,7 +1199,7 @@ function renderReviewSummaryPage() {
               \${renderKpiCard("Observed Behaviors", uniqueFlows.length, "#unique-flows-observed")}
               \${criticalFlows.length > 0 ? renderKpiCard("Covered", coveredCount, "#critical-flow-coverage", coveredCount > 0 ? "covered" : "", "covered") : ""}
               \${criticalFlows.length > 0 ? renderKpiCard("Partial", partialCount, "#critical-flow-coverage", partialCount > 0 ? "partial" : "", "partial") : ""}
-              \${criticalFlows.length > 0 ? renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "missing") : ""}
+              \${criticalFlows.length > 0 ? renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "not_covered") : ""}
             </div>
 
               <section id="unique-flows-observed" class="section-card">
@@ -1229,7 +1229,7 @@ function renderReviewSummaryPage() {
                 <button class="metric-chip all \${coverageFilter === "all" ? "active" : ""}" data-coverage-filter="all">All: \${escapeHtml(String(criticalFlows.length))}</button>
                 <button class="metric-chip covered \${coverageFilter === "covered" ? "active" : ""}" data-coverage-filter="covered">Covered: \${escapeHtml(String(coveredCount))}</button>
                 <button class="metric-chip partial \${coverageFilter === "partial" ? "active" : ""}" data-coverage-filter="partial">Partial: \${escapeHtml(String(partialCount))}</button>
-                <button class="metric-chip missing \${coverageFilter === "missing" ? "active" : ""}" data-coverage-filter="missing">Missing: \${escapeHtml(String(missingCount))}</button>
+                <button class="metric-chip missing \${coverageFilter === "not_covered" ? "active" : ""}" data-coverage-filter="not_covered">Missing: \${escapeHtml(String(missingCount))}</button>
               </div>
               \${filteredFlows.length > 0 ? \`
                 <div class="flow-summary-list">
@@ -1318,7 +1318,7 @@ function renderCriticalFlowsPage() {
       .status-chip { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; }
       .status-chip.covered { background: rgba(31,111,74,0.12); color: var(--accent); }
       .status-chip.partial { background: rgba(183,110,27,0.15); color: var(--warn); }
-      .status-chip.missing { background: rgba(159,29,29,0.12); color: var(--danger); }
+      .status-chip.not_covered { background: rgba(159,29,29,0.12); color: var(--danger); }
       .missing-preview { margin-top: 8px; font-size: 14px; color: var(--ink); }
       .missing-preview strong { color: var(--danger); }
       .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
@@ -1391,7 +1391,15 @@ function renderCriticalFlowsPage() {
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
-      const statusLabel = (status) => status[0].toUpperCase() + status.slice(1);
+      const statusLabel = (status) => {
+        if (status === "covered") {
+          return "Covered";
+        }
+        if (status === "partial") {
+          return "Partially Covered";
+        }
+        return "Not Covered";
+      };
       const summarizeItems = (values) => Array.isArray(values) && values.length > 0
         ? values.map((value) => \`<li>\${escapeHtml(value.name || value)}</li>\`).join("")
         : "<li>-</li>";
@@ -1400,12 +1408,20 @@ function renderCriticalFlowsPage() {
         .split("\\n")
         .map((entry) => entry.trim())
         .filter(Boolean);
+      const normalizeQualifierLines = (value) => String(value || "")
+        .split("\\n")
+        .map((entry) => entry.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/_+/g, "_").replace(/^_+|_+$/g, ""))
+        .filter(Boolean);
       const serializeParsedFlow = (value) => JSON.stringify({
         name: value?.name || "",
         rawText: value?.rawText || "",
         interpretedSteps: Array.isArray(value?.interpretedSteps) ? value.interpretedSteps : [],
         interpretedTerms: Array.isArray(value?.interpretedTerms) ? value.interpretedTerms : [],
         outcome: value?.outcome || "",
+        behavior: {
+          action: value?.behavior?.action || "",
+          qualifiers: Array.isArray(value?.behavior?.qualifiers) ? value.behavior.qualifiers : [],
+        },
       });
       const hasEditedFlowChanges = () => {
         if (!state.editingFlowId || !state.parsedDraft || !state.editingBaseline) {
@@ -1622,6 +1638,8 @@ function renderCriticalFlowsPage() {
         const interpretedBehavior = parsed
           ? [...new Set([...(parsed.interpretedSteps || []), ...(parsed.interpretedTerms || [])])].filter(Boolean)
           : [];
+        const behaviorAction = parsed?.behavior?.action || "";
+        const behaviorQualifiers = Array.isArray(parsed?.behavior?.qualifiers) ? parsed.behavior.qualifiers : [];
         const duplicateMatches = getLikelyDuplicates(parsed);
         const canSaveParsed = Boolean(parsed) && interpretedBehavior.length > 0;
         const showSaveAction = state.editingFlowId ? hasEditedFlowChanges() && canSaveParsed : canSaveParsed;
@@ -1671,6 +1689,14 @@ function renderCriticalFlowsPage() {
                   <span class="field-label">Interpreted behavior</span>
                   <textarea id="interpretedBehaviorInput" aria-label="Interpreted behavior">\${escapeHtml(interpretedBehavior.join("\\n"))}</textarea>
                 </label>
+                <label>
+                  <span class="field-label">Action</span>
+                  <input id="behaviorActionInput" aria-label="Action" value="\${escapeHtml(behaviorAction)}" />
+                </label>
+                <label>
+                  <span class="field-label">Qualifiers</span>
+                  <textarea id="behaviorQualifiersInput" aria-label="Qualifiers">\${escapeHtml(behaviorQualifiers.join("\\n"))}</textarea>
+                </label>
                 \${duplicateMatches.length > 0 ? \`
                   <div class="duplicate-warning">
                     <h3>Possible duplicate detected</h3>
@@ -1707,24 +1733,29 @@ function renderCriticalFlowsPage() {
       function renderSelectedFlow(flow) {
         const interpretedBehavior = [...new Set([...(flow.interpretedSteps || []), ...(flow.interpretedTerms || [])])]
           .filter(Boolean);
+        const behaviorAction = flow.behavior?.action || "";
+        const behaviorQualifiers = Array.isArray(flow.behavior?.qualifiers) ? flow.behavior.qualifiers : [];
         const statusText = flow.status === "covered"
           ? "✅ Covered"
           : flow.status === "partial"
-            ? "⚠️ Partial"
-            : "❌ Missing";
-        const explanationSection = flow.status === "missing"
+            ? "⚠️ Partially Covered"
+            : "❌ Not Covered";
+        const explanationSection = flow.status === "not_covered"
           ? \`
             <div class="detail-section">
               <h3>Why it’s missing</h3>
               <p>No test evidence was found for this behavior.</p>
               <p class="detail-support">This may indicate missing test coverage or a mismatch in behavior naming.</p>
             </div>\`
-          : flow.status === "partial" && flow.missingTerms.length > 0
+          : flow.status === "partial"
             ? \`
             <div class="detail-section">
-              <h3>What’s still missing</h3>
-              <ul>\${summarizeItems(flow.missingTerms)}</ul>
-              <p class="detail-support">These parts of the behavior were not found in observed test execution.</p>
+              <h3>Why it’s partially covered</h3>
+              \${flow.matchedAction ? \`<p>Matched action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}
+              \${flow.missingQualifiers.length > 0
+                ? \`<p>Missing qualifiers:</p><ul>\${summarizeItems(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
+                : '<p>Some parts of this behavior were not found in observed test execution.</p>'}
+              <p class="detail-support">The general behavior was observed, but the distinguishing qualifier details were not found.</p>
             </div>\`
             : "";
         return \`
@@ -1741,6 +1772,14 @@ function renderCriticalFlowsPage() {
               <h3>Interpreted Behavior</h3>
               <ul>\${summarizeItems(interpretedBehavior)}</ul>
             </div>
+            \${behaviorAction || behaviorQualifiers.length > 0 ? \`
+            <div class="detail-section">
+              <h3>Structured Behavior</h3>
+              \${behaviorAction ? \`<p>Action: <strong>\${escapeHtml(behaviorAction)}</strong></p>\` : ""}
+              \${behaviorQualifiers.length > 0
+                ? \`<p>Qualifiers:</p><ul>\${summarizeItems(behaviorQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
+                : ""}
+            </div>\` : ""}
             \${explanationSection}
           </div>\`;
       }
@@ -1866,6 +1905,7 @@ function renderCriticalFlowsPage() {
             interpretedSteps: selectedFlow.interpretedSteps,
             interpretedTerms: selectedFlow.interpretedTerms,
             outcome: selectedFlow.outcome,
+            behavior: selectedFlow.behavior,
           };
           state.editingBaseline = {
             name: selectedFlow.name,
@@ -1873,6 +1913,7 @@ function renderCriticalFlowsPage() {
             interpretedSteps: selectedFlow.interpretedSteps,
             interpretedTerms: selectedFlow.interpretedTerms,
             outcome: selectedFlow.outcome,
+            behavior: selectedFlow.behavior,
           };
           state.error = "";
           render();
@@ -1939,6 +1980,48 @@ function renderCriticalFlowsPage() {
         });
 
         detail.querySelector("#interpretedBehaviorInput")?.addEventListener("change", () => {
+          render();
+        });
+
+        detail.querySelector("#behaviorActionInput")?.addEventListener("input", (event) => {
+          if (!state.parsedDraft) {
+            return;
+          }
+
+          const nextAction = String(event.target.value || "")
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, " ")
+            .replace(/\\s+/g, " ")
+            .trim();
+          state.parsedDraft = {
+            ...state.parsedDraft,
+            behavior: {
+              action: nextAction,
+              qualifiers: Array.isArray(state.parsedDraft.behavior?.qualifiers) ? state.parsedDraft.behavior.qualifiers : [],
+            },
+          };
+        });
+
+        detail.querySelector("#behaviorActionInput")?.addEventListener("change", () => {
+          render();
+        });
+
+        detail.querySelector("#behaviorQualifiersInput")?.addEventListener("input", (event) => {
+          if (!state.parsedDraft) {
+            return;
+          }
+
+          state.parsedDraft = {
+            ...state.parsedDraft,
+            behavior: {
+              action: state.parsedDraft.behavior?.action || "",
+              qualifiers: normalizeQualifierLines(event.target.value),
+            },
+          };
+        });
+
+        detail.querySelector("#behaviorQualifiersInput")?.addEventListener("change", () => {
           render();
         });
 

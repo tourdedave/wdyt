@@ -218,7 +218,12 @@ export type UniqueFlow = {
   prerequisites?: string[];
 };
 
-export type CriticalFlowStatus = "missing" | "partial" | "covered";
+export type CriticalFlowStatus = "not_covered" | "partial" | "covered";
+
+export type StructuredBehavior = {
+  action: string;
+  qualifiers: string[];
+};
 
 export type ParsedCriticalFlow = {
   name: string;
@@ -226,6 +231,7 @@ export type ParsedCriticalFlow = {
   interpretedSteps: string[];
   interpretedTerms: string[];
   outcome?: string;
+  behavior?: StructuredBehavior;
 };
 
 export type CriticalFlowRecord = ParsedCriticalFlow & {
@@ -239,10 +245,13 @@ export type ApprovedDescriptorRecord = {
   id: string;
   name: string;
   vocab: string[];
+  behavior?: StructuredBehavior;
 };
 
 export type CriticalFlowDetailRecord = CriticalFlowRecord & {
   matchedDescriptors: ApprovedDescriptorRecord[];
   matchedConcepts: string[];
   missingTerms: string[];
+  matchedAction?: string;
+  missingQualifiers: string[];
 };

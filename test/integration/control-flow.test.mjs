@@ -2383,7 +2383,7 @@ test("artifact export supports pdf format", { timeout: 15_000 }, async () => {
             rawText: "Forgot password",
             interpretedSteps: ["forgot password"],
             interpretedTerms: ["forgot password"],
-            status: "missing",
+            status: "not_covered",
             matchedDescriptorIds: [],
             updatedAt: 1,
           },
@@ -2634,7 +2634,7 @@ test("summary page renders executive overview shell with reordered navigation", 
             rawText: "Forgot password",
             interpretedSteps: ["reset password"],
             interpretedTerms: ["reset password"],
-            status: "missing",
+            status: "not_covered",
             matchedDescriptorIds: [],
             updatedAt: 1,
           },
@@ -2871,13 +2871,13 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
     assert.equal(interpreted.outcome, "report exported");
 
     const created = await postJson(serverUrl, "/expected-behaviors", interpreted);
-    assert.equal(created.status, "missing");
+    assert.equal(created.status, "not_covered");
     assert.deepEqual(created.matchedDescriptorIds, []);
 
     const state = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(state.hasDescriptors ?? state.hasApprovedDescriptors, false);
     assert.equal(state.flows.length, 1);
-    assert.equal(state.flows[0].status, "missing");
+    assert.equal(state.flows[0].status, "not_covered");
 
     const captureGuide = await fetch(`${serverUrl}/getting-started`).then((response) => response.text());
     assert.match(captureGuide, /TODO: Add product-specific guidance/);
@@ -3259,9 +3259,9 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     assert.match(page, /Missing:/);
     assert.match(page, /Missing in/);
     assert.match(page, /Interpreted Behavior/);
-    assert.match(page, /Why it’s missing/);
-    assert.match(page, /No test evidence was found for this behavior\./);
-    assert.match(page, /This may indicate missing test coverage or a mismatch in behavior naming\./);
+    assert.match(page, /Why it’s partially covered/);
+    assert.match(page, /Some parts of this behavior were not found in observed test execution\./);
+    assert.match(page, /The general behavior was observed, but the distinguishing qualifier details were not found\./);
     assert.doesNotMatch(page, /Interpreted Terms/);
     assert.doesNotMatch(page, /Matched Concepts/);
     assert.doesNotMatch(page, /Matching Descriptors/);
@@ -3411,6 +3411,81 @@ test("critical flows compare against semantic role terms when vocab is sparse", 
   }
 });
 
+test("critical flows mark qualifier-specific behaviors as partial when only the action is observed", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-qualifiers-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const originalCwd = process.cwd();
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "descriptor-search",
+            flowId: "descriptor-search",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["search-basic"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            proposedDescriptor: "Search",
+            proposedConfidence: 0.8,
+            proposedRationale: "Search is performed.",
+            approvedVocabUsed: [],
+            proposedVocab: ["search"],
+            activeDescriptor: "Search",
+            activeVocab: ["search"],
+            primaryTerms: ["search"],
+            outcomeTerms: [],
+            interpretationStatus: "auto-generated",
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    process.chdir(tempDir);
+    const { createCriticalFlow, loadCriticalFlowState } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
+
+    const created = await createCriticalFlow({
+      name: "Search using LTR inputs",
+      rawText: "Search using LTR inputs",
+      interpretedSteps: ["search"],
+      interpretedTerms: ["search"],
+      outcome: "results visible",
+    });
+
+    assert.equal(created.status, "partial");
+    assert.deepEqual(created.matchedDescriptorIds, ["descriptor-search"]);
+    assert.deepEqual(created.behavior, {
+      action: "search",
+      qualifiers: ["ltr_inputs"],
+    });
+
+    const state = await loadCriticalFlowState();
+    assert.equal(state.flows[0].status, "partial");
+    assert.equal(state.flows[0].matchedAction, "Search");
+    assert.deepEqual(state.flows[0].missingQualifiers, ["ltr_inputs"]);
+    assert.deepEqual(state.flows[0].missingTerms, ["ltr inputs"]);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("critical flows can be updated and deleted", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-edit-delete-"));
   const port = randomPort();
@@ -3525,16 +3600,29 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
         interpretedSteps: ["create report", "export report"],
         interpretedTerms: ["create report", "export report"],
         outcome: "report exported",
+        behavior: {
+          action: "create report",
+          qualifiers: ["csv_export"],
+        },
       }),
     }).then((response) => response.json());
 
     assert.equal(updated.name, "Create and export a report");
     assert.equal(updated.status, "partial");
+    assert.deepEqual(updated.behavior, {
+      action: "create report",
+      qualifiers: ["csv_export"],
+    });
 
     const stateAfterUpdate = await getJson(serverUrl, "/expected-behaviors/state");
     assert.equal(stateAfterUpdate.flows.length, 1);
     assert.equal(stateAfterUpdate.flows[0].status, "partial");
-    assert.deepEqual(stateAfterUpdate.flows[0].missingTerms, ["export report"]);
+    assert.deepEqual(stateAfterUpdate.flows[0].missingQualifiers, ["csv_export"]);
+    assert.deepEqual(stateAfterUpdate.flows[0].missingTerms, ["csv export"]);
+    assert.deepEqual(stateAfterUpdate.flows[0].behavior, {
+      action: "create report",
+      qualifiers: ["csv_export"],
+    });
 
     const deleted = await fetch(`${serverUrl}/expected-behaviors/${encodeURIComponent(created.id)}`, {
       method: "DELETE",

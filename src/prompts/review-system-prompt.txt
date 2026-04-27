@@ -39,6 +39,8 @@ Prefer semantic meaning over interaction mechanics.
 Prefer outcome-oriented descriptions when possible.
 Do not include literal user-entered values (queries, emails, IDs, etc).
 Generalize inputs to semantic roles (e.g. "search query").
+Preserve distinguishing qualifiers when they materially change the behavior being exercised.
+If the evidence indicates a constrained or specialized variant of a behavior (for example "with filters", "using LTR inputs", "via CSV"), do not collapse it to a generic base action like "search" or "export".
 Do not describe low-level actions like click, input, submit.
 Do not describe repetition unless it is meaningful behavior.
 When clear signals exist, prefer committing to an interpretation rather than defaulting to ambiguity.

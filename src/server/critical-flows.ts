@@ -10,6 +10,7 @@ import type {
   CriticalFlowRecord,
   CriticalFlowStatus,
   ParsedCriticalFlow,
+  StructuredBehavior,
   VocabularyEntry,
 } from "../shared/types.js";
 import {
@@ -23,6 +24,9 @@ import { loadReviewUnits } from "./review.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const criticalFlowSystemPromptPath = path.join(__dirname, "../prompts/critical-flow-system-prompt.txt");
 const CRITICAL_FLOW_SCHEMA_RETRY_LIMIT = 2;
+const QUALIFIER_PREFIX_PATTERN = /\b(?:using|with|via|from)\s+([^,.;]+)/gi;
+const LEADING_BEHAVIOR_PREFIX_PATTERN =
+  /^(?:user can|users can|should be able to|can|be able to|allow(?:s|ed)?(?: users)? to)\s+/i;
 
 function normalizeStringList(value: unknown) {
   if (!Array.isArray(value)) {
@@ -37,6 +41,92 @@ function normalizeTerm(term: string, vocabulary: Iterable<VocabularyEntry>) {
   return approvedTerm ?? term.trim();
 }
 
+function normalizeBehaviorLabel(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeQualifierToken(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function formatQualifierToken(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function normalizeStructuredBehavior(value: unknown, vocabulary: Iterable<VocabularyEntry>): StructuredBehavior | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const rawAction = typeof candidate.action === "string" ? normalizeBehaviorLabel(candidate.action) : "";
+  const qualifiers = normalizeStringList(candidate.qualifiers)
+    .map((qualifier) => normalizeQualifierToken(qualifier))
+    .filter(Boolean);
+
+  if (!rawAction) {
+    return undefined;
+  }
+
+  return {
+    action: normalizeTerm(rawAction, vocabulary),
+    qualifiers: [...new Set(qualifiers)].sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+function decomposeBehaviorPhrase(
+  value: string,
+  vocabulary: Iterable<VocabularyEntry>,
+  candidateActions: string[] = []
+): StructuredBehavior | undefined {
+  const raw = value.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  const qualifiers = [...raw.matchAll(QUALIFIER_PREFIX_PATTERN)]
+    .map((match) => normalizeQualifierToken(match[1] ?? ""))
+    .filter(Boolean);
+  const dedupedQualifiers = [...new Set(qualifiers)];
+  if (dedupedQualifiers.length === 0) {
+    return undefined;
+  }
+
+  const actionSource = raw
+    .replace(LEADING_BEHAVIOR_PREFIX_PATTERN, "")
+    .replace(QUALIFIER_PREFIX_PATTERN, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.,;:]+$/g, "");
+  const normalizedActionSource = normalizeBehaviorLabel(actionSource);
+  if (!normalizedActionSource) {
+    return undefined;
+  }
+
+  const normalizedCandidates = candidateActions
+    .map((candidate) => normalizeBehaviorLabel(candidate))
+    .filter(Boolean);
+  if (normalizedCandidates.length > 0 && !normalizedCandidates.includes(normalizedActionSource)) {
+    return undefined;
+  }
+
+  const canonicalAction = normalizeTerm(normalizedActionSource, vocabulary);
+  return {
+    action: canonicalAction,
+    qualifiers: dedupedQualifiers.sort((a, b) => a.localeCompare(b)),
+  };
+}
+
 function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary: VocabularyEntry[]): ParsedCriticalFlow | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -47,6 +137,7 @@ function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary
   const interpretedSteps = normalizeStringList(candidate.interpretedSteps).map((step) => normalizeTerm(step, vocabulary));
   const interpretedTerms = normalizeStringList(candidate.interpretedTerms).map((term) => normalizeTerm(term, vocabulary));
   const outcome = typeof candidate.outcome === "string" ? candidate.outcome.trim() : undefined;
+  const structuredBehavior = normalizeStructuredBehavior(candidate.behavior, vocabulary);
 
   if (!name || interpretedSteps.length === 0 || interpretedTerms.length === 0) {
     return null;
@@ -58,6 +149,10 @@ function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary
     interpretedSteps: [...new Set(interpretedSteps)].filter(Boolean),
     interpretedTerms: canonicalizeSemanticTerms(interpretedTerms, vocabulary),
     outcome: outcome || undefined,
+    behavior:
+      structuredBehavior ??
+      decomposeBehaviorPhrase(rawText, vocabulary, [...interpretedSteps, ...interpretedTerms]) ??
+      decomposeBehaviorPhrase(name, vocabulary, [...interpretedSteps, ...interpretedTerms]),
   };
 }
 
@@ -105,18 +200,107 @@ export async function loadApprovedDescriptors() {
 
   return units
     .filter((unit) => unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor))
-    .map((unit) => ({
-      id: unit.reviewId,
-      name: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
-      vocab: buildDescriptorComparisonTerms(unit, vocabulary),
-    }))
+    .map(
+      (unit): ApprovedDescriptorRecord => ({
+        id: unit.reviewId,
+        name: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
+        vocab: buildDescriptorComparisonTerms(unit, vocabulary),
+        behavior: decomposeBehaviorPhrase(
+          unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
+          vocabulary,
+          buildDescriptorComparisonTerms(unit, vocabulary)
+        ),
+      })
+    )
     .filter((descriptor) => descriptor.name.trim().length > 0);
 }
 
 function computeCoverage(
-  flow: Pick<CriticalFlowRecord, "interpretedTerms">,
+  flow: Pick<CriticalFlowRecord, "interpretedTerms" | "behavior">,
   descriptors: ApprovedDescriptorRecord[]
-): { status: CriticalFlowStatus; matchedDescriptorIds: string[]; matchedConcepts: string[]; missingTerms: string[] } {
+): {
+  status: CriticalFlowStatus;
+  matchedDescriptorIds: string[];
+  matchedConcepts: string[];
+  missingTerms: string[];
+  matchedAction?: string;
+  missingQualifiers: string[];
+} {
+  if (flow.behavior?.action && flow.behavior.qualifiers.length > 0) {
+    const expectedAction = normalizeBehaviorLabel(flow.behavior.action);
+    const expectedQualifiers = [...new Set(flow.behavior.qualifiers.map((qualifier) => normalizeQualifierToken(qualifier)).filter(Boolean))];
+    let bestMatch:
+      | {
+          descriptorId: string;
+          status: CriticalFlowStatus;
+          matchedAction?: string;
+          missingQualifiers: string[];
+        }
+      | null = null;
+
+    for (const descriptor of descriptors) {
+      const descriptorBehavior = descriptor.behavior;
+      const descriptorAction = normalizeBehaviorLabel(descriptorBehavior?.action ?? "");
+      const descriptorTokens = new Set(
+        [
+          ...(descriptorBehavior?.qualifiers ?? []),
+          ...descriptor.vocab,
+        ]
+          .map((value) => normalizeQualifierToken(value))
+          .filter(Boolean)
+      );
+      const actionMatches =
+        descriptorAction === expectedAction ||
+        descriptor.vocab.some((term) => normalizeBehaviorLabel(term) === expectedAction);
+
+      if (!actionMatches) {
+        continue;
+      }
+
+      const missingQualifiers = expectedQualifiers.filter((qualifier) => !descriptorTokens.has(qualifier));
+      const status: CriticalFlowStatus = missingQualifiers.length === 0 ? "covered" : "partial";
+      const candidate = {
+        descriptorId: descriptor.id,
+        status,
+        matchedAction: descriptorBehavior?.action ?? descriptor.name,
+        missingQualifiers,
+      };
+
+      if (!bestMatch) {
+        bestMatch = candidate;
+        continue;
+      }
+
+      const currentScore = bestMatch.status === "covered" ? 2 : 1;
+      const nextScore = candidate.status === "covered" ? 2 : 1;
+      if (
+        nextScore > currentScore ||
+        (nextScore === currentScore && candidate.missingQualifiers.length < bestMatch.missingQualifiers.length)
+      ) {
+        bestMatch = candidate;
+      }
+    }
+
+    if (bestMatch) {
+      return {
+        status: bestMatch.status,
+        matchedDescriptorIds: [bestMatch.descriptorId],
+        matchedConcepts: bestMatch.status === "covered" ? [flow.behavior.action, ...expectedQualifiers.map(formatQualifierToken)] : [flow.behavior.action],
+        missingTerms: bestMatch.missingQualifiers.map(formatQualifierToken),
+        matchedAction: bestMatch.matchedAction,
+        missingQualifiers: bestMatch.missingQualifiers,
+      };
+    }
+
+    return {
+      status: "not_covered",
+      matchedDescriptorIds: [],
+      matchedConcepts: [],
+      missingTerms: [flow.behavior.action, ...expectedQualifiers.map(formatQualifierToken)],
+      missingQualifiers: expectedQualifiers,
+    };
+  }
+
   const normalizedFlowTerms = [...new Set(flow.interpretedTerms.map((term) => term.trim()).filter(Boolean))].sort((a, b) =>
     a.localeCompare(b)
   );
@@ -150,13 +334,14 @@ function computeCoverage(
   const missingTerms = normalizedFlowTerms.filter((term) => !matchedTermUnion.has(term));
   const matchedCount = matchedConcepts.length;
   const status: CriticalFlowStatus =
-    matchedCount === 0 ? "missing" : missingTerms.length === 0 ? "covered" : "partial";
+    matchedCount === 0 ? "not_covered" : missingTerms.length === 0 ? "covered" : "partial";
 
   return {
     status,
     matchedDescriptorIds,
     matchedConcepts,
     missingTerms,
+    missingQualifiers: [],
   };
 }
 
@@ -262,6 +447,7 @@ export async function updateCriticalFlow(id: string, input: ParsedCriticalFlow) 
   existing.interpretedSteps = normalized.interpretedSteps;
   existing.interpretedTerms = normalized.interpretedTerms;
   existing.outcome = normalized.outcome;
+  existing.behavior = normalized.behavior;
   existing.status = coverage.status;
   existing.matchedDescriptorIds = coverage.matchedDescriptorIds;
   existing.updatedAt = Date.now();
@@ -354,6 +540,8 @@ export async function loadCriticalFlowState() {
         .filter((descriptor): descriptor is ApprovedDescriptorRecord => Boolean(descriptor)),
       matchedConcepts: coverage.matchedConcepts,
       missingTerms: coverage.missingTerms,
+      matchedAction: coverage.matchedAction,
+      missingQualifiers: coverage.missingQualifiers,
     };
   });
 
