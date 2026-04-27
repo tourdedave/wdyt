@@ -22,6 +22,7 @@ import { loadReviewUnits } from "./review.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const criticalFlowSystemPromptPath = path.join(__dirname, "../prompts/critical-flow-system-prompt.txt");
+const CRITICAL_FLOW_SCHEMA_RETRY_LIMIT = 2;
 
 function normalizeStringList(value: unknown) {
   if (!Array.isArray(value)) {
@@ -199,23 +200,25 @@ export async function parseCriticalFlow(rawText: string): Promise<ParsedCritical
     2
   );
 
-  const parsed = normalizeParsedCriticalFlow(
-    await requestJsonCompletion({
-      baseUrl: process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL,
-      apiKey: process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY,
-      model: process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL,
-      systemPrompt,
-      userPrompt,
-    }),
-    trimmed,
-    vocabulary
-  );
+  for (let attempt = 0; attempt < CRITICAL_FLOW_SCHEMA_RETRY_LIMIT; attempt += 1) {
+    const parsed = normalizeParsedCriticalFlow(
+      await requestJsonCompletion({
+        baseUrl: process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL,
+        apiKey: process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY,
+        model: process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL,
+        systemPrompt,
+        userPrompt,
+      }),
+      trimmed,
+      vocabulary
+    );
 
-  if (!parsed) {
-    throw new Error("LLM response did not match expected critical flow schema");
+    if (parsed) {
+      return parsed;
+    }
   }
 
-  return parsed;
+  throw new Error("LLM response did not match expected critical flow schema");
 }
 
 export async function createCriticalFlow(input: ParsedCriticalFlow) {

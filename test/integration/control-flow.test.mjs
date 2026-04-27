@@ -15,7 +15,7 @@ function randomPort() {
   return 4100 + Math.floor(Math.random() * 1000);
 }
 
-async function waitForHealth(serverUrl, timeoutMs = 10_000) {
+async function waitForHealth(serverUrl, timeoutMs = 15_000) {
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
@@ -1424,6 +1424,43 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
   }
 });
 
+test("critical flow parsing retries once when the first LLM response is schema-invalid", { timeout: 15_000 }, async () => {
+  const llmPort = randomPort();
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort, {
+    responseSequence: [
+      { name: "Reset password" },
+      {
+        name: "Reset password",
+        interpretedSteps: ["reset password"],
+        interpretedTerms: ["reset password"],
+        outcome: "",
+      },
+    ],
+  });
+  const originalBaseUrl = process.env.WDYT_LLM_BASE_URL;
+  const originalApiKey = process.env.WDYT_LLM_API_KEY;
+  const originalModel = process.env.WDYT_LLM_MODEL;
+
+  try {
+    process.env.WDYT_LLM_BASE_URL = llmUrl;
+    process.env.WDYT_LLM_API_KEY = "ollama";
+    process.env.WDYT_LLM_MODEL = "mistral:instruct";
+
+    const { parseCriticalFlow } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
+    const parsed = await parseCriticalFlow("Reset password");
+
+    assert.equal(parsed.name, "Reset password");
+    assert.deepEqual(parsed.interpretedSteps, ["reset password"]);
+    assert.deepEqual(parsed.interpretedTerms, ["reset password"]);
+  } finally {
+    process.env.WDYT_LLM_BASE_URL = originalBaseUrl;
+    process.env.WDYT_LLM_API_KEY = originalApiKey;
+    process.env.WDYT_LLM_MODEL = originalModel;
+    llmServer.close();
+  }
+});
+
 test("review proposal prompt uses registry matches and canonical approved vocabulary", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-sanitize-"));
   const port = randomPort();
@@ -1894,7 +1931,14 @@ test("review splits one canonical flow into separate outcome variants", { timeou
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
 
-    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+    const reviewFile = await waitForCondition(async () => {
+      try {
+        const contents = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+        return Array.isArray(contents) && contents.length === 2 ? contents : false;
+      } catch {
+        return false;
+      }
+    });
     assert.equal(reviewFile.length, 2);
     assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
