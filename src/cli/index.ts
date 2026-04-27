@@ -6,7 +6,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import { buildArtifactWithOptions } from "../artifact/buildArtifact.js";
-import { importArtifact } from "../artifact/importArtifact.js";
+import { importArtifacts } from "../artifact/importArtifact.js";
 import { exportPdf, loadSummaryReportData } from "../report/summary-report.js";
 import {
   getProcessedRunsPath,
@@ -1145,7 +1145,7 @@ async function main() {
     "Usage:",
     "  wdyt artifact",
     "  wdyt artifact export [--format zip|pdf] [--output <path>]",
-    "  wdyt artifact import <zip-path>",
+    "  wdyt artifact import <zip-path> [more-zip-paths...]",
     "",
     "Commands:",
     "  export    Create a snapshot zip of the current wdyt runtime data",
@@ -1183,14 +1183,14 @@ async function main() {
     }
 
     if (subcommand === "import") {
-      const artifactPath = args[1];
-      if (!artifactPath) {
+      const artifactPaths = args.slice(1);
+      if (artifactPaths.length === 0) {
         console.error(artifactUsage);
         process.exitCode = 1;
         return;
       }
 
-      console.log(await importArtifact(artifactPath));
+      console.log(await importArtifacts(artifactPaths));
       return;
     }
 

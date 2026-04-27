@@ -201,8 +201,21 @@ export async function importArtifactBuffers(zipBuffers: Buffer[]): Promise<strin
   return restoreRuntimeEntries(mergedEntries);
 }
 
+export async function importArtifacts(zipPaths: string[]): Promise<string> {
+  if (zipPaths.length === 0) {
+    throw new Error("At least one artifact is required");
+  }
+
+  const zipBuffers = await Promise.all(
+    zipPaths.map(async (zipPath) => {
+      const artifactPath = path.resolve(process.cwd(), zipPath);
+      return readFile(artifactPath);
+    })
+  );
+
+  return importArtifactBuffers(zipBuffers);
+}
+
 export async function importArtifact(zipPath: string): Promise<string> {
-  const artifactPath = path.resolve(process.cwd(), zipPath);
-  const zipBuffer = await readFile(artifactPath);
-  return importArtifactBuffers([zipBuffer]);
+  return importArtifacts([zipPath]);
 }

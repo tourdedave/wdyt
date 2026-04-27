@@ -1976,7 +1976,7 @@ test("artifact command packages current wdyt runtime state with manifest", { tim
 
     const artifactHelp = await runCli(tempDir, ["artifact"]);
     assert.match(artifactHelp, /wdyt artifact export \[--format zip\|pdf\] \[--output <path>\]/);
-    assert.match(artifactHelp, /wdyt artifact import <zip-path>/);
+    assert.match(artifactHelp, /wdyt artifact import <zip-path> \[more-zip-paths\.\.\.\]/);
 
     const zipPath = await runCli(tempDir, ["artifact", "export"]);
     assert.match(zipPath, /\.zip$/);
@@ -2063,6 +2063,86 @@ test("artifact import restores runtime JSON artifacts from zip", { timeout: 15_0
     assert.equal(staleExists, false);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("artifact import accepts multiple zip paths and merges runtime artifacts", { timeout: 15_000 }, async () => {
+  const sourceADir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-import-multi-a-"));
+  const sourceBDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-import-multi-b-"));
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-import-multi-target-"));
+  const zipAPath = path.join(sourceADir, "artifact-a.zip");
+  const zipBPath = path.join(sourceBDir, "artifact-b.zip");
+
+  try {
+    await mkdir(path.join(sourceADir, ".wdyt"), { recursive: true });
+    await writeFile(
+      path.join(sourceADir, ".wdyt", "runs.raw.jsonl"),
+      `${JSON.stringify({ run: { id: "raw-a" } })}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(sourceADir, ".wdyt", "review-units.json"),
+      `${JSON.stringify([{ reviewId: "unit-a", flowId: "flow-a" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(sourceADir, ".wdyt", "critical-flows.json"),
+      `${JSON.stringify([{ id: "critical-a", name: "Behavior A" }], null, 2)}\n`,
+      "utf8"
+    );
+    await runCli(sourceADir, ["artifact", "export", "--output", zipAPath]);
+
+    await mkdir(path.join(sourceBDir, ".wdyt"), { recursive: true });
+    await writeFile(
+      path.join(sourceBDir, ".wdyt", "runs.raw.jsonl"),
+      `${JSON.stringify({ run: { id: "raw-b" } })}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(sourceBDir, ".wdyt", "review-units.json"),
+      `${JSON.stringify([{ reviewId: "unit-b", flowId: "flow-b" }], null, 2)}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(sourceBDir, ".wdyt", "critical-flows.json"),
+      `${JSON.stringify([{ id: "critical-b", name: "Behavior B" }], null, 2)}\n`,
+      "utf8"
+    );
+    await runCli(sourceBDir, ["artifact", "export", "--output", zipBPath]);
+
+    const importedDataDir = await runCli(targetDir, ["artifact", "import", zipAPath, zipBPath]);
+    assert.match(importedDataDir, /\.wdyt$/);
+
+    assert.equal(
+      await readFile(path.join(targetDir, ".wdyt", "runs.raw.jsonl"), "utf8"),
+      `${JSON.stringify({ run: { id: "raw-a" } })}\n${JSON.stringify({ run: { id: "raw-b" } })}\n`
+    );
+    assert.equal(
+      await readFile(path.join(targetDir, ".wdyt", "review-units.json"), "utf8"),
+      `${JSON.stringify(
+        [
+          { reviewId: "unit-a", flowId: "flow-a" },
+          { reviewId: "unit-b", flowId: "flow-b" },
+        ],
+        null,
+        2
+      )}\n`
+    );
+    assert.equal(
+      await readFile(path.join(targetDir, ".wdyt", "critical-flows.json"), "utf8"),
+      `${JSON.stringify(
+        [
+          { id: "critical-a", name: "Behavior A" },
+          { id: "critical-b", name: "Behavior B" },
+        ],
+        null,
+        2
+      )}\n`
+    );
+  } finally {
+    await rm(sourceADir, { recursive: true, force: true });
+    await rm(sourceBDir, { recursive: true, force: true });
+    await rm(targetDir, { recursive: true, force: true });
   }
 });
 
