@@ -12,6 +12,14 @@ type Manifest = {
   }>;
 };
 
+type ParsedArtifact = {
+  manifest: Manifest;
+  runtimeEntries: Array<{
+    path: string;
+    content: Buffer;
+  }>;
+};
+
 function assertRelativeDataPath(zipPath: string) {
   if (!zipPath.startsWith("data/")) {
     throw new Error(`Artifact file path must start with data/: ${zipPath}`);
@@ -82,9 +90,7 @@ function validateManifest(manifest: Manifest, zipEntries: Map<string, Buffer>) {
   }
 }
 
-export async function importArtifact(zipPath: string): Promise<string> {
-  const artifactPath = path.resolve(process.cwd(), zipPath);
-  const zipBuffer = await readFile(artifactPath);
+function parseArtifactBuffer(zipBuffer: Buffer): ParsedArtifact {
   const entries = readZipEntries(zipBuffer);
   const entryMap = new Map(entries.map((entry) => [entry.path, entry.content]));
   const manifestBuffer = entryMap.get("manifest.json");
@@ -96,7 +102,13 @@ export async function importArtifact(zipPath: string): Promise<string> {
   const manifest = JSON.parse(manifestBuffer.toString("utf8")) as Manifest;
   validateManifest(manifest, entryMap);
 
-  const runtimeEntries = entries.filter((entry) => entry.path.startsWith("data/"));
+  return {
+    manifest,
+    runtimeEntries: entries.filter((entry) => entry.path.startsWith("data/")),
+  };
+}
+
+async function restoreRuntimeEntries(runtimeEntries: Array<{ path: string; content: Buffer }>) {
   const dataDir = getDataDir();
   await mkdir(dataDir, { recursive: true });
   await removeExistingRuntimeArtifacts(dataDir);
@@ -109,4 +121,88 @@ export async function importArtifact(zipPath: string): Promise<string> {
   }
 
   return dataDir;
+}
+
+function mergeJsonArrayEntries(buffers: Buffer[]) {
+  const merged: unknown[] = [];
+  const seen = new Set<string>();
+
+  for (const buffer of buffers) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(buffer.toString("utf8"));
+    } catch {
+      continue;
+    }
+
+    if (!Array.isArray(parsed)) {
+      continue;
+    }
+
+    for (const item of parsed) {
+      const key = JSON.stringify(item);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(item);
+    }
+  }
+
+  return Buffer.from(`${JSON.stringify(merged, null, 2)}\n`, "utf8");
+}
+
+function mergeJsonLineEntries(buffers: Buffer[]) {
+  const lines: string[] = [];
+  const seen = new Set<string>();
+
+  for (const buffer of buffers) {
+    const content = buffer.toString("utf8");
+    for (const line of content.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+      if (seen.has(line)) {
+        continue;
+      }
+      seen.add(line);
+      lines.push(line);
+    }
+  }
+
+  return Buffer.from(lines.length > 0 ? `${lines.join("\n")}\n` : "", "utf8");
+}
+
+export async function importArtifactBuffers(zipBuffers: Buffer[]): Promise<string> {
+  if (zipBuffers.length === 0) {
+    throw new Error("At least one artifact is required");
+  }
+
+  const parsedArtifacts = zipBuffers.map(parseArtifactBuffer);
+  if (parsedArtifacts.length === 1) {
+    return restoreRuntimeEntries(parsedArtifacts[0].runtimeEntries);
+  }
+
+  const entryGroups = new Map<string, Buffer[]>();
+  for (const artifact of parsedArtifacts) {
+    for (const entry of artifact.runtimeEntries) {
+      const current = entryGroups.get(entry.path) ?? [];
+      current.push(entry.content);
+      entryGroups.set(entry.path, current);
+    }
+  }
+
+  const mergedEntries = [...entryGroups.entries()].map(([zipPath, buffers]) => {
+    const fileName = path.basename(zipPath).toLowerCase();
+    const content = fileName.endsWith(".jsonl")
+      ? mergeJsonLineEntries(buffers)
+      : mergeJsonArrayEntries(buffers);
+
+    return { path: zipPath, content };
+  });
+
+  return restoreRuntimeEntries(mergedEntries);
+}
+
+export async function importArtifact(zipPath: string): Promise<string> {
+  const artifactPath = path.resolve(process.cwd(), zipPath);
+  const zipBuffer = await readFile(artifactPath);
+  return importArtifactBuffers([zipBuffer]);
 }

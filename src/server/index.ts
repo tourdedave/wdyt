@@ -1,7 +1,18 @@
 import http from "node:http";
+import { Buffer } from "node:buffer";
 
+import { importArtifactBuffers } from "../artifact/importArtifact.js";
 import { DEFAULT_SERVER_URL } from "../shared/constants.js";
-import { ensureDataDir, getVocabularyPath, readJsonFile } from "../shared/fs.js";
+import {
+  ensureDataDir,
+  getCriticalFlowsPath,
+  getProcessedRunsPath,
+  getRawRunsPath,
+  getReviewUnitsPath,
+  getVocabularyPath,
+  readJsonFile,
+  readJsonLines,
+} from "../shared/fs.js";
 import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { loadSummaryReportData, renderReportPdf } from "../report/summary-report.js";
@@ -28,9 +39,207 @@ function writeJson(res: http.ServerResponse, statusCode: number, payload: unknow
   res.end(JSON.stringify(payload));
 }
 
+async function hasAnyRuntimeData() {
+  const [rawRuns, processedRuns, reviewUnits, criticalFlows] = await Promise.all([
+    readJsonLines(getRawRunsPath()),
+    readJsonLines(getProcessedRunsPath()),
+    readJsonFile(getReviewUnitsPath(), []),
+    readJsonFile(getCriticalFlowsPath(), []),
+  ]);
+
+  return rawRuns.length > 0 || processedRuns.length > 0 || reviewUnits.length > 0 || criticalFlows.length > 0;
+}
+
 function getServerUrl(req: http.IncomingMessage) {
   const host = req.headers.host;
   return host ? `http://${host}` : DEFAULT_SERVER_URL;
+}
+
+function renderEmptyStatePage() {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Get started with wdyt</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f6f1e7;
+        --panel: #fffdf8;
+        --line: #d8cfbf;
+        --ink: #1d1a16;
+        --muted: #6d6458;
+        --accent: #1f6f4a;
+        --accent-2: #8a5a18;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
+      main { min-height: 100vh; padding: 40px 24px; }
+      .shell { max-width: 1120px; margin: 0 auto; }
+      h1 { margin: 0 0 28px; font-size: 40px; line-height: 1.1; }
+      .launchpad { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 24px; align-items: stretch; }
+      .panel { background: rgba(255,253,248,0.92); border: 1px solid var(--line); border-radius: 18px; padding: 28px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.55); }
+      .panel h2 { margin: 0 0 12px; font-size: 28px; }
+      .panel p { margin: 0 0 14px; color: var(--muted); line-height: 1.5; font-size: 17px; }
+      .panel p.helper { margin-top: 18px; font-size: 15px; }
+      .button-link,
+      .picker-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid var(--accent);
+        background: var(--accent);
+        color: #fff;
+        text-decoration: none;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .button-link:hover,
+      .picker-button:hover { background: #195d3f; }
+      .divider {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 14px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+      .dropzone {
+        margin-top: 12px;
+        padding: 28px 20px;
+        border: 2px dashed rgba(31,111,74,0.24);
+        border-radius: 16px;
+        background: rgba(255,255,255,0.55);
+        text-align: center;
+        transition: border-color 120ms ease, background 120ms ease;
+      }
+      .dropzone.dragover {
+        border-color: var(--accent);
+        background: rgba(31,111,74,0.08);
+      }
+      .dropzone p { margin: 0 0 14px; font-size: 16px; }
+      .meta { margin-top: 12px; color: var(--muted); font-size: 14px; min-height: 20px; }
+      .error { color: #9f1d1d; }
+      input[type="file"] { display: none; }
+      @media (max-width: 900px) {
+        .launchpad { grid-template-columns: 1fr; }
+        .divider { margin: -6px 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="shell">
+        <h1>Get started with wdyt</h1>
+        <div class="launchpad">
+          <section class="panel">
+            <h2>Capture test data</h2>
+            <p>Run your tests with wdyt enabled to capture behavior and generate an artifact.</p>
+            <a class="button-link" href="/critical-flows/capture-guide" target="_blank" rel="noreferrer">View Getting Started guide</a>
+            <p class="helper">After running your tests, you’ll be able to review observed behaviors and evaluate coverage.</p>
+          </section>
+
+          <div class="divider">OR</div>
+
+          <section class="panel">
+            <h2>Upload an artifact</h2>
+            <p>Already have wdyt output? Upload one or more artifact (.zip) files to review and analyze.</p>
+            <div id="dropzone" class="dropzone" tabindex="0">
+              <p>Drag and drop artifact (.zip) files here</p>
+              <label class="picker-button" for="artifactFiles">Select files</label>
+              <input id="artifactFiles" type="file" accept=".zip,application/zip" multiple />
+            </div>
+            <div id="uploadStatus" class="meta"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+    <script>
+      const dropzone = document.getElementById("dropzone");
+      const fileInput = document.getElementById("artifactFiles");
+      const statusEl = document.getElementById("uploadStatus");
+
+      const setStatus = (message, isError = false) => {
+        statusEl.textContent = message;
+        statusEl.className = isError ? "meta error" : "meta";
+      };
+
+      const toBase64 = async (file) => {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = "";
+        const chunkSize = 0x8000;
+        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+        }
+        return btoa(binary);
+      };
+
+      const importFiles = async (files) => {
+        if (!files || files.length === 0) {
+          return;
+        }
+
+        const zipFiles = [...files].filter((file) => file.name.toLowerCase().endsWith(".zip"));
+        if (zipFiles.length === 0) {
+          setStatus("Select one or more artifact (.zip) files.", true);
+          return;
+        }
+
+        setStatus(\`Uploading \${zipFiles.length} artifact\${zipFiles.length === 1 ? "" : "s"}…\`);
+
+        try {
+          const payload = {
+            files: await Promise.all(zipFiles.map(async (file) => ({
+              name: file.name,
+              contentBase64: await toBase64(file),
+            }))),
+          };
+
+          const response = await fetch("/artifacts/import", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const body = await response.json();
+          if (!response.ok) {
+            throw new Error(body.error || "Unable to import artifacts.");
+          }
+
+          setStatus("Artifacts imported. Opening observed behaviors…");
+          window.location.assign("/review");
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : "Unable to import artifacts.", true);
+        }
+      };
+
+      fileInput.addEventListener("change", () => {
+        importFiles(fileInput.files);
+      });
+
+      ["dragenter", "dragover"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.add("dragover");
+        });
+      });
+
+      ["dragleave", "drop"].forEach((eventName) => {
+        dropzone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropzone.classList.remove("dragover");
+        });
+      });
+
+      dropzone.addEventListener("drop", (event) => {
+        importFiles(event.dataTransfer.files);
+      });
+    </script>
+  </body>
+</html>`;
 }
 
 function renderBootstrapPage(payload: {
@@ -1726,13 +1935,29 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && requestPath === "/") {
+    res.writeHead(302, { location: "/review" });
+    res.end();
+    return;
+  }
+
   if (req.method === "GET" && requestPath === "/review") {
+    if (!(await hasAnyRuntimeData())) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(renderEmptyStatePage());
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderReviewPage());
     return;
   }
 
   if (req.method === "GET" && requestPath === "/review/summary") {
+    if (!(await hasAnyRuntimeData())) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(renderEmptyStatePage());
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderReviewSummaryPage());
     return;
@@ -1757,6 +1982,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && requestPath === "/critical-flows") {
+    if (!(await hasAnyRuntimeData())) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(renderEmptyStatePage());
+      return;
+    }
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderCriticalFlowsPage());
     return;
@@ -1881,6 +2111,34 @@ const server = http.createServer(async (req, res) => {
       }
 
       writeJson(res, 200, await parseCriticalFlow(body.rawText));
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
+  if (req.method === "POST" && requestPath === "/artifacts/import") {
+    try {
+      const body = (await readJsonBody(req)) as { files?: Array<{ name?: string; contentBase64?: string }> } | null;
+      const files = Array.isArray(body?.files) ? body.files : [];
+      if (files.length === 0) {
+        writeJson(res, 400, { error: "At least one artifact (.zip) file is required." });
+        return;
+      }
+
+      const buffers = files.map((file) => {
+        if (typeof file.contentBase64 !== "string" || file.contentBase64.length === 0) {
+          throw new Error("Each artifact must include base64 content.");
+        }
+        return Buffer.from(file.contentBase64, "base64");
+      });
+
+      await importArtifactBuffers(buffers);
+      await refreshReviewUnits();
+
+      writeJson(res, 200, { ok: true });
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";

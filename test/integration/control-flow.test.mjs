@@ -2066,6 +2066,81 @@ test("artifact import restores runtime JSON artifacts from zip", { timeout: 15_0
   }
 });
 
+test("empty runtime shows launchpad and accepts multi-file artifact upload", { timeout: 20_000 }, async () => {
+  const sourceDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-launchpad-source-"));
+  const targetDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-launchpad-target-"));
+  const sourcePort = randomPort();
+  const targetPort = randomPort();
+  const sourceUrl = `http://127.0.0.1:${sourcePort}`;
+  const targetUrl = `http://127.0.0.1:${targetPort}`;
+  const sourceServer = spawnServer(sourceDir, sourcePort);
+  const targetServer = spawnServer(targetDir, targetPort);
+  const artifactPath = path.join(sourceDir, "fixture-artifact.zip");
+
+  try {
+    await waitForHealth(sourceUrl);
+    await waitForHealth(targetUrl);
+
+    await postJson(sourceUrl, "/ingest", {
+      suite: { id: "integration", name: "integration", normalizedName: "integration" },
+      environment: {
+        tool: "integration-test",
+        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        testName: "launchpad-upload",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Sign in" } },
+        { type: "submit", ts: 1020, seq: 2, target: { tag: "form", text: "Username Password Sign in" } },
+        { type: "navigate", ts: 1030, seq: 3, url: "http://127.0.0.1:4010/dashboard" },
+      ],
+    });
+
+    await runCli(sourceDir, ["artifact", "export", "--output", artifactPath]);
+    const artifactBase64 = (await readFile(artifactPath)).toString("base64");
+
+    const emptyPage = await fetch(`${targetUrl}/review`).then((response) => response.text());
+    assert.match(emptyPage, /Get started with wdyt/);
+    assert.match(emptyPage, /Capture test data/);
+    assert.match(emptyPage, /Upload an artifact/);
+    assert.match(emptyPage, /OR/);
+
+    const uploadResponse = await postJson(targetUrl, "/artifacts/import", {
+      files: [
+        { name: "fixture-a.zip", contentBase64: artifactBase64 },
+        { name: "fixture-b.zip", contentBase64: artifactBase64 },
+      ],
+    });
+    assert.equal(uploadResponse.ok, true);
+
+    const uploadedUnits = await waitForCondition(async () => {
+      const units = await getJson(targetUrl, "/review/units");
+      return units.length > 0 ? units : false;
+    });
+    assert.equal(uploadedUnits.length, 1);
+
+    const reviewPage = await fetch(`${targetUrl}/review`).then((response) => response.text());
+    assert.doesNotMatch(reviewPage, /Get started with wdyt/);
+    assert.match(reviewPage, /Observed Behaviors/);
+  } finally {
+    await stopChildProcess(sourceServer.child);
+    await stopChildProcess(targetServer.child);
+    await rm(sourceDir, { recursive: true, force: true });
+    await rm(targetDir, { recursive: true, force: true });
+  }
+});
+
 test("artifact export supports an explicit output path", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-output-"));
   const dataDir = path.join(tempDir, ".wdyt");
@@ -2336,11 +2411,124 @@ test("review module materializes review units, proposes descriptors, and saves r
 
 test("summary page renders executive overview shell with reordered navigation", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-page-"));
+  const dataDir = path.join(tempDir, ".wdyt");
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
-  const { child } = spawnServer(tempDir, port);
+  let child;
 
   try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "flow-dashboard-a",
+            flowId: "flow-dashboard-a",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-a"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-dashboard-b",
+            flowId: "flow-dashboard-b",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["dashboard-b"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["dashboard"],
+            activeDescriptor: "View dashboard",
+            activeVocab: ["dashboard"],
+            overlapTerms: ["dashboard"],
+            updatedAt: 1,
+          },
+          {
+            reviewId: "flow-search",
+            flowId: "flow-search",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["search"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            approvedVocabUsed: [],
+            proposedVocab: ["search results"],
+            activeDescriptor: "View search results",
+            activeVocab: ["search results"],
+            overlapTerms: ["search results"],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "critical-flows.json"),
+      `${JSON.stringify(
+        [
+          {
+            id: "expected-dashboard",
+            name: "View dashboard",
+            rawText: "View dashboard",
+            interpretedSteps: ["view dashboard"],
+            interpretedTerms: ["dashboard"],
+            status: "covered",
+            matchedDescriptorIds: ["flow-dashboard-a", "flow-dashboard-b"],
+            updatedAt: 1,
+          },
+          {
+            id: "expected-reset-password",
+            name: "Forgot password",
+            rawText: "Forgot password",
+            interpretedSteps: ["reset password"],
+            interpretedTerms: ["reset password"],
+            status: "missing",
+            matchedDescriptorIds: [],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    ({ child } = spawnServer(tempDir, port));
     await waitForHealth(serverUrl);
 
     const page = await fetch(`${serverUrl}/review/summary`).then((response) => response.text());
@@ -2353,7 +2541,6 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /Covered/);
     assert.match(page, /Partial/);
     assert.match(page, /Missing/);
-    assert.match(page, /Observed Behaviors/);
     assert.doesNotMatch(page, /Repeated Coverage/);
     assert.match(page, /const formatUniqueFlowLabel = \(item\) =>/);
     assert.match(page, /item\.count > 1 \? `\$\{item\.title\} \(\$\{item\.count\}\)` : item\.title/);
@@ -2361,7 +2548,9 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.doesNotMatch(page, /number = how many flows/);
     assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/critical-flows">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
   } finally {
-    await stopChildProcess(child);
+    if (child) {
+      await stopChildProcess(child);
+    }
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -2540,10 +2729,10 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
     await waitForHealth(serverUrl);
 
     const page = await fetch(`${serverUrl}/critical-flows`).then((response) => response.text());
-    assert.match(page, /Critical Flows/);
-    assert.match(page, /Define expected behaviors and evaluate them against observed execution evidence\./);
-    assert.match(page, /What are the most important things your application must do\?/);
-    assert.match(page, /Learn how to capture a test/);
+    assert.match(page, /Get started with wdyt/);
+    assert.match(page, /Capture test data/);
+    assert.match(page, /Upload an artifact/);
+    assert.match(page, /View Getting Started guide/);
 
     const interpreted = await postJson(serverUrl, "/critical-flows/interpret", {
       rawText: "User can log in and export a report to CSV",
