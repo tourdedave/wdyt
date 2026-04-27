@@ -1,6 +1,10 @@
 import http from "node:http";
 import { Buffer } from "node:buffer";
+import os from "node:os";
+import path from "node:path";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 
+import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifactBuffers } from "../artifact/importArtifact.js";
 import { DEFAULT_SERVER_URL } from "../shared/constants.js";
 import {
@@ -15,7 +19,6 @@ import {
 } from "../shared/fs.js";
 import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
-import { loadSummaryReportData, renderReportPdf } from "../report/summary-report.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
 import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
@@ -765,8 +768,48 @@ function renderReviewSummaryPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      .export-report { position: absolute; top: 50%; right: 0; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; padding: 10px 16px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; white-space: nowrap; }
-      .export-report:hover { background: #195d3f; }
+      .export-menu { position: absolute; top: 50%; right: 0; transform: translateY(-50%); }
+      .export-menu[open] { z-index: 20; }
+      .export-trigger {
+        list-style: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: var(--accent);
+        color: #fff;
+        text-decoration: none;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .export-trigger:hover { background: #195d3f; }
+      .export-trigger::-webkit-details-marker { display: none; }
+      .export-panel {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        min-width: 220px;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255,253,248,0.98);
+        box-shadow: 0 10px 30px rgba(29,26,22,0.12);
+      }
+      .export-option {
+        display: block;
+        padding: 10px 12px;
+        border-radius: 10px;
+        color: var(--ink);
+        text-decoration: none;
+        font-size: 15px;
+        line-height: 1.35;
+      }
+      .export-option:hover {
+        background: rgba(31,111,74,0.08);
+      }
       main { padding: 24px 24px 48px; display: grid; gap: 14px; }
       .hero { display: grid; gap: 8px; }
       .hero h2 { margin: 0; font-size: 34px; }
@@ -823,7 +866,8 @@ function renderReviewSummaryPage() {
       .unique-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
-        .export-report { position: static; transform: none; margin-top: 12px; }
+        .export-menu { position: static; transform: none; margin-top: 12px; }
+        .export-panel { right: auto; left: 0; }
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         .repeat-list { grid-template-columns: 1fr; }
       }
@@ -843,13 +887,33 @@ function renderReviewSummaryPage() {
             </nav>
           </div>
         </div>
-        <a class="export-report" href="/report/summary.pdf">Export Report</a>
+        <details class="export-menu">
+          <summary class="export-trigger">Export <span aria-hidden="true">▾</span></summary>
+          <div class="export-panel">
+            <a class="export-option" href="/artifacts/export?format=pdf">Download PDF report</a>
+            <a class="export-option" href="/artifacts/export?format=zip">Download artifact (.zip)</a>
+          </div>
+        </details>
       </div>
     </header>
     <main>
       <div id="summary">Loading…</div>
     </main>
     <script>
+      const exportMenu = document.querySelector(".export-menu");
+      if (exportMenu) {
+        document.addEventListener("click", (event) => {
+          if (!exportMenu.contains(event.target)) {
+            exportMenu.removeAttribute("open");
+          }
+        });
+        exportMenu.querySelectorAll(".export-option").forEach((link) => {
+          link.addEventListener("click", () => {
+            exportMenu.removeAttribute("open");
+          });
+        });
+      }
+
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -1868,7 +1932,8 @@ function inferBrowserInfo(req: http.IncomingMessage): BrowserInfo | undefined {
 const server = http.createServer(async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "content-type");
-  const requestPath = req.url ? new URL(req.url, getServerUrl(req)).pathname : null;
+  const requestUrl = req.url ? new URL(req.url, getServerUrl(req)) : null;
+  const requestPath = requestUrl?.pathname ?? null;
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
@@ -1904,11 +1969,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && requestPath === "/bootstrap") {
-    const requestUrl = new URL(req.url ?? "/bootstrap", getServerUrl(req));
-    const serverUrl = requestUrl.searchParams.get("serverUrl") ?? getServerUrl(req);
-    const action = requestUrl.searchParams.get("action");
-    const tool = requestUrl.searchParams.get("tool");
-    const reason = requestUrl.searchParams.get("reason");
+    const bootstrapUrl = requestUrl ?? new URL("/bootstrap", getServerUrl(req));
+    const serverUrl = requestUrl?.searchParams.get("serverUrl") ?? getServerUrl(req);
+    const action = requestUrl?.searchParams.get("action");
+    const tool = requestUrl?.searchParams.get("tool");
+    const reason = requestUrl?.searchParams.get("reason");
     const browser = inferBrowserInfo(req);
 
     if (action !== "start" && action !== "finalize") {
@@ -1926,8 +1991,8 @@ const server = http.createServer(async (req, res) => {
       renderBootstrapPage({
         action,
         serverUrl,
-        suiteName: requestUrl.searchParams.get("suiteName") ?? undefined,
-        testName: requestUrl.searchParams.get("testName") ?? undefined,
+        suiteName: bootstrapUrl.searchParams.get("suiteName") ?? undefined,
+        testName: bootstrapUrl.searchParams.get("testName") ?? undefined,
         environment: Object.keys(environment).length > 0 ? environment : undefined,
         reason: reason === "timeout" ? "timeout" : "completed",
       })
@@ -1963,17 +2028,40 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && requestPath === "/report/summary.pdf") {
+  if (req.method === "GET" && requestPath === "/artifacts/export") {
     try {
-      const reportData = await loadSummaryReportData();
-      const pdfMode = process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer";
-      const pdfBuffer = await renderReportPdf(reportData, { mode: pdfMode });
-      res.writeHead(200, {
-        "content-type": "application/pdf",
-        "content-disposition": 'attachment; filename="wdyt-report.pdf"',
-      });
-      res.end(pdfBuffer);
-      return;
+      if (!(await hasAnyRuntimeData())) {
+        writeJson(res, 400, { error: "No data available to export" });
+        return;
+      }
+
+      const formatParam = requestUrl?.searchParams.get("format");
+      const format = formatParam === "zip" ? "zip" : formatParam === "pdf" ? "pdf" : null;
+      if (!format) {
+        writeJson(res, 400, { error: "Export format must be 'pdf' or 'zip'" });
+        return;
+      }
+
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-export-"));
+      const outputPath = path.join(tempDir, DEFAULT_EXPORT_FILE_NAMES[format]);
+      try {
+        const generatedPath = await exportArtifact({
+          format,
+          outputPath,
+          pdfMode: process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer",
+        });
+        const fileBuffer = await readFile(generatedPath);
+        const contentType = format === "pdf" ? "application/pdf" : "application/zip";
+        const fileName = DEFAULT_EXPORT_FILE_NAMES[format];
+        res.writeHead(200, {
+          "content-type": contentType,
+          "content-disposition": `attachment; filename="${fileName}"`,
+        });
+        res.end(fileBuffer);
+        return;
+      } finally {
+        await rm(tempDir, { recursive: true, force: true });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
       writeJson(res, 500, { error: message });

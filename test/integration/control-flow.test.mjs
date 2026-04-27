@@ -243,7 +243,7 @@ async function runCli(workdir, args, stdinText = "", env = {}) {
 }
 
 async function readZipEntries(zipPath) {
-  const buffer = await readFile(zipPath);
+  const buffer = Buffer.isBuffer(zipPath) ? zipPath : await readFile(zipPath);
   const entries = new Map();
   let offset = 0;
 
@@ -1977,10 +1977,11 @@ test("artifact command packages current wdyt runtime state with manifest", { tim
     const artifactHelp = await runCli(tempDir, ["artifact"]);
     assert.match(artifactHelp, /wdyt artifact export \[--format zip\|pdf\] \[--output <path>\]/);
     assert.match(artifactHelp, /wdyt artifact import <zip-path> \[more-zip-paths\.\.\.\]/);
+    assert.match(artifactHelp, /zip: \.\/wdyt-artifact\.zip/);
+    assert.match(artifactHelp, /pdf: \.\/wdyt-report\.pdf/);
 
     const zipPath = await runCli(tempDir, ["artifact", "export"]);
-    assert.match(zipPath, /\.zip$/);
-    assert.match(zipPath, /\.wdyt-artifacts\//);
+    assert.match(zipPath, /wdyt-artifact\.zip$/);
 
     const zipEntries = await readZipEntries(zipPath);
     assert.ok(zipEntries.has("manifest.json"));
@@ -2148,17 +2149,23 @@ test("artifact import accepts multiple zip paths and merges runtime artifacts", 
 
 test("empty runtime shows launchpad and accepts multi-file artifact upload", { timeout: 20_000 }, async () => {
   const sourceDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-launchpad-source-"));
+  const sourceDirB = await mkdtemp(path.join(os.tmpdir(), "wdyt-launchpad-source-b-"));
   const targetDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-launchpad-target-"));
   const sourcePort = randomPort();
+  const sourcePortB = randomPort();
   const targetPort = randomPort();
   const sourceUrl = `http://127.0.0.1:${sourcePort}`;
+  const sourceUrlB = `http://127.0.0.1:${sourcePortB}`;
   const targetUrl = `http://127.0.0.1:${targetPort}`;
   const sourceServer = spawnServer(sourceDir, sourcePort);
+  const sourceServerB = spawnServer(sourceDirB, sourcePortB);
   const targetServer = spawnServer(targetDir, targetPort);
-  const artifactPath = path.join(sourceDir, "fixture-artifact.zip");
+  const artifactPathA = path.join(sourceDir, "fixture-artifact-a.zip");
+  const artifactPathB = path.join(sourceDirB, "fixture-artifact-b.zip");
 
   try {
     await waitForHealth(sourceUrl);
+    await waitForHealth(sourceUrlB);
     await waitForHealth(targetUrl);
 
     await postJson(sourceUrl, "/ingest", {
@@ -2187,8 +2194,36 @@ test("empty runtime shows launchpad and accepts multi-file artifact upload", { t
       ],
     });
 
-    await runCli(sourceDir, ["artifact", "export", "--output", artifactPath]);
-    const artifactBase64 = (await readFile(artifactPath)).toString("base64");
+    await postJson(sourceUrlB, "/ingest", {
+      suite: { id: "integration", name: "integration", normalizedName: "integration" },
+      environment: {
+        tool: "integration-test",
+        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/settings",
+        title: "Settings",
+        heading: "Settings",
+        alertText: null,
+      },
+      run: {
+        testName: "launchpad-upload-b",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Sign in" } },
+        { type: "submit", ts: 1020, seq: 2, target: { tag: "form", text: "Username Password Sign in" } },
+        { type: "navigate", ts: 1030, seq: 3, url: "http://127.0.0.1:4010/settings" },
+      ],
+    });
+
+    await runCli(sourceDir, ["artifact", "export", "--output", artifactPathA]);
+    await runCli(sourceDirB, ["artifact", "export", "--output", artifactPathB]);
+    const artifactBase64A = (await readFile(artifactPathA)).toString("base64");
+    const artifactBase64B = (await readFile(artifactPathB)).toString("base64");
 
     const emptyPage = await fetch(`${targetUrl}/review`).then((response) => response.text());
     assert.match(emptyPage, /Get started with wdyt/);
@@ -2198,8 +2233,8 @@ test("empty runtime shows launchpad and accepts multi-file artifact upload", { t
 
     const uploadResponse = await postJson(targetUrl, "/artifacts/import", {
       files: [
-        { name: "fixture-a.zip", contentBase64: artifactBase64 },
-        { name: "fixture-b.zip", contentBase64: artifactBase64 },
+        { name: "fixture-a.zip", contentBase64: artifactBase64A },
+        { name: "fixture-b.zip", contentBase64: artifactBase64B },
       ],
     });
     assert.equal(uploadResponse.ok, true);
@@ -2208,15 +2243,17 @@ test("empty runtime shows launchpad and accepts multi-file artifact upload", { t
       const units = await getJson(targetUrl, "/review/units");
       return units.length > 0 ? units : false;
     });
-    assert.equal(uploadedUnits.length, 1);
+    assert.equal(uploadedUnits.length, 2);
 
     const reviewPage = await fetch(`${targetUrl}/review`).then((response) => response.text());
     assert.doesNotMatch(reviewPage, /Get started with wdyt/);
     assert.match(reviewPage, /Observed Behaviors/);
   } finally {
     await stopChildProcess(sourceServer.child);
+    await stopChildProcess(sourceServerB.child);
     await stopChildProcess(targetServer.child);
     await rm(sourceDir, { recursive: true, force: true });
+    await rm(sourceDirB, { recursive: true, force: true });
     await rm(targetDir, { recursive: true, force: true });
   }
 });
@@ -2360,7 +2397,7 @@ test("artifact export supports pdf format", { timeout: 15_000 }, async () => {
     const result = await runCli(tempDir, ["artifact", "export", "--format", "pdf"], "", {
       WDYT_PDF_STUB: "1",
     });
-    assert.match(result, /Report generated: \.\/wdyt-report\.pdf/);
+    assert.match(result, /Report generated: .*wdyt-report\.pdf/);
 
     const reportBody = await readFile(path.join(tempDir, "wdyt-report.pdf"), "utf8");
     assert.match(reportBody, /%PDF-STUB/);
@@ -2614,7 +2651,9 @@ test("summary page renders executive overview shell with reordered navigation", 
     const page = await fetch(`${serverUrl}/review/summary`).then((response) => response.text());
     assert.match(page, /What Did You Test\? \| Summary/);
     assert.match(page, /See what was exercised based on observed evidence, and evaluate coverage of critical business flows\./);
-    assert.match(page, /Export Report/);
+    assert.match(page, /Export <span aria-hidden="true">▾<\/span>/);
+    assert.match(page, /Download PDF report/);
+    assert.match(page, /Download artifact \(.zip\)/);
     assert.match(page, /Coverage Against Expected Behaviors/);
     assert.match(page, /Observed Behaviors/);
     assert.match(page, /Behaviors exercised during testing\. Counts indicate repeated coverage across multiple test scenarios\./);
@@ -2635,8 +2674,8 @@ test("summary page renders executive overview shell with reordered navigation", 
   }
 });
 
-test("summary page exports a shared pdf report", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-pdf-"));
+test("summary page exports shared pdf and zip downloads", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-export-"));
   const dataDir = path.join(tempDir, ".wdyt");
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -2725,7 +2764,7 @@ test("summary page exports a shared pdf report", { timeout: 15_000 }, async () =
       "utf8"
     );
 
-    const pdfResponse = await fetch(`${serverUrl}/report/summary.pdf`);
+    const pdfResponse = await fetch(`${serverUrl}/artifacts/export?format=pdf`);
     assert.equal(pdfResponse.status, 200);
     assert.match(pdfResponse.headers.get("content-type") || "", /application\/pdf/);
     assert.match(pdfResponse.headers.get("content-disposition") || "", /wdyt-report\.pdf/);
@@ -2737,6 +2776,16 @@ test("summary page exports a shared pdf report", { timeout: 15_000 }, async () =
     assert.match(pdfBody, /Coverage Against Expected Behaviors/);
     assert.match(pdfBody, /Behaviors exercised during testing\. Counts indicate repeated coverage across multiple test scenarios\./);
     assert.match(pdfBody, /View dashboard \(2\)/);
+
+    const zipResponse = await fetch(`${serverUrl}/artifacts/export?format=zip`);
+    assert.equal(zipResponse.status, 200);
+    assert.match(zipResponse.headers.get("content-type") || "", /application\/zip/);
+    assert.match(zipResponse.headers.get("content-disposition") || "", /wdyt-artifact\.zip/);
+
+    const zipEntries = await readZipEntries(Buffer.from(await zipResponse.arrayBuffer()));
+    assert.ok(zipEntries.has("manifest.json"));
+    assert.ok(zipEntries.has("data/review-units.json"));
+    assert.ok(zipEntries.has("data/critical-flows.json"));
   } finally {
     if (child) {
       await stopChildProcess(child);

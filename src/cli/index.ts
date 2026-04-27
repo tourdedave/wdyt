@@ -5,9 +5,8 @@ import path from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
-import { buildArtifactWithOptions } from "../artifact/buildArtifact.js";
+import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
-import { exportPdf, loadSummaryReportData } from "../report/summary-report.js";
 import {
   getProcessedRunsPath,
   getRawRunsPath,
@@ -1156,8 +1155,8 @@ async function main() {
     "  -o, --output <path>   Output zip path or directory for export",
     "",
     "Default export location:",
-    "  zip: <runtime-data-dir-parent>/.wdyt-artifacts/",
-    "  pdf: ./wdyt-report.pdf",
+    `  zip: ./${DEFAULT_EXPORT_FILE_NAMES.zip}`,
+    `  pdf: ./${DEFAULT_EXPORT_FILE_NAMES.pdf}`,
   ].join("\n");
 
   if (command === "flows") {
@@ -1223,22 +1222,24 @@ async function main() {
         return;
       }
 
-      if (format === "pdf") {
-        const targetPath = outputPath ?? "./wdyt-report.pdf";
-        const pdfMode = process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer";
-        const reportData = await loadSummaryReportData();
-        await exportPdf(reportData, targetPath, { mode: pdfMode });
-        console.log(`Report generated: ${targetPath}`);
-        return;
-      }
-
-      if (format !== "zip") {
+      if (format !== "zip" && format !== "pdf") {
         console.error(artifactUsage);
         process.exitCode = 1;
         return;
       }
 
-      console.log(await buildArtifactWithOptions({ outputPath }));
+      const targetPath = await exportArtifact({
+        format,
+        outputPath,
+        pdfMode: process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer",
+      });
+
+      if (format === "pdf") {
+        console.log(`Report generated: ${targetPath}`);
+        return;
+      }
+
+      console.log(targetPath);
       return;
     }
 
