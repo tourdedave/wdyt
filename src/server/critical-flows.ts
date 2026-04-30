@@ -127,7 +127,12 @@ function decomposeBehaviorPhrase(
   };
 }
 
-function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary: VocabularyEntry[]): ParsedCriticalFlow | null {
+function normalizeParsedCriticalFlow(
+  value: unknown,
+  rawText: string,
+  vocabulary: VocabularyEntry[],
+  options: { preserveInterpretedTerms?: boolean } = {}
+): ParsedCriticalFlow | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -135,7 +140,10 @@ function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary
   const candidate = value as Record<string, unknown>;
   const name = typeof candidate.name === "string" ? candidate.name.trim() : rawText.trim();
   const interpretedSteps = normalizeStringList(candidate.interpretedSteps).map((step) => normalizeTerm(step, vocabulary));
-  const interpretedTerms = normalizeStringList(candidate.interpretedTerms).map((term) => normalizeTerm(term, vocabulary));
+  const rawInterpretedTerms = normalizeStringList(candidate.interpretedTerms);
+  const interpretedTerms = options.preserveInterpretedTerms
+    ? rawInterpretedTerms
+    : rawInterpretedTerms.map((term) => normalizeTerm(term, vocabulary));
   const outcome = typeof candidate.outcome === "string" ? candidate.outcome.trim() : undefined;
   const structuredBehavior = normalizeStructuredBehavior(candidate.behavior, vocabulary);
 
@@ -147,7 +155,9 @@ function normalizeParsedCriticalFlow(value: unknown, rawText: string, vocabulary
     name,
     rawText: rawText.trim(),
     interpretedSteps: [...new Set(interpretedSteps)].filter(Boolean),
-    interpretedTerms: canonicalizeSemanticTerms(interpretedTerms, vocabulary),
+    interpretedTerms: options.preserveInterpretedTerms
+      ? [...new Set(interpretedTerms)].filter(Boolean)
+      : canonicalizeSemanticTerms(interpretedTerms, vocabulary),
     outcome: outcome || undefined,
     behavior:
       structuredBehavior ??
@@ -370,6 +380,10 @@ export async function parseCriticalFlow(rawText: string): Promise<ParsedCritical
   }
 
   const vocabulary = await loadVocabulary();
+  const descriptorSuggestion = await resolveDescriptorSuggestion(trimmed, vocabulary);
+  if (descriptorSuggestion) {
+    return descriptorSuggestion;
+  }
   const approvedVocabulary = getApprovedVocabulary(vocabulary).map((entry) => ({
     term: entry.term,
     description: entry.description ?? null,
@@ -408,7 +422,9 @@ export async function parseCriticalFlow(rawText: string): Promise<ParsedCritical
 
 export async function createCriticalFlow(input: ParsedCriticalFlow) {
   const [flows, vocabulary, descriptors] = await Promise.all([loadCriticalFlows(), loadVocabulary(), loadApprovedDescriptors()]);
-  const normalized = normalizeParsedCriticalFlow(input, input.rawText, vocabulary);
+  const normalized = normalizeParsedCriticalFlow(input, input.rawText, vocabulary, {
+    preserveInterpretedTerms: Boolean(input.behavior),
+  });
 
   if (!normalized) {
     throw new Error("Critical flow is missing required interpreted fields.");
@@ -436,7 +452,9 @@ export async function updateCriticalFlow(id: string, input: ParsedCriticalFlow) 
     return null;
   }
 
-  const normalized = normalizeParsedCriticalFlow(input, input.rawText, vocabulary);
+  const normalized = normalizeParsedCriticalFlow(input, input.rawText, vocabulary, {
+    preserveInterpretedTerms: Boolean(input.behavior),
+  });
   if (!normalized) {
     throw new Error("Critical flow is missing required interpreted fields.");
   }
@@ -510,6 +528,36 @@ function normalizeSuggestionValue(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+async function resolveDescriptorSuggestion(rawText: string, vocabulary: VocabularyEntry[]) {
+  const normalizedInput = normalizeSuggestionValue(rawText);
+  if (!normalizedInput) {
+    return null;
+  }
+
+  const descriptors = await loadApprovedDescriptors();
+  const sourceDescriptor = descriptors.find(
+    (descriptor) => normalizeSuggestionValue(descriptorToSuggestionText(descriptor.name)) === normalizedInput
+  );
+
+  if (!sourceDescriptor || sourceDescriptor.vocab.length === 0) {
+    return null;
+  }
+
+  return normalizeParsedCriticalFlow(
+    {
+      name: rawText.trim(),
+      rawText: rawText.trim(),
+      interpretedSteps: sourceDescriptor.vocab,
+      interpretedTerms: sourceDescriptor.vocab,
+      outcome: "",
+      behavior: sourceDescriptor.behavior,
+    },
+    rawText.trim(),
+    vocabulary,
+    { preserveInterpretedTerms: true }
+  );
 }
 
 export async function loadCriticalFlowState() {

@@ -3105,6 +3105,70 @@ test("critical flows suggest active descriptors and match composite coverage", {
   }
 });
 
+test("critical flow suggestions preserve observed descriptor terms for access reports", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-access-reports-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const originalCwd = process.cwd();
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(
+      path.join(dataDir, "review-units.json"),
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "descriptor-access-reports",
+            flowId: "descriptor-access-reports",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["access-reports"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "proposed",
+            proposedDescriptor: "Access reports",
+            proposedConfidence: 0.8,
+            proposedRationale: "Reports are accessed.",
+            approvedVocabUsed: [],
+            proposedVocab: [],
+            activeDescriptor: "Access reports",
+            activeVocab: [],
+            primaryTerms: ["reports"],
+            outcomeTerms: [],
+            interpretationStatus: "auto-generated",
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    process.chdir(tempDir);
+    const { parseCriticalFlow, createCriticalFlow } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
+
+    const interpreted = await parseCriticalFlow("Access reports");
+    assert.equal(interpreted.name, "Access reports");
+    assert.deepEqual(interpreted.interpretedSteps, ["reports"]);
+    assert.deepEqual(interpreted.interpretedTerms, ["reports"]);
+
+    const created = await createCriticalFlow(interpreted);
+    assert.equal(created.status, "covered");
+    assert.deepEqual(created.interpretedTerms, ["reports"]);
+    assert.deepEqual(created.matchedDescriptorIds, ["descriptor-access-reports"]);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("critical flows frame missing terms as missing reviewed evidence", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-partial-"));
   const port = randomPort();
@@ -3633,6 +3697,94 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
     assert.equal(stateAfterDelete.flows.length, 0);
   } finally {
     llmServer.close();
+    await stopChildProcess(child);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("critical flows preserve removal edits in interpreted behavior terms", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-remove-term-"));
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    const { createCriticalFlow, updateCriticalFlow, loadCriticalFlows } = await import(path.join(repoRoot, "dist", "server", "critical-flows.js"));
+
+    const created = await createCriticalFlow({
+      name: "View report",
+      rawText: "View report",
+      interpretedSteps: ["view report"],
+      interpretedTerms: ["report"],
+      outcome: "",
+      behavior: {
+        action: "view report",
+        qualifiers: [],
+      },
+    });
+
+    const updated = await updateCriticalFlow(created.id, {
+      name: "View report",
+      rawText: "View report",
+      interpretedSteps: ["view report"],
+      interpretedTerms: ["view report"],
+      outcome: "",
+      behavior: {
+        action: "view report",
+        qualifiers: [],
+      },
+    });
+
+    assert.ok(updated);
+    assert.deepEqual(updated.interpretedSteps, ["view report"]);
+    assert.deepEqual(updated.interpretedTerms, ["view report"]);
+
+    const saved = await loadCriticalFlows();
+    assert.equal(saved.length, 1);
+    assert.deepEqual(saved[0].interpretedSteps, ["view report"]);
+    assert.deepEqual(saved[0].interpretedTerms, ["view report"]);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("expected behavior edit UI always renders save action and toggles disabled state client-side", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-expected-behavior-edit-ui-"));
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  await mkdir(dataDir, { recursive: true });
+  await writeFile(path.join(dataDir, "review-units.json"), `${JSON.stringify([], null, 2)}\n`, "utf8");
+
+  const { child } = spawnServer(tempDir, port);
+
+  try {
+    await waitForHealth(serverUrl);
+    await postJson(serverUrl, "/expected-behaviors", {
+      name: "Create report",
+      rawText: "Create report",
+      interpretedSteps: ["create report"],
+      interpretedTerms: ["create report"],
+      outcome: "report created",
+      behavior: {
+        action: "create report",
+        qualifiers: [],
+      },
+    });
+
+    const page = await fetch(`${serverUrl}/expected-behaviors`).then((response) => response.text());
+    assert.match(page, /const disableSaveAction = state\.editingFlowId/);
+    assert.match(page, /id="saveCriticalFlow"/);
+    assert.match(page, /disableSaveAction \? "disabled" : ""/);
+    assert.match(page, /state\.editingFlowId \? "Save Changes" : "Save Expected Behavior"/);
+    assert.match(page, /function syncSaveButtonState\(\)/);
+    assert.match(page, /saveButton\.disabled = disabled;/);
+    assert.doesNotMatch(page, /criticalFlowNameInput"\)\?\.addEventListener\("change"/);
+    assert.doesNotMatch(page, /interpretedBehaviorInput"\)\?\.addEventListener\("change"/);
+    assert.doesNotMatch(page, /behaviorActionInput"\)\?\.addEventListener\("change"/);
+    assert.doesNotMatch(page, /behaviorQualifiersInput"\)\?\.addEventListener\("change"/);
+  } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }

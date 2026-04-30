@@ -1644,7 +1644,9 @@ function renderCriticalFlowsPage() {
         const behaviorQualifiers = Array.isArray(parsed?.behavior?.qualifiers) ? parsed.behavior.qualifiers : [];
         const duplicateMatches = getLikelyDuplicates(parsed);
         const canSaveParsed = Boolean(parsed) && interpretedBehavior.length > 0;
-        const showSaveAction = state.editingFlowId ? hasEditedFlowChanges() && canSaveParsed : canSaveParsed;
+        const disableSaveAction = state.editingFlowId
+          ? !hasEditedFlowChanges() || !canSaveParsed || state.isWorking
+          : !canSaveParsed || state.isWorking;
         const examples = state.suggestions.length === 0 ? \`
           <ul class="example-list">
             <li>Log in successfully</li>
@@ -1717,7 +1719,7 @@ function renderCriticalFlowsPage() {
                   </div>\`
                 : ""}
                 <div class="button-row">
-                  \${showSaveAction ? \`<button class="primary" id="saveCriticalFlow" \${state.isWorking ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Expected Behavior"}</button>\` : ""}
+                  <button class="primary" id="saveCriticalFlow" \${disableSaveAction ? "disabled" : ""}>\${state.editingFlowId ? "Save Changes" : "Save Expected Behavior"}</button>
                   \${duplicateMatches.length > 0 ? '<span class="meta">Save Anyway</span>' : ""}
                 </div>
               </div>\`
@@ -1962,10 +1964,7 @@ function renderCriticalFlowsPage() {
             ...state.parsedDraft,
             name: event.target.value,
           };
-        });
-
-        detail.querySelector("#criticalFlowNameInput")?.addEventListener("change", () => {
-          render();
+          syncSaveButtonState();
         });
 
         detail.querySelector("#interpretedBehaviorInput")?.addEventListener("input", (event) => {
@@ -1979,10 +1978,7 @@ function renderCriticalFlowsPage() {
             interpretedSteps: nextValues,
             interpretedTerms: nextValues,
           };
-        });
-
-        detail.querySelector("#interpretedBehaviorInput")?.addEventListener("change", () => {
-          render();
+          syncSaveButtonState();
         });
 
         detail.querySelector("#behaviorActionInput")?.addEventListener("input", (event) => {
@@ -2003,10 +1999,7 @@ function renderCriticalFlowsPage() {
               qualifiers: Array.isArray(state.parsedDraft.behavior?.qualifiers) ? state.parsedDraft.behavior.qualifiers : [],
             },
           };
-        });
-
-        detail.querySelector("#behaviorActionInput")?.addEventListener("change", () => {
-          render();
+          syncSaveButtonState();
         });
 
         detail.querySelector("#behaviorQualifiersInput")?.addEventListener("input", (event) => {
@@ -2021,17 +2014,16 @@ function renderCriticalFlowsPage() {
               qualifiers: normalizeQualifierLines(event.target.value),
             },
           };
-        });
-
-        detail.querySelector("#behaviorQualifiersInput")?.addEventListener("change", () => {
-          render();
+          syncSaveButtonState();
         });
 
         detail.querySelector("#saveCriticalFlow")?.addEventListener("click", async () => {
-          if (!state.parsedDraft) {
+          const draftToSave = readDraftFromForm();
+          if (!draftToSave) {
             return;
           }
 
+          state.parsedDraft = draftToSave;
           state.isWorking = true;
           state.error = "";
           render();
@@ -2042,7 +2034,7 @@ function renderCriticalFlowsPage() {
               {
               method: state.editingFlowId ? "PUT" : "POST",
               headers: { "content-type": "application/json" },
-              body: JSON.stringify(state.parsedDraft),
+              body: JSON.stringify(draftToSave),
             });
             const payload = await response.json();
             if (!response.ok) {
@@ -2062,6 +2054,51 @@ function renderCriticalFlowsPage() {
             render();
           }
         });
+
+        function syncSaveButtonState() {
+          const saveButton = detail.querySelector("#saveCriticalFlow");
+          if (!saveButton) {
+            return;
+          }
+
+          const parsed = state.parsedDraft;
+          const interpretedBehavior = parsed
+            ? [...new Set([...(parsed.interpretedSteps || []), ...(parsed.interpretedTerms || [])])].filter(Boolean)
+            : [];
+          const canSaveParsed = Boolean(parsed) && interpretedBehavior.length > 0;
+          const disabled = state.editingFlowId
+            ? !hasEditedFlowChanges() || !canSaveParsed || state.isWorking
+            : !canSaveParsed || state.isWorking;
+          saveButton.disabled = disabled;
+        }
+
+        function readDraftFromForm() {
+          if (!state.parsedDraft) {
+            return null;
+          }
+
+          const nameInput = detail.querySelector("#criticalFlowNameInput");
+          const interpretedBehaviorInput = detail.querySelector("#interpretedBehaviorInput");
+          const behaviorActionInput = detail.querySelector("#behaviorActionInput");
+          const behaviorQualifiersInput = detail.querySelector("#behaviorQualifiersInput");
+
+          const nextValues = normalizeBehaviorLines(interpretedBehaviorInput?.value ?? "");
+          return {
+            ...state.parsedDraft,
+            name: nameInput?.value ?? state.parsedDraft.name,
+            interpretedSteps: nextValues,
+            interpretedTerms: nextValues,
+            behavior: {
+              action: String(behaviorActionInput?.value || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, " ")
+                .replace(/\\s+/g, " ")
+                .trim(),
+              qualifiers: normalizeQualifierLines(behaviorQualifiersInput?.value ?? ""),
+            },
+          };
+        }
       }
 
       function render() {
