@@ -90,6 +90,7 @@ export type ReviewUnitInterpretationStatus = "auto-generated" | "edited" | "repr
 
 export type ReviewUnitRecord = {
   reviewId: string;
+  runId: string;
   flowId: string;
   variantSignature?: string;
   canonical: ReducedStep[];

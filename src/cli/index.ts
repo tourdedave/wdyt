@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -88,6 +87,7 @@ type GroupedFlow = {
 
 type ReviewUnit = GroupedFlow & {
   reviewId: string;
+  runId: string;
   variantSignature?: string;
 };
 
@@ -198,10 +198,6 @@ function getVariantSignature(record: ProcessedRunRecord) {
     heading: record.endState?.heading ?? null,
     alertText: record.endState?.alertText ?? null,
   });
-}
-
-function hashVariantSignature(signature: string) {
-  return createHash("sha256").update(signature).digest("hex").slice(0, 12);
 }
 
 function clampConfidence(value: unknown) {
@@ -430,85 +426,62 @@ async function loadReviewUnits() {
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
-  const recordsByFlow = new Map<string, ProcessedRunRecord[]>();
-
-  for (const record of records) {
-    const current = recordsByFlow.get(record.flowId) ?? [];
-    current.push(record);
-    recordsByFlow.set(record.flowId, current);
-  }
 
   const reviewUnits: ReviewUnit[] = [];
 
-  for (const [flowId, flowRecords] of recordsByFlow) {
-    const variantGroups = new Map<string, ProcessedRunRecord[]>();
+  for (const record of records) {
+    const rawRun = rawRunById.get(record.runId);
+    const unit: ReviewUnit = {
+      reviewId: record.runId,
+      runId: record.runId,
+      flowId: record.flowId,
+      variantSignature: getVariantSignature(record),
+      count: 1,
+      canonical: record.canonical,
+      suites: new Set<string>(),
+      tests: new Set<string>(),
+      tools: new Set<string>(),
+      browsers: new Set<string>(),
+      urls: new Set<string>(),
+      targets: new Set<string>(),
+      finalUrls: new Set<string>(),
+      titles: new Set<string>(),
+      headings: new Set<string>(),
+      alerts: new Set<string>(),
+    };
 
-    for (const record of flowRecords) {
-      const variantSignature = getVariantSignature(record);
-      const current = variantGroups.get(variantSignature) ?? [];
-      current.push(record);
-      variantGroups.set(variantSignature, current);
+    unit.suites.add(record.suite.name);
+    if (rawRun?.run.testName) {
+      unit.tests.add(rawRun.run.testName);
     }
+    unit.tools.add(formatTool(record.environment));
+    unit.browsers.add(formatBrowser(record.environment));
 
-    const hasMultipleVariants = variantGroups.size > 1;
-
-    for (const [variantSignature, variantRecords] of variantGroups) {
-      const firstRecord = variantRecords[0];
-      const unit: ReviewUnit = {
-        reviewId: hasMultipleVariants ? `${flowId}:${hashVariantSignature(variantSignature)}` : flowId,
-        flowId,
-        variantSignature: hasMultipleVariants ? variantSignature : undefined,
-        count: 0,
-        canonical: firstRecord.canonical,
-        suites: new Set<string>(),
-        tests: new Set<string>(),
-        tools: new Set<string>(),
-        browsers: new Set<string>(),
-        urls: new Set<string>(),
-        targets: new Set<string>(),
-        finalUrls: new Set<string>(),
-        titles: new Set<string>(),
-        headings: new Set<string>(),
-        alerts: new Set<string>(),
-      };
-
-      for (const record of variantRecords) {
-        const rawRun = rawRunById.get(record.runId);
-        unit.count += 1;
-        unit.suites.add(record.suite.name);
-        if (rawRun?.run.testName) {
-          unit.tests.add(rawRun.run.testName);
-        }
-        unit.tools.add(formatTool(record.environment));
-        unit.browsers.add(formatBrowser(record.environment));
-
-        for (const event of rawRun?.events ?? []) {
-          if (event.type === "navigate" && event.url) {
-            unit.urls.add(event.url);
-          }
-
-          const targetLabel = extractTargetLabel(event);
-          if (targetLabel) {
-            unit.targets.add(targetLabel);
-          }
-        }
-
-        if (record.endState?.finalUrl) {
-          unit.finalUrls.add(record.endState.finalUrl);
-        }
-        if (record.endState?.title) {
-          unit.titles.add(record.endState.title);
-        }
-        if (record.endState?.heading) {
-          unit.headings.add(record.endState.heading);
-        }
-        if (record.endState?.alertText) {
-          unit.alerts.add(record.endState.alertText);
-        }
+    for (const event of rawRun?.events ?? []) {
+      if (event.type === "navigate" && event.url) {
+        unit.urls.add(event.url);
       }
 
-      reviewUnits.push(unit);
+      const targetLabel = extractTargetLabel(event);
+      if (targetLabel) {
+        unit.targets.add(targetLabel);
+      }
     }
+
+    if (record.endState?.finalUrl) {
+      unit.finalUrls.add(record.endState.finalUrl);
+    }
+    if (record.endState?.title) {
+      unit.titles.add(record.endState.title);
+    }
+    if (record.endState?.heading) {
+      unit.headings.add(record.endState.heading);
+    }
+    if (record.endState?.alertText) {
+      unit.alerts.add(record.endState.alertText);
+    }
+
+    reviewUnits.push(unit);
   }
 
   return reviewUnits.sort((a, b) => b.count - a.count || a.reviewId.localeCompare(b.reviewId));
@@ -621,6 +594,7 @@ function materializeReviewUnitRecord(flow: ReviewUnit, existing?: ReviewUnitReco
 
   return {
     reviewId: flow.reviewId,
+    runId: flow.runId,
     flowId: flow.flowId,
     variantSignature: flow.variantSignature,
     canonical: flow.canonical as ReviewUnitRecord["canonical"],
@@ -1158,11 +1132,10 @@ function parseSyntheticNumber(args: string[], ...flags: string[]) {
 
 async function seedSyntheticDataset(args: string[]) {
   const units = parseSyntheticNumber(args, "--units", "-u") ?? 150;
-  const runsPerUnit = parseSyntheticNumber(args, "--runs-per-unit", "-r") ?? 2;
   const offset = parseSyntheticNumber(args, "--offset") ?? 0;
   const shouldBuild = args.includes("--build");
   const shouldPropose = args.includes("--propose");
-  const seeded = await seedSyntheticRuntimeData({ units, runsPerUnit, offset });
+  const seeded = await seedSyntheticRuntimeData({ units, offset });
 
   if (shouldBuild || shouldPropose) {
     await buildReviewUnits();
@@ -1172,15 +1145,14 @@ async function seedSyntheticDataset(args: string[]) {
   }
 
   console.log(
-    `Seeded synthetic dataset: units=${seeded.units} runs=${seeded.totalRuns} runsPerUnit=${seeded.runsPerUnit}${shouldBuild ? " built=1" : ""}${shouldPropose ? " proposed=1" : ""}`
+    `Seeded synthetic dataset: units=${seeded.units} runs=${seeded.totalRuns}${shouldBuild ? " built=1" : ""}${shouldPropose ? " proposed=1" : ""}`
   );
 }
 
 async function benchmarkSyntheticDataset(args: string[]) {
   const units = parseSyntheticNumber(args, "--units", "-u") ?? 500;
-  const runsPerUnit = parseSyntheticNumber(args, "--runs-per-unit", "-r") ?? 2;
   const offset = parseSyntheticNumber(args, "--offset") ?? 0;
-  const seeded = await seedSyntheticRuntimeData({ units, runsPerUnit, offset });
+  const seeded = await seedSyntheticRuntimeData({ units, offset });
 
   const buildStart = Date.now();
   await buildReviewUnits();
@@ -1219,8 +1191,8 @@ async function main() {
 
   const syntheticUsage = [
     "Usage:",
-    "  wdyt synthetic seed [--units <count>] [--runs-per-unit <count>] [--offset <count>] [--build] [--propose]",
-    "  wdyt synthetic benchmark [--units <count>] [--runs-per-unit <count>] [--offset <count>]",
+    "  wdyt synthetic seed [--units <count>] [--offset <count>] [--build] [--propose]",
+    "  wdyt synthetic benchmark [--units <count>] [--offset <count>]",
     "",
     "Commands:",
     "  seed       Replace the current wdyt runtime data with a synthetic dataset",

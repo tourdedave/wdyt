@@ -39,7 +39,7 @@ const PORT = Number(process.env.WDYT_PORT ?? "3876");
 const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
 const GETTING_STARTED_PATH = "/getting-started";
 const REVIEW_PAGINATION_THRESHOLD = Number.parseInt(process.env.WDYT_REVIEW_PAGINATION_THRESHOLD ?? "50", 10) || 50;
-const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "50", 10) || 50;
+const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "20", 10) || 20;
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -545,7 +545,6 @@ function renderReviewPage() {
       .list-controls { display: grid; gap: 10px; margin-bottom: 16px; }
       .list-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
       .list-controls input { width: 100%; }
-      .scaled-note { color: var(--muted); font-size: 13px; line-height: 1.4; }
       .pagination-bar {
         display: flex;
         align-items: center;
@@ -742,6 +741,16 @@ function renderReviewPage() {
       const redirectToLaunchpad = () => {
         window.location.assign("/review");
       };
+      const getProtectedFocusTarget = () => {
+        const activeId = document.activeElement?.id;
+        if (state.editingId && ["approvedDescriptor", "promoteVocab", "reviewNotes"].includes(activeId)) {
+          return "editor";
+        }
+        if (activeId === "reviewSearchInput") {
+          return "search";
+        }
+        return null;
+      };
       const getCurrentUnit = () =>
         state.mode === "scaled"
           ? state.selectedUnit
@@ -757,6 +766,7 @@ function renderReviewPage() {
       }
 
       async function loadState() {
+        const protectedFocusTarget = getProtectedFocusTarget();
         const params = new URLSearchParams(window.location.search);
         const initialReviewId = state.initialized ? null : params.get("reviewId");
         const initialOverlapKey = state.initialized ? null : params.get("overlapKey");
@@ -828,7 +838,10 @@ function renderReviewPage() {
         }
 
         state.initialized = true;
-        render();
+        render({
+          preserveDetail: protectedFocusTarget === "editor",
+          preserveListControls: protectedFocusTarget === "search",
+        });
       }
 
       function renderListControls() {
@@ -842,9 +855,8 @@ function renderReviewPage() {
           <div class="list-controls">
             <label>
               <span>Search observed behaviors</span>
-              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search descriptors, tests, terms, or destinations" />
+              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search behaviors, tests, or terms" />
             </label>
-            <div class="scaled-note">Large dataset mode is using server-backed search and pagination to keep the browser footprint bounded.</div>
           </div>\`;
 
         const input = document.getElementById("reviewSearchInput");
@@ -918,6 +930,10 @@ function renderReviewPage() {
 
       function renderList() {
         const container = document.getElementById("units");
+        if (state.units.length === 0) {
+          container.innerHTML = "";
+          return;
+        }
         container.innerHTML = state.units.map((unit) => \`
           <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "related" : ""} \${state.activeOverlapKey && !getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
             <h2>\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
@@ -980,6 +996,10 @@ function renderReviewPage() {
         const unit = getCurrentUnit();
 
         if (!unit) {
+          if (state.mode === "scaled" && state.query && state.units.length === 0) {
+            detail.innerHTML = '<p id="empty">No observed behaviors match this search.</p>';
+            return;
+          }
           const activeUnits = getActiveUnits();
           if (activeUnits.length === 0) {
             detail.innerHTML = '<p id="empty">Waiting for interpreted flow variants.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
@@ -1123,17 +1143,23 @@ function renderReviewPage() {
         }
       });
 
-      function render() {
+      function render(options = {}) {
+        const preserveDetail = options.preserveDetail === true;
+        const preserveListControls = options.preserveListControls === true;
         const rebuildButton = document.getElementById("rebuildReviewUnits");
         if (rebuildButton) {
           rebuildButton.disabled = state.rebuilding;
           rebuildButton.textContent = state.rebuilding ? "Rebuilding…" : "Rebuild Observed Behaviors";
         }
-        renderListControls();
+        if (!preserveListControls) {
+          renderListControls();
+        }
         renderOverlapSummary();
         renderList();
         renderPagination();
-        renderDetail();
+        if (!preserveDetail) {
+          renderDetail();
+        }
       }
       loadState();
       setInterval(loadState, 4000);

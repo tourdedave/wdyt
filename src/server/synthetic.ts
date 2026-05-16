@@ -15,7 +15,6 @@ import type { IngestPayload, ProcessedRunRecord, ReducedStep } from "../shared/t
 
 type SyntheticSeedOptions = {
   units: number;
-  runsPerUnit: number;
   offset?: number;
 };
 
@@ -176,7 +175,6 @@ export async function resetSyntheticRuntimeData() {
 
 export async function seedSyntheticRuntimeData(options: SyntheticSeedOptions) {
   const units = Math.max(1, Math.floor(options.units));
-  const runsPerUnit = Math.max(1, Math.floor(options.runsPerUnit));
   const offset = Math.max(0, Math.floor(options.offset ?? 0));
 
   await resetSyntheticRuntimeData();
@@ -184,16 +182,13 @@ export async function seedSyntheticRuntimeData(options: SyntheticSeedOptions) {
   for (let unitIndex = 0; unitIndex < units; unitIndex += 1) {
     const syntheticIndex = offset + unitIndex;
     const scenario = SCENARIOS[syntheticIndex % SCENARIOS.length];
-    for (let runIndex = 0; runIndex < runsPerUnit; runIndex += 1) {
-      const run = buildSyntheticRun(syntheticIndex, runIndex, scenario);
-      await appendJsonLine(getRawRunsPath(), run.rawRun);
-      await appendJsonLine(getProcessedRunsPath(), run.processedRun);
-    }
+    const run = buildSyntheticRun(syntheticIndex, 0, scenario);
+    await appendJsonLine(getRawRunsPath(), run.rawRun);
+    await appendJsonLine(getProcessedRunsPath(), run.processedRun);
   }
 
   return {
     units,
-    runsPerUnit,
-    totalRuns: units * runsPerUnit,
+    totalRuns: units,
   };
 }

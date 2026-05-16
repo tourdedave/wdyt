@@ -1858,20 +1858,10 @@ test("review keeps deterministic confidence for successful login despite mechani
 
 test("review splits one canonical flow into separate outcome variants", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-variants-"));
-  const port = randomPort();
-  const serverUrl = `http://127.0.0.1:${port}`;
-  const { child } = spawnServer(tempDir, port);
+  const dataDir = path.join(tempDir, ".wdyt");
 
   try {
-    await waitForHealth(serverUrl);
-
-    await fetchBootstrap(serverUrl, {
-      action: "start",
-      serverUrl,
-      suiteName: "integration",
-      testName: "login-success-dashboard",
-      tool: "integration-test",
-    });
+    await mkdir(dataDir, { recursive: true });
 
     const sharedEvents = [
       { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
@@ -1884,67 +1874,102 @@ test("review splits one canonical flow into separate outcome variants", { timeou
       { type: "navigate", ts: 1070, seq: 7, url: "http://127.0.0.1:4010/dashboard" },
     ];
 
-    await postJson(serverUrl, "/ingest", {
-      suite: { id: "integration", name: "integration", normalizedName: "integration" },
-      environment: {
-        tool: "integration-test",
-        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+    const processedRuns = [
+      {
+        runId: "run-dashboard-variant",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: {
+          tool: "integration-test",
+          browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+        },
+        endState: {
+          finalUrl: "http://127.0.0.1:4010/dashboard",
+          title: "Dashboard",
+          heading: "Dashboard",
+          alertText: null,
+        },
+        reduced: ["NAVIGATE", "INPUT", "CHANGE", "INPUT", "CHANGE", "CLICK", "SUBMIT", "NAVIGATE"],
+        canonical: ["NAVIGATE", "INPUT", "CHANGE", "INPUT", "CHANGE", "CLICK", "SUBMIT", "NAVIGATE"],
+        flowId: "shared-login-flow",
+        meta: { canonicalSource: "reducer" },
       },
-      endState: {
-        finalUrl: "http://127.0.0.1:4010/dashboard",
-        title: "Dashboard",
-        heading: "Dashboard",
-        alertText: null,
+      {
+        runId: "run-login-variant",
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: {
+          tool: "integration-test",
+          browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+        },
+        endState: {
+          finalUrl: "http://127.0.0.1:4010/login",
+          title: "Demo Login",
+          heading: "Sign in",
+          alertText: "Invalid username or password.",
+        },
+        reduced: ["NAVIGATE", "INPUT", "CHANGE", "INPUT", "CHANGE", "CLICK", "SUBMIT", "NAVIGATE"],
+        canonical: ["NAVIGATE", "INPUT", "CHANGE", "INPUT", "CHANGE", "CLICK", "SUBMIT", "NAVIGATE"],
+        flowId: "shared-login-flow",
+        meta: { canonicalSource: "reducer" },
       },
-      run: {
-        testName: "login-success-dashboard",
-        startedAt: 0,
-        endedAt: 1,
-        reason: "completed",
-      },
-      events: sharedEvents,
-    });
+    ];
 
-    await postJson(serverUrl, "/ingest", {
-      suite: { id: "integration", name: "integration", normalizedName: "integration" },
-      environment: {
-        tool: "integration-test",
-        browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+    const rawRuns = [
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: {
+          tool: "integration-test",
+          browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+        },
+        endState: processedRuns[0].endState,
+        run: {
+          id: "run-dashboard-variant",
+          testName: "login-success-dashboard",
+          startedAt: 0,
+          endedAt: 1,
+          reason: "completed",
+        },
+        events: sharedEvents,
       },
-      endState: {
-        finalUrl: "http://127.0.0.1:4010/login",
-        title: "Demo Login",
-        heading: "Sign in",
-        alertText: "Invalid username or password.",
+      {
+        suite: { id: "integration", name: "integration", normalizedName: "integration" },
+        environment: {
+          tool: "integration-test",
+          browser: { family: "chromium", version: "146.0.7680.178", source: "bootstrap-request" },
+        },
+        endState: processedRuns[1].endState,
+        run: {
+          id: "run-login-variant",
+          testName: "login-invalid",
+          startedAt: 0,
+          endedAt: 1,
+          reason: "completed",
+        },
+        events: sharedEvents,
       },
-      run: {
-        testName: "login-invalid",
-        startedAt: 0,
-        endedAt: 1,
-        reason: "completed",
-      },
-      events: sharedEvents,
-    });
+    ];
+
+    await writeFile(
+      path.join(dataDir, "runs.processed.jsonl"),
+      `${processedRuns.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      "utf8"
+    );
+    await writeFile(
+      path.join(dataDir, "runs.raw.jsonl"),
+      `${rawRuns.map((record) => JSON.stringify(record)).join("\n")}\n`,
+      "utf8"
+    );
 
     const reviewOutput = await runCli(tempDir, ["review"], "a\na\n");
-    assert.match(reviewOutput, /Variant:/);
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
     assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
 
-    const reviewFile = await waitForCondition(async () => {
-      try {
-        const contents = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
-        return Array.isArray(contents) && contents.length === 2 ? contents : false;
-      } catch {
-        return false;
-      }
-    });
+    const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
     assert.equal(reviewFile.length, 2);
     assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
+    assert.ok(reviewFile.every((record) => typeof record.runId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
-    assert.ok(reviewFile.every((record) => record.reviewId === record.flowId || record.reviewId.startsWith(`${record.flowId}:`)));
+    assert.ok(reviewFile.every((record) => record.reviewId === record.runId));
   } finally {
-    await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
@@ -4172,8 +4197,8 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-synthetic-cli-"));
 
   try {
-    const seedResult = await runCli(tempDir, ["synthetic", "seed", "--units", "24", "--runs-per-unit", "2", "--build"]);
-    assert.match(seedResult, /Seeded synthetic dataset: units=24 runs=48 runsPerUnit=2 built=1/);
+    const seedResult = await runCli(tempDir, ["synthetic", "seed", "--units", "24", "--build"]);
+    assert.match(seedResult, /Seeded synthetic dataset: units=24 runs=24 built=1/);
 
     const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
     assert.equal(reviewUnits.length, 24);
@@ -4182,11 +4207,11 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
       .trim()
       .split("\n")
       .filter(Boolean);
-    assert.equal(rawRuns.length, 48);
+    assert.equal(rawRuns.length, 24);
 
     const benchmarkResult = await runCli(
       tempDir,
-      ["synthetic", "benchmark", "--units", "12", "--runs-per-unit", "2"],
+      ["synthetic", "benchmark", "--units", "12"],
       "",
       {
         WDYT_LLM_FAKE: "1",
@@ -4194,7 +4219,7 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
         WDYT_REVIEW_CONCURRENCY: "4",
       }
     );
-    assert.match(benchmarkResult, /Synthetic benchmark complete: units=12 runs=24/);
+    assert.match(benchmarkResult, /Synthetic benchmark complete: units=12 runs=12/);
     assert.match(benchmarkResult, /fakeLlm=1/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
