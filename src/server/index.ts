@@ -20,6 +20,7 @@ import {
 import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
+import { startMemoryLogging } from "./memory.js";
 import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
 import { persistRun } from "./storage.js";
 
@@ -2693,6 +2694,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDataDir();
+startMemoryLogging();
 
 server.listen(PORT, HOST, () => {
   console.log(`WDYT server listening on http://${HOST}:${PORT}`);

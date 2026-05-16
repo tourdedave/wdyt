@@ -58,6 +58,7 @@ import {
   validateProposal,
 } from "../shared/proposal-validation.js";
 import { DEFAULT_LLM_API_KEY, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, requestJsonCompletion } from "./llm.js";
+import { logProcessMemoryUsage } from "./memory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-prompt.txt");
@@ -384,6 +385,7 @@ export async function loadReviewUnitViews() {
 
 export async function buildReviewUnits() {
   console.log("[WDYT] rebuilding review units from persisted runs");
+  logProcessMemoryUsage("review-build:start");
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
@@ -506,6 +508,7 @@ export async function buildReviewUnits() {
 
   await saveReviewUnits(materialized);
   console.log(`[WDYT] review units ready count=${materialized.length}`);
+  logProcessMemoryUsage("review-build:end");
   return materialized;
 }
 
@@ -849,6 +852,7 @@ export async function queueProposalProcessing() {
 
   processingQueue = true;
   console.log("[WDYT] proposal worker started");
+  logProcessMemoryUsage("proposal-worker:start");
 
   try {
     while (true) {
@@ -860,11 +864,13 @@ export async function queueProposalProcessing() {
 
       if (pendingUnits.length === 0) {
         console.log("[WDYT] proposal worker idle");
+        logProcessMemoryUsage("proposal-worker:idle");
         break;
       }
 
       const concurrency = Math.min(getProposalWorkerConcurrency(), pendingUnits.length);
       console.log(`[WDYT] proposal worker batch count=${pendingUnits.length} concurrency=${concurrency}`);
+      logProcessMemoryUsage(`proposal-worker:batch-start pending=${pendingUnits.length} concurrency=${concurrency}`);
 
       let nextIndex = 0;
       const workers = Array.from({ length: concurrency }, async () => {
@@ -880,17 +886,21 @@ export async function queueProposalProcessing() {
       });
 
       await Promise.all(workers);
+      logProcessMemoryUsage(`proposal-worker:batch-end pending=${pendingUnits.length} concurrency=${concurrency}`);
     }
   } finally {
     processingQueue = false;
     console.log("[WDYT] proposal worker stopped");
+    logProcessMemoryUsage("proposal-worker:stop");
   }
 }
 
 export async function refreshReviewUnits() {
   console.log("[WDYT] refreshing review units");
+  logProcessMemoryUsage("review-refresh:start");
   await buildReviewUnits();
   void queueProposalProcessing();
+  logProcessMemoryUsage("review-refresh:queued");
 }
 
 export async function saveReviewUnitEdits(input: {
