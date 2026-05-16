@@ -21,13 +21,25 @@ import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
 import { startMemoryLogging } from "./memory.js";
-import { loadReviewUnits, loadReviewUnitViews, refreshReviewUnits, requestReviewUnitReprocess, saveReviewUnitEdits, upsertVocabulary } from "./review.js";
+import {
+  getReviewUnitViewCount,
+  loadReviewUnits,
+  loadReviewUnitView,
+  loadReviewUnitViews,
+  queryReviewUnitViews,
+  refreshReviewUnits,
+  requestReviewUnitReprocess,
+  saveReviewUnitEdits,
+  upsertVocabulary,
+} from "./review.js";
 import { persistRun } from "./storage.js";
 
 const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.WDYT_PORT ?? "3876");
 const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
 const GETTING_STARTED_PATH = "/getting-started";
+const REVIEW_PAGINATION_THRESHOLD = Number.parseInt(process.env.WDYT_REVIEW_PAGINATION_THRESHOLD ?? "50", 10) || 50;
+const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "50", 10) || 50;
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -530,6 +542,18 @@ function renderReviewPage() {
       .status { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #efe6d7; }
       .unit-card.related { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
       .unit-card.dimmed { opacity: 0.56; }
+      .list-controls { display: grid; gap: 10px; margin-bottom: 16px; }
+      .list-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
+      .list-controls input { width: 100%; }
+      .scaled-note { color: var(--muted); font-size: 13px; line-height: 1.4; }
+      .pagination-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      .page-summary { color: var(--muted); font-size: 13px; }
       section { padding: 24px; overflow: auto; }
       .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
       .descriptor { font-size: 28px; margin: 8px 0 6px; }
@@ -583,18 +607,37 @@ function renderReviewPage() {
       </div>
     </header>
     <main>
-      <aside><div id="overlapSummary"></div><div id="units"></div></aside>
+      <aside><div id="listControls"></div><div id="overlapSummary"></div><div id="units"></div><div id="listPagination"></div></aside>
       <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
     </main>
     <script>
-      let state = { units: [], vocabulary: [], selectedId: null, editingId: null, submittingReviewId: null, transitionMessage: "", pendingFocusHeading: false, activeOverlapKey: null, rebuilding: false };
+      let state = {
+        mode: "full",
+        units: [],
+        allUnits: [],
+        selectedUnit: null,
+        vocabulary: [],
+        selectedId: null,
+        editingId: null,
+        submittingReviewId: null,
+        transitionMessage: "",
+        pendingFocusHeading: false,
+        activeOverlapKey: null,
+        rebuilding: false,
+        initialized: false,
+        page: 1,
+        pageSize: ${REVIEW_PAGE_SIZE},
+        totalUnits: 0,
+        totalPages: 1,
+        query: "",
+      };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;");
-      const getActiveUnits = () => state.units.filter((unit) => unit.proposalState === "proposed" || unit.activeDescriptor);
+      const getActiveUnits = () => (state.mode === "scaled" ? state.units : state.allUnits).filter((unit) => unit.proposalState === "proposed" || unit.activeDescriptor);
       const getOverlapVocab = (unit) => Array.isArray(unit.overlapTerms) ? unit.overlapTerms : [];
       const getDescriptorKey = (unit) => String(unit.activeDescriptor || unit.proposedDescriptor || "").trim().toLowerCase();
       const getSharedOverlapCount = (leftValues, rightValues) => {
@@ -630,7 +673,7 @@ function renderReviewPage() {
         return minCount > 0 && shared === minCount;
       };
       const getComparableUnits = () =>
-        state.units.filter(
+        (state.mode === "scaled" ? [] : state.allUnits).filter(
           (unit) =>
             unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor)
         );
@@ -640,28 +683,28 @@ function renderReviewPage() {
           .slice()
           .sort((a, b) => getOverlapVocab(a).length - getOverlapVocab(b).length || a.reviewId.localeCompare(b.reviewId))
           .forEach((unit) => {
-          const vocab = getOverlapVocab(unit);
-          if (vocab.length === 0) {
-            return;
-          }
+            const vocab = getOverlapVocab(unit);
+            if (vocab.length === 0) {
+              return;
+            }
 
-          const matchedGroup = groups.find((group) =>
-            group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)) || isSubsetOverlapMatch(unit, candidate))
-          );
+            const matchedGroup = groups.find((group) =>
+              group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)) || isSubsetOverlapMatch(unit, candidate))
+            );
 
-          if (matchedGroup) {
-            matchedGroup.units.push(unit);
-            matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
-            matchedGroup.key = matchedGroup.vocab.join("||");
-            return;
-          }
+            if (matchedGroup) {
+              matchedGroup.units.push(unit);
+              matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
+              matchedGroup.key = matchedGroup.vocab.join("||");
+              return;
+            }
 
-          groups.push({
-            key: [...vocab].sort().join("||"),
-            vocab: [...vocab],
-            units: [unit],
+            groups.push({
+              key: [...vocab].sort().join("||"),
+              vocab: [...vocab],
+              units: [unit],
+            });
           });
-        });
 
         return groups
           .filter((group) => group.units.length > 1)
@@ -699,49 +742,145 @@ function renderReviewPage() {
       const redirectToLaunchpad = () => {
         window.location.assign("/review");
       };
+      const getCurrentUnit = () =>
+        state.mode === "scaled"
+          ? state.selectedUnit
+          : state.units.find((candidate) => candidate.reviewId === state.selectedId);
+
+      async function fetchReviewUnit(reviewId) {
+        const response = await fetch(\`/review/units/\${encodeURIComponent(reviewId)}\`);
+        if (!response.ok) {
+          return null;
+        }
+
+        return response.json();
+      }
 
       async function loadState() {
         const params = new URLSearchParams(window.location.search);
-        const initialReviewId = params.get("reviewId");
-        const initialOverlapKey = params.get("overlapKey");
-        const [unitsRes, vocabRes, runtimeRes] = await Promise.all([
-          fetch("/review/units"),
+        const initialReviewId = state.initialized ? null : params.get("reviewId");
+        const initialOverlapKey = state.initialized ? null : params.get("overlapKey");
+        const [vocabRes, runtimeRes, metaRes] = await Promise.all([
           fetch("/review/vocabulary"),
           fetch("/runtime/state"),
+          fetch("/review/units/meta"),
         ]);
-        const nextUnits = await unitsRes.json();
         state.vocabulary = await vocabRes.json();
         const runtimeState = await runtimeRes.json();
         if (!runtimeState.hasData) {
           redirectToLaunchpad();
           return;
         }
-        if (state.editingId && nextUnits.some((unit) => unit.reviewId === state.editingId)) {
+
+        const meta = await metaRes.json();
+        state.mode = meta.mode;
+        state.pageSize = meta.pageSize;
+        state.totalUnits = meta.total;
+
+        if (state.mode === "full") {
+          const unitsRes = await fetch("/review/units");
+          const nextUnits = await unitsRes.json();
           state.units = nextUnits;
-          renderList();
-          return;
-        }
-        state.units = nextUnits;
-        const activeUnits = getActiveUnits();
-        const overlapGroups = getOverlapGroups();
-        if (initialOverlapKey && overlapGroups.some((group) => group.key === initialOverlapKey)) {
-          state.activeOverlapKey = initialOverlapKey;
-          if (!initialReviewId) {
-            state.selectedId = overlapGroups.find((group) => group.key === initialOverlapKey)?.units[0]?.reviewId ?? state.selectedId;
+          state.allUnits = nextUnits;
+          state.selectedUnit = null;
+
+          const activeUnits = getActiveUnits();
+          const overlapGroups = getOverlapGroups();
+          if (initialOverlapKey && overlapGroups.some((group) => group.key === initialOverlapKey)) {
+            state.activeOverlapKey = initialOverlapKey;
+            if (!initialReviewId) {
+              state.selectedId = overlapGroups.find((group) => group.key === initialOverlapKey)?.units[0]?.reviewId ?? state.selectedId;
+            }
+          }
+          if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
+            state.selectedId = initialReviewId;
+          }
+          if (!state.selectedId && activeUnits[0]) state.selectedId = activeUnits[0].reviewId;
+          if (state.selectedId && !state.units.some((unit) => unit.reviewId === state.selectedId)) {
+            state.selectedId = activeUnits[0]?.reviewId ?? state.units[0]?.reviewId ?? null;
+          }
+        } else {
+          const queryRes = await fetch(\`/review/units/query?page=\${encodeURIComponent(String(state.page))}&pageSize=\${encodeURIComponent(String(state.pageSize))}&q=\${encodeURIComponent(state.query)}\`);
+          const paged = await queryRes.json();
+          state.units = paged.units;
+          state.allUnits = [];
+          state.page = paged.page;
+          state.totalPages = paged.totalPages;
+          state.totalUnits = paged.total;
+          state.activeOverlapKey = null;
+
+          if (!state.selectedId && initialReviewId) {
+            state.selectedId = initialReviewId;
+          }
+          if (!state.selectedId) {
+            state.selectedId = state.units[0]?.reviewId ?? null;
+          }
+          if (state.selectedId) {
+            const pageUnit = state.units.find((unit) => unit.reviewId === state.selectedId);
+            state.selectedUnit = pageUnit ?? await fetchReviewUnit(state.selectedId);
+            if (!state.selectedUnit && state.units[0]) {
+              state.selectedId = state.units[0].reviewId;
+              state.selectedUnit = state.units[0];
+            }
+          } else {
+            state.selectedUnit = null;
           }
         }
-        if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
-          state.selectedId = initialReviewId;
-        }
-        if (!state.selectedId && activeUnits[0]) state.selectedId = activeUnits[0].reviewId;
-        if (state.selectedId && !state.units.some((unit) => unit.reviewId === state.selectedId)) {
-          state.selectedId = activeUnits[0]?.reviewId ?? state.units[0]?.reviewId ?? null;
-        }
+
+        state.initialized = true;
         render();
+      }
+
+      function renderListControls() {
+        const container = document.getElementById("listControls");
+        if (state.mode !== "scaled") {
+          container.innerHTML = "";
+          return;
+        }
+
+        container.innerHTML = \`
+          <div class="list-controls">
+            <label>
+              <span>Search observed behaviors</span>
+              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search descriptors, tests, terms, or destinations" />
+            </label>
+            <div class="scaled-note">Large dataset mode is using server-backed search and pagination to keep the browser footprint bounded.</div>
+          </div>\`;
+
+        const input = document.getElementById("reviewSearchInput");
+        input?.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+          state.query = input.value.trim();
+          state.page = 1;
+          state.selectedId = null;
+          await loadState();
+        });
+        input?.addEventListener("search", async () => {
+          state.query = input.value.trim();
+          state.page = 1;
+          state.selectedId = null;
+          await loadState();
+        });
+        input?.addEventListener("blur", async () => {
+          const nextQuery = input.value.trim();
+          if (nextQuery === state.query) {
+            return;
+          }
+          state.query = nextQuery;
+          state.page = 1;
+          state.selectedId = null;
+          await loadState();
+        });
       }
 
       function renderOverlapSummary() {
         const container = document.getElementById("overlapSummary");
+        if (state.mode === "scaled") {
+          container.innerHTML = "";
+          return;
+        }
         const groups = getOverlapGroups();
 
         if (groups.length === 0) {
@@ -785,7 +924,47 @@ function renderReviewPage() {
             \${getCardStatus(unit) ? \`<div class="status">\${escapeHtml(getCardStatus(unit))}</div>\` : ""}
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
-          node.addEventListener("click", () => { state.selectedId = node.getAttribute("data-id"); render(); });
+          node.addEventListener("click", async () => {
+            state.selectedId = node.getAttribute("data-id");
+            if (state.mode === "scaled") {
+              state.selectedUnit = await fetchReviewUnit(state.selectedId);
+            }
+            render();
+          });
+        });
+      }
+
+      function renderPagination() {
+        const container = document.getElementById("listPagination");
+        if (state.mode !== "scaled" || state.totalPages <= 1) {
+          container.innerHTML = "";
+          return;
+        }
+
+        const firstIndex = state.totalUnits === 0 ? 0 : (state.page - 1) * state.pageSize + 1;
+        const lastIndex = Math.min(state.totalUnits, state.page * state.pageSize);
+        container.innerHTML = \`
+          <div class="pagination-bar">
+            <div class="page-summary">Showing \${firstIndex}-\${lastIndex} of \${state.totalUnits}</div>
+            <div class="button-row">
+              <button type="button" id="reviewPrevPage" \${state.page <= 1 ? "disabled" : ""}>Previous</button>
+              <button type="button" id="reviewNextPage" \${state.page >= state.totalPages ? "disabled" : ""}>Next</button>
+            </div>
+          </div>\`;
+
+        document.getElementById("reviewPrevPage")?.addEventListener("click", async () => {
+          if (state.page <= 1) {
+            return;
+          }
+          state.page -= 1;
+          await loadState();
+        });
+        document.getElementById("reviewNextPage")?.addEventListener("click", async () => {
+          if (state.page >= state.totalPages) {
+            return;
+          }
+          state.page += 1;
+          await loadState();
         });
       }
 
@@ -798,15 +977,17 @@ function renderReviewPage() {
 
       function renderDetail() {
         const detail = document.getElementById("detail");
-        const unit = state.units.find((candidate) => candidate.reviewId === state.selectedId);
+        const unit = getCurrentUnit();
 
         if (!unit) {
           const activeUnits = getActiveUnits();
           if (activeUnits.length === 0) {
-          detail.innerHTML = '<p id="empty">Waiting for interpreted flow variants.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
-          } else {
+            detail.innerHTML = '<p id="empty">Waiting for interpreted flow variants.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
+          } else if (state.mode === "full") {
             state.selectedId = activeUnits[0].reviewId;
             render();
+          } else {
+            detail.innerHTML = '<p id="empty">Select a flow variant to review.</p>';
           }
           return;
         }
@@ -923,6 +1104,7 @@ function renderReviewPage() {
           }
 
           state.selectedId = null;
+          state.selectedUnit = null;
           state.activeOverlapKey = null;
           state.pendingFocusHeading = false;
           await loadState();
@@ -947,8 +1129,10 @@ function renderReviewPage() {
           rebuildButton.disabled = state.rebuilding;
           rebuildButton.textContent = state.rebuilding ? "Rebuilding…" : "Rebuild Observed Behaviors";
         }
+        renderListControls();
         renderOverlapSummary();
         renderList();
+        renderPagination();
         renderDetail();
       }
       loadState();
@@ -2451,6 +2635,33 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && requestPath === "/review/units/meta") {
+    const total = await getReviewUnitViewCount();
+    writeJson(res, 200, {
+      total,
+      threshold: REVIEW_PAGINATION_THRESHOLD,
+      pageSize: REVIEW_PAGE_SIZE,
+      mode: total >= REVIEW_PAGINATION_THRESHOLD ? "scaled" : "full",
+    });
+    return;
+  }
+
+  if (req.method === "GET" && requestPath === "/review/units/query") {
+    const page = Number.parseInt(requestUrl?.searchParams.get("page") ?? "1", 10);
+    const pageSize = Number.parseInt(requestUrl?.searchParams.get("pageSize") ?? String(REVIEW_PAGE_SIZE), 10);
+    const query = requestUrl?.searchParams.get("q") ?? "";
+    writeJson(
+      res,
+      200,
+      await queryReviewUnitViews({
+        page,
+        pageSize,
+        query,
+      })
+    );
+    return;
+  }
+
   if (req.method === "GET" && requestPath === `${EXPECTED_BEHAVIORS_PATH}/state`) {
     writeJson(res, 200, await loadCriticalFlowState());
     return;
@@ -2458,6 +2669,18 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && requestPath === "/review/vocabulary") {
     writeJson(res, 200, await readJsonFile(getVocabularyPath(), []));
+    return;
+  }
+
+  if (req.method === "GET" && requestPath?.startsWith("/review/units/")) {
+    const reviewId = decodeURIComponent(requestPath.slice("/review/units/".length));
+    const unit = await loadReviewUnitView(reviewId);
+    if (!unit) {
+      writeJson(res, 404, { error: "Review unit not found" });
+      return;
+    }
+
+    writeJson(res, 200, unit);
     return;
   }
 

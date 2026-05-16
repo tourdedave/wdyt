@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  getDataDir,
   getProcessedRunsPath,
   getRawRunsPath,
   getReviewUnitsPath,
@@ -68,6 +69,13 @@ const reviewConceptResolutionPromptPath = path.join(__dirname, "../prompts/revie
 
 let processingQueue = false;
 let reviewUnitWriteChain: Promise<unknown> = Promise.resolve();
+let reviewUnitCache:
+  | {
+      dataDir: string;
+      units: ReviewUnitRecord[];
+      views: ReviewUnitViewRecord[];
+    }
+  | null = null;
 
 type GroupedFlow = {
   flowId: string;
@@ -253,6 +261,19 @@ async function loadVocabulary() {
   return readJsonFile<VocabularyEntry[]>(getVocabularyPath(), []);
 }
 
+function invalidateReviewUnitCache() {
+  reviewUnitCache = null;
+}
+
+function getActiveReviewUnitCache() {
+  const dataDir = getDataDir();
+  if (!reviewUnitCache || reviewUnitCache.dataDir !== dataDir) {
+    return null;
+  }
+
+  return reviewUnitCache;
+}
+
 function getActiveDescriptor(unit: Partial<ReviewUnitRecord>) {
   return unit.activeDescriptor ?? unit.proposedDescriptor;
 }
@@ -338,7 +359,16 @@ function materializeSuppressedView(unit: ReviewUnitRecord, stats: Map<string, Vo
 }
 
 async function saveReviewUnits(units: ReviewUnitRecord[]) {
-  await writeJsonFile(getReviewUnitsPath(), units.sort((a, b) => a.reviewId.localeCompare(b.reviewId)));
+  const sortedUnits = [...units].sort((a, b) => a.reviewId.localeCompare(b.reviewId));
+  await writeJsonFile(getReviewUnitsPath(), sortedUnits);
+  const vocabulary = await loadVocabulary();
+  const materializedUnits = sortedUnits.map((unit) => materializeActiveFields(unit, vocabulary));
+  const stats = buildGlobalVocabStats(materializedUnits, vocabulary);
+  reviewUnitCache = {
+    dataDir: getDataDir(),
+    units: materializedUnits,
+    views: materializedUnits.map((unit) => materializeSuppressedView(unit, stats)),
+  };
 }
 
 type MaterializedReviewUnitRecord = Awaited<ReturnType<typeof loadReviewUnits>>[number];
@@ -371,16 +401,94 @@ async function patchReviewUnit(
 }
 
 export async function loadReviewUnits() {
+  const cached = getActiveReviewUnitCache();
+  if (cached) {
+    return cached.units.map((unit: ReviewUnitRecord) => ({ ...unit }));
+  }
+
   const units = await readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), []);
   const vocabulary = await loadVocabulary();
-  return units.map((unit) => materializeActiveFields(unit, vocabulary));
+  const materializedUnits = units.map((unit) => materializeActiveFields(unit, vocabulary));
+  const stats = buildGlobalVocabStats(materializedUnits, vocabulary);
+  reviewUnitCache = {
+    dataDir: getDataDir(),
+    units: materializedUnits,
+    views: materializedUnits.map((unit) => materializeSuppressedView(unit, stats)),
+  };
+  return materializedUnits.map((unit) => ({ ...unit }));
 }
 
 export async function loadReviewUnitViews() {
+  const cached = getActiveReviewUnitCache();
+  if (cached) {
+    return cached.views.map((unit: ReviewUnitViewRecord) => ({ ...unit }));
+  }
+
+  await loadReviewUnits();
+  const refreshedCache = getActiveReviewUnitCache();
+  return refreshedCache ? refreshedCache.views.map((unit: ReviewUnitViewRecord) => ({ ...unit })) : [];
+}
+
+export async function loadReviewUnitView(reviewId: string) {
+  const units = await loadReviewUnitViews();
+  return units.find((unit) => unit.reviewId === reviewId) ?? null;
+}
+
+export async function getReviewUnitViewCount() {
   const units = await loadReviewUnits();
-  const vocabulary = await loadVocabulary();
-  const stats = buildGlobalVocabStats(units, vocabulary);
-  return units.map((unit) => materializeSuppressedView(unit, stats));
+  return units.length;
+}
+
+function matchesReviewUnitQuery(unit: ReviewUnitViewRecord, query: string) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const haystacks = [
+    unit.reviewId,
+    unit.flowId,
+    unit.activeDescriptor,
+    unit.proposedDescriptor,
+    ...(unit.tests ?? []),
+    ...(unit.suites ?? []),
+    ...(unit.primaryTerms ?? []),
+    ...(unit.prerequisites ?? []),
+    ...(unit.outcomeTerms ?? []),
+    ...(unit.activeVocab ?? []),
+    ...(unit.finalUrls ?? []),
+    ...(unit.headings ?? []),
+  ];
+
+  return haystacks.some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery));
+}
+
+export async function queryReviewUnitViews(input?: {
+  page?: number;
+  pageSize?: number;
+  query?: string;
+}) {
+  const page = Number.isFinite(input?.page) && (input?.page ?? 0) > 0 ? Math.floor(input?.page ?? 1) : 1;
+  const requestedPageSize =
+    Number.isFinite(input?.pageSize) && (input?.pageSize ?? 0) > 0 ? Math.floor(input?.pageSize ?? 50) : 50;
+  const pageSize = Math.max(1, Math.min(requestedPageSize, 100));
+  const query = input?.query?.trim() ?? "";
+  const allUnits = await loadReviewUnitViews();
+  const filteredUnits = query ? allUnits.filter((unit) => matchesReviewUnitQuery(unit, query)) : allUnits;
+  const total = filteredUnits.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const clampedPage = Math.min(page, totalPages);
+  const startIndex = (clampedPage - 1) * pageSize;
+  const units = filteredUnits.slice(startIndex, startIndex + pageSize);
+
+  return {
+    units,
+    total,
+    page: clampedPage,
+    pageSize,
+    totalPages,
+    query,
+  };
 }
 
 export async function buildReviewUnits() {

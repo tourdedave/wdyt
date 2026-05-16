@@ -4100,6 +4100,107 @@ test("review page surfaces repeated coverage for proposed review units with matc
   }
 });
 
+test("review page exposes scaled mode with paged query api for large datasets", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-scaled-mode-"));
+
+  try {
+    const dataDir = path.join(tempDir, ".wdyt");
+    await mkdir(dataDir, { recursive: true });
+    const largeUnits = Array.from({ length: 130 }, (_, index) => ({
+      reviewId: `scaled-${index}`,
+      flowId: `scaled-flow-${index}`,
+      canonical: ["NAVIGATE", "CLICK"],
+      count: 1,
+      suites: ["scaled/suite"],
+      tests: [`scaled-test-${index}`],
+      tools: ["playwright"],
+      browsers: ["chromium 149.0.0.0"],
+      urls: ["http://127.0.0.1:4010/dashboard"],
+      targets: ['a("Open report")'],
+      finalUrls: [`http://127.0.0.1:4010/reports/${index}`],
+      titles: [`Report ${index}`],
+      headings: [`Report ${index}`],
+      alerts: [],
+      proposalState: "proposed",
+      proposedDescriptor: `Access report ${index}`,
+      proposedConfidence: 0.8,
+      proposedRationale: "Synthetic large dataset review unit.",
+      approvedVocabUsed: [],
+      proposedVocab: ["reports"],
+      activeDescriptor: `Access report ${index}`,
+      activeVocab: ["reports"],
+      prerequisiteTerms: [],
+      primaryTerms: ["reports"],
+      outcomeTerms: [],
+      uncertainTerms: [],
+      updatedAt: Date.now(),
+    }));
+    await writeFile(path.join(dataDir, "review-units.json"), `${JSON.stringify(largeUnits, null, 2)}\n`, "utf8");
+
+    const port = randomPort();
+    const server = spawnServer(tempDir, port);
+    const serverUrl = `http://127.0.0.1:${port}`;
+
+    try {
+      await waitForHealth(serverUrl);
+      const meta = await getJson(serverUrl, "/review/units/meta");
+      assert.equal(meta.mode, "scaled");
+      assert.equal(meta.total, 130);
+
+      const pageOne = await getJson(serverUrl, "/review/units/query?page=1&pageSize=50");
+      assert.equal(pageOne.units.length, 50);
+      assert.equal(pageOne.total, 130);
+      assert.equal(pageOne.totalPages, 3);
+
+      const filtered = await getJson(serverUrl, "/review/units/query?page=1&pageSize=50&q=report%20129");
+      assert.equal(filtered.units.length, 1);
+      assert.equal(filtered.units[0].reviewId, "scaled-129");
+
+      const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
+      assert.match(reviewPage, /\/review\/units\/meta/);
+      assert.match(reviewPage, /\/review\/units\/query/);
+      assert.match(reviewPage, /Search observed behaviors/);
+    } finally {
+      await stopChildProcess(server.child);
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("synthetic cli seed and benchmark support large dataset hydration and fake llm stress", { timeout: 20_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-synthetic-cli-"));
+
+  try {
+    const seedResult = await runCli(tempDir, ["synthetic", "seed", "--units", "24", "--runs-per-unit", "2", "--build"]);
+    assert.match(seedResult, /Seeded synthetic dataset: units=24 runs=48 runsPerUnit=2 built=1/);
+
+    const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+    assert.equal(reviewUnits.length, 24);
+
+    const rawRuns = (await readFile(path.join(tempDir, ".wdyt", "runs.raw.jsonl"), "utf8"))
+      .trim()
+      .split("\n")
+      .filter(Boolean);
+    assert.equal(rawRuns.length, 48);
+
+    const benchmarkResult = await runCli(
+      tempDir,
+      ["synthetic", "benchmark", "--units", "12", "--runs-per-unit", "2"],
+      "",
+      {
+        WDYT_LLM_FAKE: "1",
+        WDYT_LLM_FAKE_LATENCY_MS: "1",
+        WDYT_REVIEW_CONCURRENCY: "4",
+      }
+    );
+    assert.match(benchmarkResult, /Synthetic benchmark complete: units=12 runs=24/);
+    assert.match(benchmarkResult, /fakeLlm=1/);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("review page groups semantically similar repeated coverage with divergent active vocab", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-semantic-overlap-"));
   const port = randomPort();

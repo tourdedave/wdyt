@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
 import { buildReviewUnits, queueProposalProcessing } from "../server/review.js";
+import { seedSyntheticRuntimeData } from "../server/synthetic.js";
 import {
   getProcessedRunsPath,
   getRawRunsPath,
@@ -1144,6 +1145,56 @@ async function rebuildReviewArtifacts() {
   console.log("Rebuilt review units from captured evidence.");
 }
 
+function parseSyntheticNumber(args: string[], ...flags: string[]) {
+  for (let index = 0; index < args.length; index += 1) {
+    if (!flags.includes(args[index])) {
+      continue;
+    }
+    const value = Number.parseInt(args[index + 1] ?? "", 10);
+    return Number.isFinite(value) ? value : null;
+  }
+  return null;
+}
+
+async function seedSyntheticDataset(args: string[]) {
+  const units = parseSyntheticNumber(args, "--units", "-u") ?? 150;
+  const runsPerUnit = parseSyntheticNumber(args, "--runs-per-unit", "-r") ?? 2;
+  const offset = parseSyntheticNumber(args, "--offset") ?? 0;
+  const shouldBuild = args.includes("--build");
+  const shouldPropose = args.includes("--propose");
+  const seeded = await seedSyntheticRuntimeData({ units, runsPerUnit, offset });
+
+  if (shouldBuild || shouldPropose) {
+    await buildReviewUnits();
+  }
+  if (shouldPropose) {
+    await queueProposalProcessing();
+  }
+
+  console.log(
+    `Seeded synthetic dataset: units=${seeded.units} runs=${seeded.totalRuns} runsPerUnit=${seeded.runsPerUnit}${shouldBuild ? " built=1" : ""}${shouldPropose ? " proposed=1" : ""}`
+  );
+}
+
+async function benchmarkSyntheticDataset(args: string[]) {
+  const units = parseSyntheticNumber(args, "--units", "-u") ?? 500;
+  const runsPerUnit = parseSyntheticNumber(args, "--runs-per-unit", "-r") ?? 2;
+  const offset = parseSyntheticNumber(args, "--offset") ?? 0;
+  const seeded = await seedSyntheticRuntimeData({ units, runsPerUnit, offset });
+
+  const buildStart = Date.now();
+  await buildReviewUnits();
+  const buildMs = Date.now() - buildStart;
+
+  const proposeStart = Date.now();
+  await queueProposalProcessing();
+  const proposeMs = Date.now() - proposeStart;
+
+  console.log(
+    `Synthetic benchmark complete: units=${seeded.units} runs=${seeded.totalRuns} buildMs=${buildMs} proposeMs=${proposeMs} concurrency=${process.env.WDYT_REVIEW_CONCURRENCY ?? "10"} fakeLlm=${process.env.WDYT_LLM_FAKE === "1" ? "1" : "0"} fakeLatencyMs=${process.env.WDYT_LLM_FAKE_LATENCY_MS ?? "0"}`
+  );
+}
+
 async function main() {
   const [, , command, ...args] = process.argv;
 
@@ -1164,6 +1215,19 @@ async function main() {
     "Default export location:",
     `  zip: ./${DEFAULT_EXPORT_FILE_NAMES.zip}`,
     `  pdf: ./${DEFAULT_EXPORT_FILE_NAMES.pdf}`,
+  ].join("\n");
+
+  const syntheticUsage = [
+    "Usage:",
+    "  wdyt synthetic seed [--units <count>] [--runs-per-unit <count>] [--offset <count>] [--build] [--propose]",
+    "  wdyt synthetic benchmark [--units <count>] [--runs-per-unit <count>] [--offset <count>]",
+    "",
+    "Commands:",
+    "  seed       Replace the current wdyt runtime data with a synthetic dataset",
+    "  benchmark  Seed a synthetic dataset, rebuild review units, and run proposals",
+    "",
+    "Notes:",
+    "  Use WDYT_LLM_FAKE=1 and WDYT_LLM_FAKE_LATENCY_MS=<ms> to stress the proposal worker without spending tokens.",
   ].join("\n");
 
   if (command === "flows") {
@@ -1256,6 +1320,28 @@ async function main() {
     }
 
     console.error(artifactUsage);
+    process.exitCode = 1;
+    return;
+  }
+
+  if (command === "synthetic") {
+    const subcommand = args[0];
+    if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+      console.log(syntheticUsage);
+      return;
+    }
+
+    if (subcommand === "seed") {
+      await seedSyntheticDataset(args.slice(1));
+      return;
+    }
+
+    if (subcommand === "benchmark") {
+      await benchmarkSyntheticDataset(args.slice(1));
+      return;
+    }
+
+    console.error(syntheticUsage);
     process.exitCode = 1;
     return;
   }
