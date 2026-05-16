@@ -468,16 +468,13 @@ export async function buildReviewUnits() {
     }
   }
 
-  const existing = await loadReviewUnits();
   const vocabulary = await loadVocabulary();
-  const existingById = new Map(existing.map((unit) => [unit.reviewId, unit]));
   const now = Date.now();
 
   const materialized: ReviewUnitRecord[] = reviewUnits
     .sort((a, b) => b.count - a.count || a.reviewId.localeCompare(b.reviewId))
-    .map((unit) => {
-      const previous = existingById.get(unit.reviewId);
-      return materializeActiveFields({
+    .map((unit) =>
+      materializeActiveFields({
         reviewId: unit.reviewId,
         flowId: unit.flowId,
         variantSignature: unit.variantSignature,
@@ -493,30 +490,19 @@ export async function buildReviewUnits() {
         titles: [...unit.titles].sort(),
         headings: [...unit.headings].sort(),
         alerts: [...unit.alerts].sort(),
-        proposalState: previous?.proposalState ?? "pending",
-        proposedDescriptor: previous?.proposedDescriptor,
-        proposedConfidence: previous?.proposedConfidence,
-        proposedRationale: previous?.proposedRationale,
-        candidateVocab: previous?.candidateVocab,
-        approvedVocabUsed: previous?.approvedVocabUsed ?? [],
-        proposedVocab: previous?.proposedVocab ?? [],
-        activeDescriptor: previous?.activeDescriptor ?? previous?.proposedDescriptor,
-        activeVocab: previous?.activeVocab ?? [...new Set([...(previous?.approvedVocabUsed ?? []), ...(previous?.proposedVocab ?? [])])],
-        prerequisiteTerms: previous?.prerequisiteTerms ?? [],
-        primaryTerms: previous?.primaryTerms ?? [],
-        outcomeTerms: previous?.outcomeTerms ?? [],
-        uncertainTerms: previous?.uncertainTerms ?? [],
-        evidenceItems: previous?.evidenceItems ?? [],
-        conceptResolutions: previous?.conceptResolutions ?? [],
-        roleEvidence: previous?.roleEvidence,
-        interpretationStatus: previous?.interpretationStatus,
-        proposalError: previous?.proposalError,
-        notes: previous?.notes,
+        proposalState: "pending",
+        approvedVocabUsed: [],
+        proposedVocab: [],
+        activeVocab: [],
+        prerequisiteTerms: [],
+        primaryTerms: [],
+        outcomeTerms: [],
+        uncertainTerms: [],
+        evidenceItems: [],
+        conceptResolutions: [],
         updatedAt: now,
-        proposedAt: previous?.proposedAt,
-        reprocessRequestedAt: previous?.reprocessRequestedAt,
-      }, vocabulary);
-    });
+      }, vocabulary)
+    );
 
   await saveReviewUnits(materialized);
   console.log(`[WDYT] review units ready count=${materialized.length}`);

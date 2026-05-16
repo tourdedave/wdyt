@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
+import { buildReviewUnits, queueProposalProcessing } from "../server/review.js";
 import {
   getProcessedRunsPath,
   getRawRunsPath,
@@ -1137,6 +1138,12 @@ async function reviewFlows(options: { propose: boolean }) {
   }
 }
 
+async function rebuildReviewArtifacts() {
+  await buildReviewUnits();
+  await queueProposalProcessing();
+  console.log("Rebuilt review units from captured evidence.");
+}
+
 async function main() {
   const [, , command, ...args] = process.argv;
 
@@ -1167,6 +1174,11 @@ async function main() {
   }
 
   if (command === "review") {
+    if (args.includes("--rebuild")) {
+      await rebuildReviewArtifacts();
+      return;
+    }
+
     await reviewFlows({
       propose: args.includes("--propose"),
     });
@@ -1248,7 +1260,7 @@ async function main() {
     return;
   }
 
-  console.error("Usage: wdyt flows [--verbose] | wdyt review [--propose] | wdyt artifact");
+  console.error("Usage: wdyt flows [--verbose] | wdyt review [--propose|--rebuild] | wdyt artifact");
   process.exitCode = 1;
 }
 

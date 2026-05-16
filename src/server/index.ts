@@ -458,8 +458,9 @@ function renderReviewPage() {
       * { box-sizing: border-box; }
       body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
       header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
-      .header-bar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+      .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
       .header-copy { min-width: 0; }
+      .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
       header h1 { margin: 0; font-size: 30px; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
@@ -467,6 +468,53 @@ function renderReviewPage() {
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
       nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+      .settings-menu { position: relative; }
+      .settings-menu[open] { z-index: 40; }
+      .settings-trigger {
+        list-style: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 10px 16px;
+        background: var(--accent);
+        color: #fff;
+        text-decoration: none;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .settings-trigger:hover { background: #195d3f; }
+      .settings-trigger::-webkit-details-marker { display: none; }
+      .settings-panel {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        z-index: 41;
+        min-width: 240px;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(255,253,248,0.98);
+        box-shadow: 0 10px 30px rgba(29,26,22,0.12);
+      }
+      .settings-option {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        border: none;
+        border-radius: 10px;
+        color: var(--ink);
+        background: transparent;
+        text-align: left;
+        font-size: 15px;
+        line-height: 1.35;
+        cursor: pointer;
+      }
+      .settings-option:hover {
+        background: rgba(31,111,74,0.08);
+      }
       main { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 89px); }
       aside { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
       #units { display: grid; gap: 12px; }
@@ -503,25 +551,42 @@ function renderReviewPage() {
       .decision-editor.open { display: grid; }
       .transition-banner { margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; background: rgba(31,111,74,0.12); color: var(--accent); font-size: 14px; }
       .panel.is-submitting { opacity: 0.72; transition: opacity 120ms ease; }
-      @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } .grid { grid-template-columns: 1fr; } }
+      @media (max-width: 900px) {
+        main { grid-template-columns: 1fr; }
+        aside { border-right: 0; border-bottom: 1px solid var(--line); }
+        .grid { grid-template-columns: 1fr; }
+        .settings-panel { right: auto; left: 0; }
+      }
     </style>
   </head>
   <body>
     <header>
-      <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Review and refine observed behaviors before evaluating coverage.</p>
-      <nav>
-        <a class="active" href="/review">Observed Behaviors</a>
-        <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
-        <a href="/review/summary">Summary</a>
-      </nav>
+      <div class="header-bar">
+        <div class="header-copy">
+          <h1><a href="/review/summary">What Did You Test?</a></h1>
+          <p>Review and refine observed behaviors before evaluating coverage.</p>
+          <nav>
+            <a class="active" href="/review">Observed Behaviors</a>
+            <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
+            <a href="/review/summary">Summary</a>
+          </nav>
+        </div>
+        <div class="header-actions">
+          <details class="settings-menu" id="reviewSettingsMenu">
+            <summary class="settings-trigger">Settings <span aria-hidden="true">▾</span></summary>
+            <div class="settings-panel">
+              <button type="button" class="settings-option" id="rebuildReviewUnits">Rebuild Observed Behaviors</button>
+            </div>
+          </details>
+        </div>
+      </div>
     </header>
     <main>
       <aside><div id="overlapSummary"></div><div id="units"></div></aside>
       <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
     </main>
     <script>
-      let state = { units: [], vocabulary: [], selectedId: null, editingId: null, submittingReviewId: null, transitionMessage: "", pendingFocusHeading: false, activeOverlapKey: null };
+      let state = { units: [], vocabulary: [], selectedId: null, editingId: null, submittingReviewId: null, transitionMessage: "", pendingFocusHeading: false, activeOverlapKey: null, rebuilding: false };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -836,7 +901,55 @@ function renderReviewPage() {
         });
       }
 
-      function render() { renderOverlapSummary(); renderList(); renderDetail(); }
+      document.getElementById("rebuildReviewUnits")?.addEventListener("click", async () => {
+        if (state.rebuilding) {
+          return;
+        }
+
+        const settingsMenu = document.getElementById("reviewSettingsMenu");
+        if (settingsMenu && "open" in settingsMenu) {
+          settingsMenu.open = false;
+        }
+
+        state.rebuilding = true;
+        state.transitionMessage = "Rebuilding observed behaviors from captured evidence…";
+        render();
+
+        try {
+          const response = await fetch("/review/rebuild", { method: "POST" });
+          if (!response.ok) {
+            throw new Error("Unable to rebuild observed behaviors.");
+          }
+
+          state.selectedId = null;
+          state.activeOverlapKey = null;
+          state.pendingFocusHeading = false;
+          await loadState();
+          state.transitionMessage = "Observed behaviors rebuilt from captured evidence.";
+          render();
+          setTimeout(() => {
+            state.transitionMessage = "";
+            render();
+          }, 1600);
+        } catch (error) {
+          state.transitionMessage = error instanceof Error ? error.message : "Unable to rebuild observed behaviors.";
+          render();
+        } finally {
+          state.rebuilding = false;
+          render();
+        }
+      });
+
+      function render() {
+        const rebuildButton = document.getElementById("rebuildReviewUnits");
+        if (rebuildButton) {
+          rebuildButton.disabled = state.rebuilding;
+          rebuildButton.textContent = state.rebuilding ? "Rebuilding…" : "Rebuild Observed Behaviors";
+        }
+        renderOverlapSummary();
+        renderList();
+        renderDetail();
+      }
       loadState();
       setInterval(loadState, 4000);
     </script>
@@ -2408,6 +2521,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (req.method === "POST" && requestPath === "/review/rebuild") {
+    try {
+      await refreshReviewUnits();
+      writeJson(res, 200, { ok: true });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to rebuild review units.";
+      writeJson(res, 500, { error: message });
+      return;
+    }
+  }
+
   if (req.method === "POST" && requestPath === "/review/vocabulary") {
     try {
       const body = (await readJsonBody(req)) as
@@ -2568,7 +2693,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 await ensureDataDir();
-await refreshReviewUnits();
 
 server.listen(PORT, HOST, () => {
   console.log(`WDYT server listening on http://${HOST}:${PORT}`);

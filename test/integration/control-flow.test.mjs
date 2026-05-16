@@ -2434,6 +2434,8 @@ test("review module materializes review units, proposes descriptors, and saves r
     const {
       loadReviewUnits,
       refreshReviewUnits,
+      buildReviewUnits,
+      queueProposalProcessing,
       saveReviewUnitEdits,
       requestReviewUnitReprocess,
     } = await import(path.join(repoRoot, "dist", "server", "review.js"));
@@ -2516,11 +2518,110 @@ test("review module materializes review units, proposes descriptors, and saves r
     const vocabulary = await readJsonFile(getVocabularyPath(), []);
     assert.equal(vocabulary[0].term, "search");
     assert.equal(vocabulary[0].status, "approved");
+
+    await buildReviewUnits();
+
+    const rebuiltUnits = await loadReviewUnits();
+    assert.equal(rebuiltUnits.length, 1);
+    assert.equal(rebuiltUnits[0].proposalState, "pending");
+    assert.equal(rebuiltUnits[0].activeDescriptor, undefined);
+    assert.deepEqual(rebuiltUnits[0].activeVocab, []);
+    assert.equal(rebuiltUnits[0].interpretationStatus, "auto-generated");
+    assert.equal(rebuiltUnits[0].notes, undefined);
+
+    await queueProposalProcessing();
+
+    const replayedUnit = await waitForCondition(async () => {
+      const units = await loadReviewUnits();
+      const first = units[0];
+      return first?.proposalState === "proposed" ? first : null;
+    });
+
+    assert.equal(replayedUnit.activeDescriptor, "search ends at dashboard");
+    assert.deepEqual(replayedUnit.activeVocab, ["search"]);
   } finally {
     process.chdir(originalCwd);
     process.env.WDYT_LLM_BASE_URL = originalBaseUrl;
     process.env.WDYT_LLM_API_KEY = originalApiKey;
     process.env.WDYT_LLM_MODEL = originalModel;
+    llmServer.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("review rebuild is manual-only and available from the observed behaviors page", { timeout: 20_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-manual-rebuild-"));
+  const llmPort = randomPort();
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmServer = await startMockLlmServer(llmPort);
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: "run-manual-review-rebuild",
+        testName: "ui review flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    const { child } = spawnServer(tempDir, port, {
+      WDYT_LLM_BASE_URL: llmUrl,
+      WDYT_LLM_API_KEY: "ollama",
+      WDYT_LLM_MODEL: "mistral:instruct",
+    });
+
+    try {
+      await waitForHealth(serverUrl);
+
+      const unitsBefore = await getJson(serverUrl, "/review/units");
+      assert.deepEqual(unitsBefore, []);
+
+      const page = await fetch(`${serverUrl}/review`).then((response) => response.text());
+      assert.match(page, /Settings <span aria-hidden="true">▾<\/span>/);
+      assert.match(page, /reviewSettingsMenu/);
+      assert.match(page, /Rebuild Observed Behaviors/);
+
+      const rebuildResponse = await postJson(serverUrl, "/review/rebuild", {});
+      assert.deepEqual(rebuildResponse, { ok: true });
+
+      const rebuiltUnit = await waitForCondition(async () => {
+        const units = await getJson(serverUrl, "/review/units");
+        const first = units[0];
+        return first?.proposalState === "proposed" ? first : null;
+      });
+
+      assert.equal(rebuiltUnit.activeDescriptor, "search ends at dashboard");
+    } finally {
+      await stopChildProcess(child);
+    }
+  } finally {
+    process.chdir(originalCwd);
     llmServer.close();
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -2852,6 +2953,7 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
     WDYT_LLM_BASE_URL: llmUrl,
     WDYT_LLM_API_KEY: "ollama",
     WDYT_LLM_MODEL: "mistral:instruct",
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
   });
 
   try {
@@ -3063,6 +3165,7 @@ test("critical flows suggest active descriptors and match composite coverage", {
     WDYT_LLM_BASE_URL: llmUrl,
     WDYT_LLM_API_KEY: "ollama",
     WDYT_LLM_MODEL: "mistral:instruct",
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
   });
 
   try {
@@ -3302,6 +3405,7 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     WDYT_LLM_BASE_URL: llmUrl,
     WDYT_LLM_API_KEY: "ollama",
     WDYT_LLM_MODEL: "mistral:instruct",
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
   });
 
   try {
@@ -3641,6 +3745,7 @@ test("critical flows can be updated and deleted", { timeout: 15_000 }, async () 
     WDYT_LLM_BASE_URL: llmUrl,
     WDYT_LLM_API_KEY: "ollama",
     WDYT_LLM_MODEL: "mistral:instruct",
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
   });
 
   try {
@@ -3757,7 +3862,9 @@ test("expected behavior edit UI always renders save action and toggles disabled 
   await mkdir(dataDir, { recursive: true });
   await writeFile(path.join(dataDir, "review-units.json"), `${JSON.stringify([], null, 2)}\n`, "utf8");
 
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
+  });
 
   try {
     await waitForHealth(serverUrl);
@@ -3973,7 +4080,9 @@ test("review page surfaces repeated coverage for proposed review units with matc
     "utf8"
   );
 
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
+  });
 
   try {
     await waitForHealth(serverUrl);
@@ -4179,7 +4288,9 @@ test("review page groups semantically similar repeated coverage with divergent a
     "utf8"
   );
 
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
+  });
 
   try {
     await waitForHealth(serverUrl);
@@ -4329,7 +4440,9 @@ test("review page groups identical descriptors when one overlap-term set is a su
     "utf8"
   );
 
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
+  });
 
   try {
     await waitForHealth(serverUrl);
