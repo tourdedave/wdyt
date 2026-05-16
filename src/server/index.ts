@@ -39,7 +39,7 @@ const PORT = Number(process.env.WDYT_PORT ?? "3876");
 const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
 const GETTING_STARTED_PATH = "/getting-started";
 const REVIEW_PAGINATION_THRESHOLD = Number.parseInt(process.env.WDYT_REVIEW_PAGINATION_THRESHOLD ?? "50", 10) || 50;
-const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "20", 10) || 20;
+const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "10", 10) || 10;
 
 async function readJsonBody(req: http.IncomingMessage) {
   const chunks: Buffer[] = [];
@@ -71,6 +71,25 @@ async function hasAnyRuntimeData() {
 function getServerUrl(req: http.IncomingMessage) {
   const host = req.headers.host;
   return host ? `http://${host}` : DEFAULT_SERVER_URL;
+}
+
+function renderFontFaceStyles() {
+  return `
+      @font-face {
+        font-family: "Inter";
+        src: url("/fonts/inter-var.woff2") format("woff2");
+        font-style: normal;
+        font-weight: 100 900;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: "Newsreader";
+        src: url("/fonts/newsreader-var.woff2") format("woff2");
+        font-style: normal;
+        font-weight: 200 800;
+        font-display: swap;
+      }
+  `;
 }
 
 function renderEmptyStatePage() {
@@ -457,29 +476,38 @@ function renderReviewPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Review</title>
     <style>
+      ${renderFontFaceStyles()}
       :root {
         color-scheme: light;
-        --bg: #f6f1e7;
-        --panel: #fffdf8;
-        --line: #d8cfbf;
-        --ink: #1d1a16;
-        --muted: #6d6458;
-        --accent: #1f6f4a;
-        --accent-2: #8a5a18;
-        --danger: #9f1d1d;
+        --bg: #f8fafc;
+        --bg-soft: #f1f5f9;
+        --panel: #ffffff;
+        --line: #e2e8f0;
+        --line-strong: #cbd5e1;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --muted-2: #94a3b8;
+        --accent: #166534;
+        --accent-soft: #f0fdf4;
+        --accent-border: #bbf7d0;
+        --accent-ink: #15803d;
+        --danger: #b91c1c;
+        --warn: #a16207;
+        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); }
+      body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); }
       .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
       .header-copy { min-width: 0; }
       .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-      header h1 { margin: 0; font-size: 30px; }
+      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
-      header p { margin: 6px 0 0; color: var(--muted); }
+      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
+      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
       .settings-menu { position: relative; }
       .settings-menu[open] { z-index: 40; }
@@ -489,16 +517,18 @@ function renderReviewPage() {
         align-items: center;
         justify-content: center;
         gap: 6px;
-        border-radius: 999px;
-        padding: 10px 16px;
-        background: var(--accent);
-        color: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        background: transparent;
+        color: var(--muted);
         text-decoration: none;
+        font-size: 13px;
         font-weight: 600;
         white-space: nowrap;
         cursor: pointer;
       }
-      .settings-trigger:hover { background: #195d3f; }
+      .settings-trigger:hover { border-color: var(--line-strong); background: #fff; color: var(--ink); }
       .settings-trigger::-webkit-details-marker { display: none; }
       .settings-panel {
         position: absolute;
@@ -508,78 +538,201 @@ function renderReviewPage() {
         min-width: 240px;
         padding: 8px;
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(255,253,248,0.98);
-        box-shadow: 0 10px 30px rgba(29,26,22,0.12);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.98);
+        box-shadow: 0 14px 28px rgba(15,23,42,0.08);
       }
       .settings-option {
         display: block;
         width: 100%;
         padding: 10px 12px;
         border: none;
-        border-radius: 10px;
+        border-radius: 8px;
         color: var(--ink);
         background: transparent;
         text-align: left;
-        font-size: 15px;
+        font-size: 14px;
         line-height: 1.35;
         cursor: pointer;
       }
-      .settings-option:hover {
-        background: rgba(31,111,74,0.08);
+      .settings-option:hover { background: var(--bg-soft); }
+      main { display: grid; grid-template-columns: 340px 1fr; min-height: calc(100vh - 89px); }
+      aside {
+        border-right: 1px solid var(--line);
+        padding: 14px 0 18px;
+        overflow: auto;
+        background: #fff;
       }
-      main { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 89px); }
-      aside { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
-      #units { display: grid; gap: 12px; }
-      .unit-card { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 14px; cursor: pointer; }
-      .unit-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(31,111,74,0.15); }
-      .unit-card h2 { margin: 0 0 8px; font-size: 17px; }
-      .meta { color: var(--muted); font-size: 14px; line-height: 1.4; }
-      .overlap-summary { display: grid; gap: 10px; margin-bottom: 22px; }
-      .overlap-card { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 12px; cursor: pointer; }
-      .overlap-card.active { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.14); }
-      .overlap-term { display: inline-block; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
-      .status { display: inline-block; margin-top: 8px; padding: 3px 8px; border-radius: 999px; font-size: 12px; background: #efe6d7; }
-      .unit-card.related { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
+      #units { display: grid; }
+      .unit-card {
+        border: 1px solid transparent;
+        border-left: 2px solid transparent;
+        border-right: 0;
+        border-top: 0;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        border-radius: 0;
+        padding: 11px 16px 12px 18px;
+        cursor: pointer;
+      }
+      .unit-card:hover { background: var(--bg-soft); }
+      .unit-card.active {
+        background: linear-gradient(90deg, rgba(22,101,52,0.06), rgba(240,253,244,0.88));
+        border-left-color: var(--accent);
+      }
+      .unit-card.related { border-left-color: var(--warn); }
       .unit-card.dimmed { opacity: 0.56; }
-      .list-controls { display: grid; gap: 10px; margin-bottom: 16px; }
+      .unit-card h2 { margin: 0; font-size: 15px; line-height: 1.3; }
+      .unit-card-meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px 8px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+      .unit-card-secondary { margin-top: 7px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+      .unit-card-summary { margin-top: 7px; color: var(--muted); font-size: 13px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .meta { color: var(--muted); font-size: 14px; line-height: 1.4; }
+      .overlap-summary { display: grid; gap: 8px; margin: 0 16px 14px; padding: 0 0 14px; border-bottom: 1px solid var(--line); }
+      .rail-title { margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+      .overlap-card {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        border-radius: 10px;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+      .overlap-card.active { border-color: #fcd34d; background: #fffbeb; }
+      .overlap-term { display: inline-block; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+      .list-controls { display: grid; gap: 10px; margin: 0 16px 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
       .list-controls label { display: grid; gap: 6px; color: var(--muted); font-size: 14px; }
       .list-controls input { width: 100%; }
+      .filter-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .filter-indicator button {
+        border: 0;
+        background: transparent;
+        color: inherit;
+        padding: 0;
+        min-width: auto;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .filter-indicator button:hover:not(:disabled) {
+        border: 0;
+        background: transparent;
+        color: var(--ink);
+      }
       .pagination-bar {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 10px;
-        margin-top: 14px;
+        margin: 14px 16px 0;
       }
       .page-summary { color: var(--muted); font-size: 13px; }
-      section { padding: 24px; overflow: auto; }
-      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
-      .descriptor { font-size: 28px; margin: 8px 0 6px; }
-      .confidence { color: var(--accent-2); font-size: 14px; }
-      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
-      .list-block { border: 1px solid var(--line); border-radius: 12px; padding: 14px; min-height: 120px; min-width: 0; }
-      .list-block h3 { font-size: 15px; margin: 0 0 10px; }
+      section { padding: 22px 24px; overflow: auto; background: var(--bg-soft); }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 24px 26px;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.02);
+      }
+      .detail-header { display: grid; gap: 14px; }
+      .detail-header-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+      .descriptor { font-family: var(--font-serif); font-size: 33px; font-weight: 600; line-height: 1.05; letter-spacing: -0.012em; margin: 0; }
+      .detail-summary { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 78ch; }
+      .detail-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--muted);
+        font-family: var(--font-sans);
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .badge.status-edited { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
+      .badge.status-error { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+      .badge.status-processing, .badge.status-auto-generated, .badge.status-reprocessed, .badge.confidence-medium { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+      .badge.confidence-low { color: var(--muted); border-color: var(--line); background: #f8fafc; }
+      .meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+        padding: 8px 0 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .meta-item strong { color: var(--ink); font-weight: 600; margin-right: 4px; }
+      .section-stack { display: grid; gap: 22px; margin-top: 20px; }
+      .doc-section { display: grid; gap: 10px; padding-top: 2px; }
+      .doc-section + .doc-section { padding-top: 18px; border-top: 1px solid var(--line); }
+      .doc-section h3 { margin: 0; font-family: var(--font-serif); font-size: 22px; font-weight: 600; line-height: 1.15; color: var(--ink); }
+      .section-body { display: grid; gap: 12px; }
+      .section-copy { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+      .sequence { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; line-height: 1.5; }
+      .sequence-step { padding: 5px 10px; border-radius: 999px; background: var(--bg-soft); border: 1px solid var(--line); color: var(--ink); }
+      .sequence-arrow { color: var(--muted-2); }
+      .flow-block {
+        padding: 4px 0 0;
+      }
+      .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
+      .evidence-group { min-width: 0; }
+      .evidence-group h4 { margin: 0 0 8px; font-family: var(--font-sans); font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+      .evidence-rows { display: grid; gap: 6px; }
+      .evidence-row { display: grid; grid-template-columns: 84px 1fr; gap: 10px; padding-top: 6px; border-top: 1px solid var(--line); }
+      .evidence-row:first-child { border-top: 0; padding-top: 0; }
+      .evidence-key { color: var(--muted); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+      .evidence-value { color: var(--ink); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; word-break: break-word; }
+      .evidence-empty { color: var(--muted); font-size: 13px; }
+      .raw-steps details, .evidence-notes details {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fcfdff;
+        padding: 12px 14px;
+      }
+      details summary { cursor: pointer; color: var(--ink); font-family: var(--font-sans); font-size: 13px; font-weight: 600; }
+      details[open] summary { margin-bottom: 10px; }
       ul { margin: 0; padding-left: 18px; }
-      li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; }
-      .actions { display: grid; gap: 12px; margin-top: 20px; }
+      li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; color: var(--ink); font-size: 13px; line-height: 1.45; }
+      .actions { display: grid; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
       input, textarea, button { font: inherit; }
-      textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+      textarea, input { width: 100%; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); font-family: var(--font-sans); font-size: 13px; }
       .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
-      button { border: none; border-radius: 999px; padding: 10px 16px; cursor: pointer; background: #efe6d7; }
-      button.primary { background: var(--accent); color: white; }
+      button { border: 1px solid var(--line); border-radius: 10px; padding: 9px 13px; cursor: pointer; background: #fff; color: var(--ink); font-family: var(--font-sans); font-size: 13px; font-weight: 600; }
+      button:hover:not(:disabled) { border-color: var(--line-strong); background: #f8fafc; }
+      button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+      button.primary:hover:not(:disabled) { background: #14532d; border-color: #14532d; }
       button.reject { background: var(--danger); color: white; }
+      button:disabled { cursor: default; opacity: 0.6; }
       #empty { color: var(--muted); }
-      .summary-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+      .summary-link { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-weight: 600; }
       .decision-editor { display: none; }
-      .decision-editor.open { display: grid; }
-      .transition-banner { margin-bottom: 14px; padding: 10px 12px; border-radius: 10px; background: rgba(31,111,74,0.12); color: var(--accent); font-size: 14px; }
+      .decision-editor.open { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line); }
+      .transition-banner { margin-bottom: 18px; padding: 10px 12px; border-radius: 10px; border: 1px solid #bbf7d0; background: var(--accent-soft); color: var(--accent); font-size: 14px; }
       .panel.is-submitting { opacity: 0.72; transition: opacity 120ms ease; }
       @media (max-width: 900px) {
         main { grid-template-columns: 1fr; }
         aside { border-right: 0; border-bottom: 1px solid var(--line); }
-        .grid { grid-template-columns: 1fr; }
+        .evidence-grid { grid-template-columns: 1fr; }
+        .detail-header-top { flex-direction: column; }
         .settings-panel { right: auto; left: 0; }
+        section { padding: 18px; }
+        .panel { padding: 20px 18px; }
       }
     </style>
   </head>
@@ -629,8 +782,14 @@ function renderReviewPage() {
         totalUnits: 0,
         totalPages: 1,
         query: "",
+        fromSummary: false,
       };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
+      const truncate = (value, max = 110) => {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        return text.length > max ? text.slice(0, max - 1) + "…" : text;
+      };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -728,15 +887,108 @@ function renderReviewPage() {
       const getDisplayStatus = (unit) => {
         if (unit.interpretationStatus === "edited") return "edited";
         if (unit.interpretationStatus === "reprocessed") return "reprocessed";
-        if (unit.proposalState === "proposed") return "ready for review";
         if (unit.proposalState === "processing") return "generating proposal";
         if (unit.proposalState === "error") return "proposal failed";
-        return "auto-generated";
+        return null;
+      };
+      const getStatusTone = (status) => {
+        if (status === "edited") return "status-edited";
+        if (status === "proposal failed") return "status-error";
+        if (status === "generating proposal") return "status-processing";
+        if (status === "reprocessed") return "status-reprocessed";
+        return "status-auto-generated";
+      };
+      const getConfidenceTone = (value) => {
+        if (typeof value !== "number") return "confidence-low";
+        if (value >= 0.6) return "confidence-medium";
+        return "confidence-low";
+      };
+      const getConfidenceLabel = (value) => {
+        if (typeof value !== "number") {
+          return null;
+        }
+        if (value >= 0.8) {
+          return "High confidence";
+        }
+        if (value >= 0.6) {
+          return "Moderate confidence";
+        }
+        return "Low confidence";
       };
       const getCardStatus = (unit) => {
         if (unit.proposalState === "processing") return "generating proposal";
         if (unit.proposalState === "error") return "proposal failed";
         return null;
+      };
+      const getPrimaryTest = (unit) => Array.isArray(unit.tests) && unit.tests.length > 0 ? unit.tests[0] : null;
+      const getPrimarySuite = (unit) => Array.isArray(unit.suites) && unit.suites.length > 0 ? unit.suites[0] : null;
+      const getPrimaryTool = (unit) => Array.isArray(unit.tools) && unit.tools.length > 0 ? unit.tools[0] : null;
+      const getPrimaryBrowser = (unit) => Array.isArray(unit.browsers) && unit.browsers.length > 0 ? unit.browsers[0] : null;
+      const getPrimaryHeading = (unit) => (Array.isArray(unit.headings) && unit.headings[0]) || (Array.isArray(unit.titles) && unit.titles[0]) || null;
+      const getPrimaryFinalUrl = (unit) => Array.isArray(unit.finalUrls) && unit.finalUrls.length > 0 ? unit.finalUrls[0] : null;
+      const getUnitSummary = (unit) =>
+        unit.proposedRationale ||
+        (getPrimaryHeading(unit) ? \`Ended on \${getPrimaryHeading(unit)}.\` : "") ||
+        (getPrimaryFinalUrl(unit) ? \`Ended at \${getPrimaryFinalUrl(unit)}.\` : "") ||
+        "";
+      const humanizeRawStep = (step) => {
+        if (step === "NAVIGATE") return "Navigate";
+        if (step === "INPUT") return "Input";
+        if (step === "CHANGE") return "Change";
+        if (step === "CLICK") return "Click";
+        if (step === "SUBMIT") return "Submit";
+        return String(step);
+      };
+      const humanizeCanonicalStep = (step, unit) => {
+        if (step === "NAVIGATE") {
+          const finalLabel = getPrimaryHeading(unit);
+          return finalLabel ? \`Navigate to \${finalLabel}\` : "Navigate";
+        }
+        if (step === "INPUT" || step === "CHANGE") {
+          const targets = Array.isArray(unit.targets) ? unit.targets.join(" ") : "";
+          if (/credential|username|password|sign in/i.test(targets)) return "Input credentials";
+          if (/search/i.test(targets)) return "Input search query";
+          return "Input details";
+        }
+        if (step === "CLICK") {
+          const targets = Array.isArray(unit.targets) ? unit.targets.join(" ") : "";
+          if (/sign in/i.test(targets)) return "Choose sign in";
+          if (/search/i.test(targets)) return "Choose search";
+          return "Choose action";
+        }
+        if (step === "SUBMIT") return "Submit";
+        return humanizeRawStep(step);
+      };
+      const buildFlowSequence = (unit) => {
+        const steps = [];
+        let inputAdded = false;
+        let submitAdded = false;
+        for (const step of unit.canonical || []) {
+          if (step === "NAVIGATE") {
+            if (steps.length === 0) {
+              steps.push("Open flow");
+            }
+            continue;
+          }
+          if ((step === "INPUT" || step === "CHANGE") && !inputAdded) {
+            steps.push(humanizeCanonicalStep(step, unit));
+            inputAdded = true;
+            continue;
+          }
+          if (step === "CLICK") {
+            steps.push(humanizeCanonicalStep(step, unit));
+            continue;
+          }
+          if (step === "SUBMIT" && !submitAdded) {
+            steps.push("Submit");
+            submitAdded = true;
+          }
+        }
+        const finalLabel = (unit.headings && unit.headings[0]) || (unit.titles && unit.titles[0]) || null;
+        if (finalLabel) {
+          steps.push(\`\${finalLabel} loaded\`);
+        }
+        return steps.length > 0 ? steps : (unit.canonical || []).map(humanizeRawStep);
       };
       const redirectToLaunchpad = () => {
         window.location.assign("/review");
@@ -751,10 +1003,110 @@ function renderReviewPage() {
         }
         return null;
       };
+      const getOpenDetailSections = () =>
+        Array.from(document.querySelectorAll("#detail details[open][data-preserve-open]"))
+          .map((node) => node.getAttribute("id"))
+          .filter(Boolean);
+      const restoreOpenDetailSections = (sectionIds) => {
+        if (!Array.isArray(sectionIds) || sectionIds.length === 0) {
+          return;
+        }
+        sectionIds.forEach((id) => {
+          const node = document.getElementById(id);
+          if (node && node.tagName === "DETAILS") {
+            node.open = true;
+          }
+        });
+      };
       const getCurrentUnit = () =>
         state.mode === "scaled"
           ? state.selectedUnit
-          : state.units.find((candidate) => candidate.reviewId === state.selectedId);
+          : getVisibleUnits().find((candidate) => candidate.reviewId === state.selectedId);
+      const normalizeReviewQuery = (value) => String(value || "").trim().toLowerCase();
+      const getConfidenceBucket = (value) => {
+        if (typeof value !== "number") {
+          return "low";
+        }
+        if (value >= 0.8) {
+          return "high";
+        }
+        if (value >= 0.6) {
+          return "moderate";
+        }
+        return "low";
+      };
+      const matchesReviewQuery = (unit, rawQuery) => {
+        const normalizedQuery = normalizeReviewQuery(rawQuery);
+        if (!normalizedQuery) {
+          return true;
+        }
+
+        const confidenceFilters = new Set();
+        const textQuery = normalizedQuery
+          .replace(/\bconfidence:(low|moderate|high)\b/g, (_match, bucket) => {
+            confidenceFilters.add(bucket);
+            return " ";
+          })
+          .replace(/\b(low|moderate|high)\s+confidence\b/g, (_match, bucket) => {
+            confidenceFilters.add(bucket);
+            return " ";
+          })
+          .replace(/\s+/g, " ")
+          .trim();
+
+        if (confidenceFilters.size > 0) {
+          if (!confidenceFilters.has(getConfidenceBucket(unit.proposedConfidence))) {
+            return false;
+          }
+        }
+
+        if (!textQuery) {
+          return true;
+        }
+
+        const haystacks = [
+          unit.reviewId,
+          unit.flowId,
+          unit.activeDescriptor,
+          unit.proposedDescriptor,
+          ...(unit.tests || []),
+          ...(unit.suites || []),
+          ...(unit.tools || []),
+          ...(unit.browsers || []),
+          ...(unit.primaryTerms || []),
+          ...(unit.prerequisites || []),
+          ...(unit.outcomeTerms || []),
+          ...(unit.activeVocab || []),
+          ...(unit.finalUrls || []),
+          ...(unit.headings || []),
+        ];
+
+        return haystacks.some((value) => String(value || "").toLowerCase().includes(textQuery));
+      };
+      const getVisibleUnits = () => {
+        if (state.mode === "scaled") {
+          return state.units;
+        }
+        return state.query ? state.allUnits.filter((unit) => matchesReviewQuery(unit, state.query)) : state.allUnits;
+      };
+      const syncReviewUrl = () => {
+        const params = new URLSearchParams();
+        if (state.query) {
+          params.set("q", state.query);
+          if (state.fromSummary) {
+            params.set("from", "summary");
+          }
+        } else {
+          if (state.selectedId) {
+            params.set("reviewId", state.selectedId);
+          }
+          if (state.activeOverlapKey) {
+            params.set("overlapKey", state.activeOverlapKey);
+          }
+        }
+        const next = params.toString() ? \`/review?\${params.toString()}\` : "/review";
+        window.history.replaceState(null, "", next);
+      };
 
       async function fetchReviewUnit(reviewId) {
         const response = await fetch(\`/review/units/\${encodeURIComponent(reviewId)}\`);
@@ -770,6 +1122,8 @@ function renderReviewPage() {
         const params = new URLSearchParams(window.location.search);
         const initialReviewId = state.initialized ? null : params.get("reviewId");
         const initialOverlapKey = state.initialized ? null : params.get("overlapKey");
+        const initialQuery = state.initialized ? state.query : (params.get("q") ?? "").trim();
+        const fromSummary = state.initialized ? state.fromSummary : params.get("from") === "summary";
         const [vocabRes, runtimeRes, metaRes] = await Promise.all([
           fetch("/review/vocabulary"),
           fetch("/runtime/state"),
@@ -786,6 +1140,8 @@ function renderReviewPage() {
         state.mode = meta.mode;
         state.pageSize = meta.pageSize;
         state.totalUnits = meta.total;
+        state.query = initialQuery;
+        state.fromSummary = fromSummary && initialQuery.length > 0;
 
         if (state.mode === "full") {
           const unitsRes = await fetch("/review/units");
@@ -794,20 +1150,23 @@ function renderReviewPage() {
           state.allUnits = nextUnits;
           state.selectedUnit = null;
 
-          const activeUnits = getActiveUnits();
-          const overlapGroups = getOverlapGroups();
-          if (initialOverlapKey && overlapGroups.some((group) => group.key === initialOverlapKey)) {
+          const visibleUnits = getVisibleUnits();
+          const activeUnits = visibleUnits.filter((unit) => unit.proposalState === "proposed" || unit.activeDescriptor);
+          const overlapGroups = state.query ? [] : getOverlapGroups();
+          if (!state.query && initialOverlapKey && overlapGroups.some((group) => group.key === initialOverlapKey)) {
             state.activeOverlapKey = initialOverlapKey;
             if (!initialReviewId) {
               state.selectedId = overlapGroups.find((group) => group.key === initialOverlapKey)?.units[0]?.reviewId ?? state.selectedId;
             }
+          } else if (state.query) {
+            state.activeOverlapKey = null;
           }
-          if (!state.selectedId && initialReviewId && state.units.some((unit) => unit.reviewId === initialReviewId)) {
+          if (!state.query && !state.selectedId && initialReviewId && visibleUnits.some((unit) => unit.reviewId === initialReviewId)) {
             state.selectedId = initialReviewId;
           }
           if (!state.selectedId && activeUnits[0]) state.selectedId = activeUnits[0].reviewId;
-          if (state.selectedId && !state.units.some((unit) => unit.reviewId === state.selectedId)) {
-            state.selectedId = activeUnits[0]?.reviewId ?? state.units[0]?.reviewId ?? null;
+          if (state.selectedId && !visibleUnits.some((unit) => unit.reviewId === state.selectedId)) {
+            state.selectedId = activeUnits[0]?.reviewId ?? visibleUnits[0]?.reviewId ?? null;
           }
         } else {
           const queryRes = await fetch(\`/review/units/query?page=\${encodeURIComponent(String(state.page))}&pageSize=\${encodeURIComponent(String(state.pageSize))}&q=\${encodeURIComponent(state.query)}\`);
@@ -838,6 +1197,7 @@ function renderReviewPage() {
         }
 
         state.initialized = true;
+        syncReviewUrl();
         render({
           preserveDetail: protectedFocusTarget === "editor",
           preserveListControls: protectedFocusTarget === "search",
@@ -846,17 +1206,13 @@ function renderReviewPage() {
 
       function renderListControls() {
         const container = document.getElementById("listControls");
-        if (state.mode !== "scaled") {
-          container.innerHTML = "";
-          return;
-        }
-
         container.innerHTML = \`
           <div class="list-controls">
             <label>
               <span>Search observed behaviors</span>
-              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search behaviors, tests, or terms" />
+              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search behaviors, tests, terms, or confidence:low" />
             </label>
+            \${state.fromSummary && state.query ? '<div class="filter-indicator">Filtered from Summary <button type="button" id="clearSummaryFilter" aria-label="Clear summary filter">×</button></div>' : ""}
           </div>\`;
 
         const input = document.getElementById("reviewSearchInput");
@@ -865,12 +1221,14 @@ function renderReviewPage() {
             return;
           }
           state.query = input.value.trim();
+          state.fromSummary = false;
           state.page = 1;
           state.selectedId = null;
           await loadState();
         });
         input?.addEventListener("search", async () => {
           state.query = input.value.trim();
+          state.fromSummary = false;
           state.page = 1;
           state.selectedId = null;
           await loadState();
@@ -881,6 +1239,14 @@ function renderReviewPage() {
             return;
           }
           state.query = nextQuery;
+          state.fromSummary = false;
+          state.page = 1;
+          state.selectedId = null;
+          await loadState();
+        });
+        document.getElementById("clearSummaryFilter")?.addEventListener("click", async () => {
+          state.query = "";
+          state.fromSummary = false;
           state.page = 1;
           state.selectedId = null;
           await loadState();
@@ -889,7 +1255,7 @@ function renderReviewPage() {
 
       function renderOverlapSummary() {
         const container = document.getElementById("overlapSummary");
-        if (state.mode === "scaled") {
+        if (state.mode === "scaled" || state.query) {
           container.innerHTML = "";
           return;
         }
@@ -930,14 +1296,27 @@ function renderReviewPage() {
 
       function renderList() {
         const container = document.getElementById("units");
-        if (state.units.length === 0) {
+        const visibleUnits = getVisibleUnits();
+        if (visibleUnits.length === 0) {
           container.innerHTML = "";
           return;
         }
-        container.innerHTML = state.units.map((unit) => \`
+        container.innerHTML = visibleUnits.map((unit) => \`
           <article class="unit-card \${unit.reviewId === state.selectedId ? "active" : ""} \${state.activeOverlapKey && getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "related" : ""} \${state.activeOverlapKey && !getOverlapGroups().find((group) => group.key === state.activeOverlapKey)?.units.some((candidate) => candidate.reviewId === unit.reviewId) ? "dimmed" : ""}" data-id="\${escapeHtml(unit.reviewId)}">
             <h2>\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</h2>
-            \${getCardStatus(unit) ? \`<div class="status">\${escapeHtml(getCardStatus(unit))}</div>\` : ""}
+            <div class="unit-card-meta">
+              \${getDisplayStatus(unit) ? \`<span class="badge \${getStatusTone(getDisplayStatus(unit))}">\${escapeHtml(getDisplayStatus(unit))}</span>\` : ""}
+              \${getConfidenceLabel(unit.proposedConfidence) ? \`<span class="badge \${getConfidenceTone(unit.proposedConfidence)}">\${escapeHtml(getConfidenceLabel(unit.proposedConfidence))}</span>\` : ""}
+            </div>
+            <div class="unit-card-secondary">
+              \${[
+                getPrimaryTest(unit),
+                getPrimarySuite(unit),
+                getPrimaryTool(unit),
+                getPrimaryBrowser(unit),
+              ].filter(Boolean).map((value) => escapeHtml(value)).join(" · ") || escapeHtml(summarize(unit.finalUrls))}
+            </div>
+            \${getUnitSummary(unit) ? \`<div class="unit-card-summary">\${escapeHtml(truncate(getUnitSummary(unit), 120))}</div>\` : ""}
           </article>\`).join("");
         container.querySelectorAll(".unit-card").forEach((node) => {
           node.addEventListener("click", async () => {
@@ -984,23 +1363,55 @@ function renderReviewPage() {
         });
       }
 
-      function renderListBlock(title, values) {
-        const items = Array.isArray(values) && values.length > 0
-          ? values.map((value) => \`<li>\${escapeHtml(value)}</li>\`).join("")
-          : "<li>-</li>";
-        return \`<div class="list-block"><h3>\${escapeHtml(title)}</h3><ul>\${items}</ul></div>\`;
+      function renderEvidenceGroup(title, values) {
+        if (!Array.isArray(values) || values.length === 0) {
+          return "";
+        }
+        const inferEvidenceLabel = (groupTitle, rawValue) => {
+          const value = String(rawValue || "").trim();
+          const match = value.match(/^([a-zA-Z0-9 _-]+)\("([\s\S]*)"\)$/);
+          if (match) {
+            return {
+              key: match[1].replaceAll("_", " "),
+              value: match[2],
+            };
+          }
+
+          const lowerGroup = groupTitle.toLowerCase();
+          if (lowerGroup.includes("url")) return { key: "URL", value };
+          if (lowerGroup.includes("heading")) return { key: "Heading", value };
+          if (lowerGroup.includes("alert")) return { key: "Alert", value };
+          if (lowerGroup.includes("term")) return { key: "Term", value };
+          if (lowerGroup.includes("prerequisite")) return { key: "Context", value };
+          if (lowerGroup.includes("primary")) return { key: "Primary", value };
+          if (lowerGroup.includes("outcome")) return { key: "Outcome", value };
+          if (lowerGroup.includes("suite")) return { key: "Suite", value };
+          if (lowerGroup.includes("test")) return { key: "Test", value };
+          if (lowerGroup.includes("browser")) return { key: "Browser", value };
+          if (lowerGroup.includes("tool")) return { key: "Tool", value };
+          return { key: title.replace(/s$/, ""), value };
+        };
+        return \`
+          <div class="evidence-group">
+            <h4>\${escapeHtml(title)}</h4>
+            <div class="evidence-rows">\${values.map((value) => {
+              const row = inferEvidenceLabel(title, value);
+              return \`<div class="evidence-row"><div class="evidence-key">\${escapeHtml(row.key)}</div><div class="evidence-value">\${escapeHtml(row.value)}</div></div>\`;
+            }).join("")}</div>
+          </div>\`;
       }
 
       function renderDetail() {
         const detail = document.getElementById("detail");
         const unit = getCurrentUnit();
+        const visibleUnits = getVisibleUnits();
 
         if (!unit) {
-          if (state.mode === "scaled" && state.query && state.units.length === 0) {
+          if (state.query && visibleUnits.length === 0) {
             detail.innerHTML = '<p id="empty">No observed behaviors match this search.</p>';
             return;
           }
-          const activeUnits = getActiveUnits();
+          const activeUnits = visibleUnits.filter((candidate) => candidate.proposalState === "proposed" || candidate.activeDescriptor);
           if (activeUnits.length === 0) {
             detail.innerHTML = '<p id="empty">Waiting for interpreted flow variants.</p><p><a class="summary-link" href="/review/summary">Open summary readout</a></p>';
           } else if (state.mode === "full") {
@@ -1013,28 +1424,75 @@ function renderReviewPage() {
         }
 
         const isSubmitting = state.submittingReviewId === unit.reviewId;
+        const status = getDisplayStatus(unit);
+        const flowSequence = buildFlowSequence(unit);
+        const rawStepSequence = (unit.canonical || []).map((step) => humanizeCanonicalStep(step, unit));
         const llmVocab = [...new Set([...(unit.approvedVocabUsed || []), ...(unit.proposedVocab || [])])];
+        const evidenceMarkup = [
+          renderEvidenceGroup("Targets", unit.targets),
+          renderEvidenceGroup("Headings", unit.headings),
+          renderEvidenceGroup("Final URLs", unit.finalUrls),
+          renderEvidenceGroup("Alerts", unit.alerts),
+          renderEvidenceGroup("Terms and vocab", unit.activeVocab),
+          renderEvidenceGroup("Prerequisites", unit.prerequisites),
+          renderEvidenceGroup("Primary terms", unit.primaryTerms),
+          renderEvidenceGroup("Outcome terms", unit.outcomeTerms),
+        ].filter(Boolean).join("");
         detail.innerHTML = \`
           \${state.transitionMessage ? \`<div class="transition-banner" role="status">\${escapeHtml(state.transitionMessage)}</div>\` : ""}
-          <div class="descriptor" id="reviewHeading" tabindex="-1">\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || "Pending interpretation")}</div>
-          <div class="confidence">Confidence: \${unit.proposedConfidence != null ? unit.proposedConfidence.toFixed(2) : "-"}</div>
-          <p><strong>Status:</strong> \${escapeHtml(getDisplayStatus(unit))}</p>
-          <p>\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
-          <p><strong>Flow:</strong> \${escapeHtml(unit.canonical.join(" → "))}</p>
-          <p><strong>Suites:</strong> \${escapeHtml(summarize(unit.suites))}</p>
-          <p><strong>Tests:</strong> \${escapeHtml(summarize(unit.tests))}</p>
-          <p><strong>Tools:</strong> \${escapeHtml(summarize(unit.tools))}</p>
-          <p><strong>Browsers:</strong> \${escapeHtml(summarize(unit.browsers))}</p>
-          <div class="grid">
-            \${renderListBlock("Prerequisites", unit.prerequisites)}
-            \${renderListBlock("Primary Terms", unit.primaryTerms)}
-            \${renderListBlock("Flow Steps", unit.canonical)}
-            \${renderListBlock("Final URLs", unit.finalUrls)}
-            \${renderListBlock("Headings", unit.headings)}
-            \${renderListBlock("Alerts", unit.alerts)}
-            \${renderListBlock("Targets", unit.targets)}
-            \${renderListBlock("Active Vocab", unit.activeVocab)}
-            \${unit.interpretationStatus === "edited" ? renderListBlock("LLM Vocab", llmVocab) : ""}
+          <div class="detail-header">
+            <div class="detail-header-top">
+              <div>
+                <div class="descriptor" id="reviewHeading" tabindex="-1">\${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || "Pending interpretation")}</div>
+                <p class="detail-summary">\${escapeHtml(unit.proposedRationale || unit.proposalError || "No proposal yet.")}</p>
+              </div>
+              <div class="detail-badges">
+                \${status ? \`<span class="badge \${getStatusTone(status)}">\${escapeHtml(status)}</span>\` : ""}
+                \${getConfidenceLabel(unit.proposedConfidence) ? \`<span class="badge \${getConfidenceTone(unit.proposedConfidence)}">\${escapeHtml(getConfidenceLabel(unit.proposedConfidence))}</span>\` : ""}
+              </div>
+            </div>
+            <div class="meta-row">
+              \${getPrimarySuite(unit) ? \`<span class="meta-item"><strong>Suite</strong> \${escapeHtml(getPrimarySuite(unit))}</span>\` : ""}
+              \${getPrimaryTest(unit) ? \`<span class="meta-item"><strong>Test</strong> \${escapeHtml(getPrimaryTest(unit))}</span>\` : ""}
+              \${getPrimaryTool(unit) ? \`<span class="meta-item"><strong>Tool</strong> \${escapeHtml(getPrimaryTool(unit))}</span>\` : ""}
+              \${getPrimaryBrowser(unit) ? \`<span class="meta-item"><strong>Browser</strong> \${escapeHtml(getPrimaryBrowser(unit))}</span>\` : ""}
+              \${getPrimaryFinalUrl(unit) ? \`<span class="meta-item"><strong>Final URL</strong> \${escapeHtml(getPrimaryFinalUrl(unit))}</span>\` : ""}
+            </div>
+          </div>
+          <div class="section-stack">
+            <section class="doc-section">
+              <h3>Interpreted flow</h3>
+              <div class="section-body">
+                <p class="section-copy">This behavior was inferred from the captured execution evidence shown below.</p>
+                <div class="flow-block">
+                  <div class="sequence">
+                    \${flowSequence.map((step, index) => \`
+                      <span class="sequence-step">\${escapeHtml(step)}</span>\${index < flowSequence.length - 1 ? '<span class="sequence-arrow">→</span>' : ''}
+                    \`).join("")}
+                  </div>
+                </div>
+              </div>
+            </section>
+            <section class="doc-section">
+              <h3>Evidence</h3>
+              <div class="section-body">
+                \${evidenceMarkup ? \`<div class="evidence-grid">\${evidenceMarkup}</div>\` : '<div class="evidence-empty">No supporting evidence captured for this flow yet.</div>'}
+              </div>
+            </section>
+            <section class="doc-section raw-steps">
+              <h3>Raw details</h3>
+              <details id="rawDetailsPanel" data-preserve-open="true">
+                <summary>Raw steps and supporting context</summary>
+                <div class="evidence-grid">
+                  \${renderEvidenceGroup("Raw steps", rawStepSequence)}
+                  \${renderEvidenceGroup("All suites", unit.suites)}
+                  \${renderEvidenceGroup("All tests", unit.tests)}
+                  \${renderEvidenceGroup("Tools", unit.tools)}
+                  \${renderEvidenceGroup("Browsers", unit.browsers)}
+                  \${unit.interpretationStatus === "edited" ? renderEvidenceGroup("LLM vocab", llmVocab) : ""}
+                </div>
+              </details>
+            </section>
           </div>
           <div class="actions"><div class="button-row"><button id="editDecision">Edit Flow</button><button id="reprocessFlow" \${isSubmitting ? "disabled" : ""}>Re-run Interpretation</button></div></div>
           <div class="actions decision-editor \${state.editingId === unit.reviewId ? "open" : ""}" id="decisionEditor">
@@ -1146,6 +1604,7 @@ function renderReviewPage() {
       function render(options = {}) {
         const preserveDetail = options.preserveDetail === true;
         const preserveListControls = options.preserveListControls === true;
+        const openDetailSections = preserveDetail ? [] : getOpenDetailSections();
         const rebuildButton = document.getElementById("rebuildReviewUnits");
         if (rebuildButton) {
           rebuildButton.disabled = state.rebuilding;
@@ -1159,6 +1618,7 @@ function renderReviewPage() {
         renderPagination();
         if (!preserveDetail) {
           renderDetail();
+          restoreOpenDetailSections(openDetailSections);
         }
       }
       loadState();
@@ -1175,29 +1635,38 @@ function renderReviewSummaryPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Summary</title>
     <style>
+      ${renderFontFaceStyles()}
       :root {
         color-scheme: light;
-        --bg: #f6f1e7;
-        --panel: #fffdf8;
-        --line: #d8cfbf;
-        --ink: #1d1a16;
-        --muted: #6d6458;
-        --accent: #1f6f4a;
-        --accent-2: #8a5a18;
-        --danger: #9f1d1d;
-        --warn: #b76e1b;
+        --bg: #f8fafc;
+        --bg-soft: #f1f5f9;
+        --panel: #ffffff;
+        --line: #e2e8f0;
+        --line-strong: #cbd5e1;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --muted-2: #94a3b8;
+        --accent: #166534;
+        --accent-soft: #f0fdf4;
+        --danger: #b91c1c;
+        --warn: #a16207;
+        --info: #1d4ed8;
+        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
       }
       html { scroll-behavior: smooth; }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); color: var(--ink); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: relative; z-index: 30; isolation: isolate; }
+      body { margin: 0; font-family: var(--font-sans); background: var(--bg); color: var(--ink); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); position: relative; z-index: 30; isolation: isolate; }
       .header-shell { position: relative; z-index: 1; }
-      header h1 { margin: 0; font-size: 30px; }
+      .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+      .header-copy { min-width: 0; }
+      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
       header h1 a { color: inherit; text-decoration: none; }
       header h1 a:hover { text-decoration: underline; }
-      header p { margin: 6px 0 0; color: var(--muted); }
+      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
+      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
       .export-menu { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 31; }
       .export-menu[open] { z-index: 40; }
@@ -1207,16 +1676,17 @@ function renderReviewSummaryPage() {
         align-items: center;
         justify-content: center;
         gap: 6px;
-        border-radius: 999px;
-        padding: 10px 16px;
+        border-radius: 10px;
+        padding: 9px 13px;
         background: var(--accent);
         color: #fff;
         text-decoration: none;
+        font-size: 14px;
         font-weight: 600;
         white-space: nowrap;
         cursor: pointer;
       }
-      .export-trigger:hover { background: #195d3f; }
+      .export-trigger:hover { background: #14532d; }
       .export-trigger::-webkit-details-marker { display: none; }
       .export-panel {
         position: absolute;
@@ -1226,82 +1696,97 @@ function renderReviewSummaryPage() {
         min-width: 220px;
         padding: 8px;
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(255,253,248,0.98);
-        box-shadow: 0 10px 30px rgba(29,26,22,0.12);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.98);
+        box-shadow: 0 14px 28px rgba(15,23,42,0.08);
       }
       .export-option {
         display: block;
         padding: 10px 12px;
-        border-radius: 10px;
+        border-radius: 8px;
         color: var(--ink);
         text-decoration: none;
-        font-size: 15px;
+        font-size: 14px;
         line-height: 1.35;
       }
-      .export-option:hover {
-        background: rgba(31,111,74,0.08);
+      .export-option:hover { background: var(--bg-soft); }
+      main { padding: 22px 24px 40px; display: grid; gap: 14px; background: var(--bg-soft); }
+      .summary-stack { display: grid; gap: 28px; }
+      .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .kpi-card {
+        display: block;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px 16px;
+        position: relative;
+        overflow: hidden;
+        color: inherit;
+        text-decoration: none;
+        cursor: pointer;
+        transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
       }
-      main { padding: 24px 24px 48px; display: grid; gap: 14px; }
-      .hero { display: grid; gap: 8px; }
-      .hero h2 { margin: 0; font-size: 34px; }
-      .hero p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.35; max-width: 760px; }
-      .summary-stack { display: grid; gap: 30px; }
-      .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-      .kpi-card { display: block; background: linear-gradient(180deg, #fffefb 0%, #f7efe1 100%); border: 1px solid #c8bba6; border-radius: 12px; padding: 10px 12px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.75); position: relative; overflow: hidden; color: inherit; text-decoration: none; cursor: pointer; transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, background 120ms ease; }
-      .kpi-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: transparent; }
-      .kpi-card:hover { transform: translateY(-1px); border-color: #bba98e; box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), 0 6px 16px rgba(29,26,22,0.06); background: linear-gradient(180deg, #fffefc 0%, #f9f1e6 100%); }
-      .kpi-label { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
-      .kpi-value { font-size: 29px; font-weight: 700; line-height: 1; }
-      .kpi-card.covered::before { background: rgba(31,111,74,0.24); }
+      .kpi-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: transparent; }
+      .kpi-card:hover { transform: translateY(-1px); border-color: var(--line-strong); box-shadow: 0 10px 22px rgba(15,23,42,0.05); }
+      .kpi-label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; font-weight: 700; }
+      .kpi-value { font-family: var(--font-serif); font-size: 30px; font-weight: 600; line-height: 1; letter-spacing: -0.01em; }
+      .kpi-card.covered::before { background: rgba(22,101,52,0.28); }
       .kpi-card.covered .kpi-value { color: var(--accent); }
-      .kpi-card.partial::before,
-      .kpi-card.repeated::before { background: rgba(183,110,27,0.24); }
-      .kpi-card.partial .kpi-value,
-      .kpi-card.repeated .kpi-value { color: var(--warn); }
-      .kpi-card.missing::before { background: rgba(159,29,29,0.22); }
+      .kpi-card.partial::before { background: rgba(161,98,7,0.28); }
+      .kpi-card.partial .kpi-value { color: var(--warn); }
+      .kpi-card.missing::before { background: rgba(185,28,28,0.28); }
       .kpi-card.missing .kpi-value { color: var(--danger); }
-      .section-card { background: rgba(255,253,248,0.9); border: 1px solid var(--line); border-radius: 18px; padding: 12px 14px; position: relative; box-shadow: inset 0 1px 0 rgba(255,255,255,0.55); scroll-margin-top: 20px; }
-      .section-card::before { content: ""; position: absolute; top: -16px; left: 10px; right: 10px; border-top: 1px solid rgba(216,207,191,0.95); }
-      .section-card:first-child::before { display: none; }
-      .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid rgba(216,207,191,0.65); }
-      .section-header h3 { margin: 0; font-size: 24px; }
-      .section-note { margin: 0 0 10px; color: var(--muted); font-size: 14px; line-height: 1.4; }
-      .metric-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-      .metric-chip { padding: 5px 9px; border-radius: 999px; background: #f3ecdf; font-size: 12px; }
-      button.metric-chip { border: 1px solid transparent; cursor: pointer; font: inherit; transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
-      button.metric-chip:hover { transform: translateY(-1px); border-color: rgba(138,90,24,0.18); box-shadow: 0 2px 10px rgba(29,26,22,0.06); }
-      button.metric-chip.active { border-color: rgba(29,26,22,0.16); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.55); }
-      .metric-chip.all { color: var(--ink); background: #efe7d9; }
-      .metric-chip.covered { color: var(--accent); background: rgba(31,111,74,0.12); }
-      .metric-chip.partial { color: var(--warn); background: rgba(183,110,27,0.14); }
-      .metric-chip.missing { color: var(--danger); background: rgba(159,29,29,0.12); }
+      .section-card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 20px 22px;
+        scroll-margin-top: 20px;
+      }
+      .section-header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 8px; }
+      .section-header h3 { margin: 0; font-family: var(--font-serif); font-size: 27px; font-weight: 600; line-height: 1.15; }
+      .section-note { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.55; max-width: 96ch; }
+      .metric-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+      .metric-chip {
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: #fff;
+        border: 1px solid var(--line);
+        font-size: 12px;
+        color: var(--muted);
+      }
+      button.metric-chip { cursor: pointer; font: inherit; transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
+      button.metric-chip:hover { transform: translateY(-1px); border-color: var(--line-strong); }
+      button.metric-chip.active { border-color: var(--ink); color: var(--ink); }
+      .metric-chip.all { color: var(--ink); }
+      .metric-chip.covered { color: var(--accent); background: var(--accent-soft); border-color: #bbf7d0; }
+      .metric-chip.partial { color: var(--warn); background: #fffbeb; border-color: #fde68a; }
+      .metric-chip.missing { color: var(--danger); background: #fef2f2; border-color: #fecaca; }
       .empty-note, .meta { color: var(--muted); }
-      .concept-list, .repeat-list { display: grid; gap: 6px; }
-      .concept-link, .repeat-link { display: block; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; }
-      .concept-link:hover, .repeat-link:hover { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
-      .concept-title, .repeat-title { font-size: 16px; font-weight: 700; margin-bottom: 1px; line-height: 1.25; }
-      .repeat-meta, .concept-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
-      .repeat-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .flow-summary-list { display: grid; gap: 6px; }
-      .flow-summary-card { display: block; border: 1px solid var(--line); border-radius: 11px; padding: 8px 10px; background: #fff; color: inherit; text-decoration: none; }
-      .flow-summary-card:hover { border-color: var(--accent-2); box-shadow: 0 0 0 2px rgba(138,90,24,0.12); }
-      .flow-summary-title { font-size: 16px; font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
-      .flow-summary-meta { color: var(--muted); font-size: 12px; line-height: 1.25; }
+      .flow-summary-list, .unique-list { display: grid; gap: 0; }
+      .flow-summary-card, .unique-row {
+        display: grid;
+        gap: 4px;
+        padding: 12px 0;
+        border-top: 1px solid var(--line);
+        color: inherit;
+        text-decoration: none;
+      }
+      .flow-summary-card:first-child, .unique-row:first-child { border-top: 0; padding-top: 0; }
+      .flow-summary-card:hover, .unique-row:hover { color: var(--ink); }
+      .flow-summary-title, .unique-title { font-family: var(--font-serif); font-size: 21px; font-weight: 600; line-height: 1.15; letter-spacing: -0.01em; }
+      .flow-summary-meta, .unique-meta { color: var(--muted); font-size: 12px; line-height: 1.5; }
       .flow-summary-meta.covered { color: var(--accent); }
       .flow-summary-meta.partial { color: var(--warn); }
-      .flow-summary-meta.missing { color: var(--danger); }
-      .unique-list { display: grid; gap: 4px; }
-      .unique-item { display: flex; align-items: flex-start; gap: 8px; padding: 1px 0; }
-      .unique-bullet { color: var(--accent-2); font-size: 16px; line-height: 1.35; }
-      .unique-link { color: inherit; text-decoration: none; font-size: 17px; line-height: 1.35; }
-      .unique-link:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+      .flow-summary-meta.not_covered, .flow-summary-meta.missing { color: var(--danger); }
+      .unique-link { color: inherit; text-decoration: none; }
+      .unique-link:hover .unique-title { color: var(--accent); }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
         .export-menu { position: static; transform: none; margin-top: 12px; }
         .export-panel { right: auto; left: 0; }
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .repeat-list { grid-template-columns: 1fr; }
+        main { padding: 20px; }
       }
     </style>
   </head>
@@ -1479,10 +1964,27 @@ function renderReviewSummaryPage() {
             count: 1,
             prerequisites: unit.prerequisites || [],
           }));
-        return [...representatives, ...singletons].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+        const grouped = new Map();
+        [...representatives, ...singletons].forEach((item) => {
+          const title = String(item.title || "").trim();
+          const key = title.toLowerCase();
+          const current = grouped.get(key);
+          if (!current) {
+            grouped.set(key, { ...item, title, prerequisites: [...new Set(item.prerequisites || [])] });
+            return;
+          }
+
+          current.count += item.count;
+          current.prerequisites = [...new Set([...(current.prerequisites || []), ...(item.prerequisites || [])])];
+          if (current.kind !== "cluster" && item.kind === "cluster") {
+            current.kind = item.kind;
+            current.reviewId = item.reviewId;
+            current.key = item.key;
+          }
+        });
+
+        return [...grouped.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
       };
-      const formatUniqueFlowLabel = (item) =>
-        item.count > 1 ? \`\${item.title} (\${item.count})\` : item.title;
       const renderKpiCard = (label, value, href, tone = "", filter = "") => \`
         <a class="kpi-card \${escapeHtml(tone)}" href="\${escapeHtml(href)}" \${filter ? \`data-kpi-filter="\${escapeHtml(filter)}"\` : ""}>
           <div class="kpi-label">\${escapeHtml(label)}</div>
@@ -1522,7 +2024,7 @@ function renderReviewSummaryPage() {
           target.innerHTML = \`
             <div class="summary-stack">
               <div class="kpi-grid">
-              \${renderKpiCard("Observed Behaviors", uniqueFlows.length, "#unique-flows-observed")}
+              \${renderKpiCard("Unique Behaviors", uniqueFlows.length, "#unique-flows-observed")}
               \${criticalFlows.length > 0 ? renderKpiCard("Covered", coveredCount, "#critical-flow-coverage", coveredCount > 0 ? "covered" : "", "covered") : ""}
               \${criticalFlows.length > 0 ? renderKpiCard("Partial", partialCount, "#critical-flow-coverage", partialCount > 0 ? "partial" : "", "partial") : ""}
               \${criticalFlows.length > 0 ? renderKpiCard("Missing", missingCount, "#critical-flow-coverage", missingCount > 0 ? "missing" : "", "not_covered") : ""}
@@ -1530,18 +2032,21 @@ function renderReviewSummaryPage() {
 
               <section id="unique-flows-observed" class="section-card">
               <div class="section-header">
-                <h3>Observed Behaviors</h3>
+                <h3>Unique Behaviors</h3>
               </div>
               <p class="section-note">Behaviors exercised during testing. Counts indicate repeated coverage across multiple test scenarios.</p>
               \${uniqueFlows.length > 0 ? \`
                 <div class="unique-list">
                   \${uniqueFlows.map((item) => \`
-                    <div class="unique-item">
-                      <span class="unique-bullet">•</span>
-                      \${item.kind === "cluster"
-                        ? \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}&overlapKey=\${encodeURIComponent(item.key)}">\${escapeHtml(formatUniqueFlowLabel(item))}</a>\`
-                        : \`<a class="unique-link" href="/review?reviewId=\${encodeURIComponent(item.reviewId)}">\${escapeHtml(formatUniqueFlowLabel(item))}</a>\`}
-                    </div>\`).join("")}
+                    \${item.kind === "cluster"
+                      ? \`<a class="unique-link unique-row" href="/review?q=\${encodeURIComponent(item.title)}&from=summary">
+                          <div class="unique-title">\${escapeHtml(item.title)}</div>
+                          <div class="unique-meta">\${escapeHtml(item.count === 1 ? "Observed in 1 execution" : \`Observed in \${item.count} executions\`)}</div>
+                        </a>\`
+                      : \`<a class="unique-link unique-row" href="/review?q=\${encodeURIComponent(item.title)}&from=summary">
+                          <div class="unique-title">\${escapeHtml(item.title)}</div>
+                          <div class="unique-meta">\${escapeHtml(item.count === 1 ? "Observed in 1 execution" : \`Observed in \${item.count} executions\`)}</div>
+                        </a>\`}\`).join("")}
                 </div>
               \`
               : '<p class="empty-note">No observed behaviors yet.</p>'}
@@ -1605,91 +2110,139 @@ function renderCriticalFlowsPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Critical Flows</title>
     <style>
+      ${renderFontFaceStyles()}
       :root {
         color-scheme: light;
-        --bg: #f6f1e7;
-        --panel: #fffdf8;
-        --line: #d8cfbf;
-        --ink: #1d1a16;
-        --muted: #6d6458;
-        --accent: #1f6f4a;
-        --accent-2: #8a5a18;
-        --danger: #9f1d1d;
-        --warn: #b76e1b;
+        --bg: #f8fafc;
+        --bg-soft: #f1f5f9;
+        --panel: #ffffff;
+        --line: #e2e8f0;
+        --line-strong: #cbd5e1;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --muted-2: #94a3b8;
+        --accent: #166534;
+        --accent-soft: #f0fdf4;
+        --danger: #b91c1c;
+        --warn: #a16207;
+        --info: #1d4ed8;
+        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
       }
       * { box-sizing: border-box; }
-      body { margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", serif; color: var(--ink); background: linear-gradient(180deg, #f0eadc 0%, var(--bg) 100%); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.6); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 10; }
-      header h1 { margin: 0; font-size: 30px; }
+      body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 10; }
+      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
       header h1 a { color: inherit; text-decoration: none; }
-      header p { margin: 6px 0 0; color: var(--muted); }
+      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
       nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-weight: 600; }
+      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
       nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
       main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 119px); }
-      aside { border-right: 1px solid var(--line); padding: 18px; overflow: auto; }
-      section { padding: 24px; overflow: auto; }
-      .rail-title { font-size: 14px; color: var(--muted); margin: 0 0 12px; letter-spacing: 0.04em; text-transform: uppercase; }
-      .gap-summary { display: grid; gap: 10px; margin-bottom: 22px; }
-      .gap-card { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 12px; cursor: pointer; }
-      .gap-card.active { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(183,110,27,0.14); }
-      .gap-term { display: inline-block; font-weight: 700; font-size: 16px; margin-bottom: 6px; }
+      aside { border-right: 1px solid var(--line); padding: 14px 0 18px; overflow: auto; background: #fff; }
+      section { padding: 22px 24px; overflow: auto; background: var(--bg-soft); }
+      .rail-title { font-size: 11px; color: var(--muted); margin: 0 16px 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+      .gap-summary { display: grid; gap: 8px; margin: 0 16px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+      .gap-card { border: 1px solid var(--line); background: var(--panel); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+      .gap-card.active { border-color: #fde68a; background: #fffbeb; }
+      .gap-term { display: inline-block; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
       .gap-meta { color: var(--muted); font-size: 13px; line-height: 1.45; }
-      #flows { display: grid; gap: 12px; }
-      .flow-card { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 14px; cursor: pointer; }
-      .flow-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(31,111,74,0.15); }
-      .flow-card.related { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(183,110,27,0.12); }
+      #flows { display: grid; }
+      .flow-card {
+        border: 1px solid transparent;
+        border-left: 2px solid transparent;
+        border-right: 0;
+        border-top: 0;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        border-radius: 0;
+        padding: 12px 16px 12px 18px;
+        cursor: pointer;
+      }
+      .flow-card:hover { background: var(--bg-soft); }
+      .flow-card.active { background: linear-gradient(90deg, rgba(22,101,52,0.06), rgba(240,253,244,0.88)); border-left-color: var(--accent); }
+      .flow-card.related { border-left-color: var(--warn); }
       .flow-card.dimmed { opacity: 0.56; }
-      .flow-card h2 { margin: 0 0 10px; font-size: 17px; }
-      .status-chip { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; }
-      .status-chip.covered { background: rgba(31,111,74,0.12); color: var(--accent); }
-      .status-chip.partial { background: rgba(183,110,27,0.15); color: var(--warn); }
-      .status-chip.not_covered { background: rgba(159,29,29,0.12); color: var(--danger); }
-      .missing-preview { margin-top: 8px; font-size: 14px; color: var(--ink); }
+      .flow-card h2 { margin: 0 0 8px; font-size: 15px; line-height: 1.3; }
+      .status-chip {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        background: #fff;
+        font-size: 12px;
+        font-weight: 700;
+        line-height: 1.2;
+      }
+      .status-chip.covered { background: var(--accent-soft); color: var(--accent); border-color: #bbf7d0; }
+      .status-chip.partial { background: #fffbeb; color: var(--warn); border-color: #fde68a; }
+      .status-chip.not_covered { background: #fef2f2; color: var(--danger); border-color: #fecaca; }
+      .missing-preview { margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--muted); }
       .missing-preview strong { color: var(--danger); }
-      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
-      .stack { display: grid; gap: 18px; }
-      .intro h2, .detail-header h2 { margin: 0 0 8px; font-size: 28px; }
-      .intro p, .detail-header p, .meta { color: var(--muted); margin: 0; line-height: 1.5; }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
+      .stack { display: grid; gap: 24px; }
+      .intro h2, .detail-header h2 { margin: 0 0 8px; font-family: var(--font-serif); font-size: 31px; font-weight: 600; line-height: 1.08; letter-spacing: -0.01em; }
+      .intro p, .detail-header p, .meta { color: var(--muted); margin: 0; line-height: 1.55; }
       .example-list { margin: 12px 0 0; padding-left: 18px; }
       .form-grid { display: grid; gap: 12px; }
-      .field-label { display: block; margin-bottom: 8px; font-size: 15px; font-weight: 700; color: var(--ink); }
+      .field-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--ink); letter-spacing: 0.03em; }
       textarea, input, button { font: inherit; }
-      textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; }
+      textarea, input { width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--ink); }
       textarea { min-height: 96px; resize: vertical; }
       .button-row { display: flex; gap: 10px; flex-wrap: wrap; }
-      button { border: none; border-radius: 999px; padding: 10px 16px; cursor: pointer; background: #efe6d7; }
-      button.primary { background: var(--accent); color: white; }
+      button { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; cursor: pointer; background: #fff; color: var(--ink); }
+      button:hover:not(:disabled) { border-color: var(--line-strong); background: var(--bg-soft); }
+      button.primary { background: var(--accent); color: white; border-color: var(--accent); }
+      button.primary:hover:not(:disabled) { background: #14532d; border-color: #14532d; }
       button.ghost-link { background: transparent; padding: 0; color: var(--accent); text-decoration: underline; }
       button:disabled { opacity: 0.6; cursor: wait; }
-      .interpretation, .callout, .suggestions { border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .interpretation, .callout, .suggestions, .duplicate-warning {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 16px;
+        background: #fff;
+      }
       .interpretation label + label { display: block; margin-top: 14px; }
-      .duplicate-warning { border: 1px solid rgba(183,110,27,0.35); background: rgba(183,110,27,0.08); border-radius: 12px; padding: 14px; }
+      .duplicate-warning { border-color: #fde68a; background: #fffbeb; }
       .duplicate-warning h3 { margin: 0 0 8px; font-size: 18px; }
-      .duplicate-match { border-top: 1px solid rgba(216,207,191,0.8); padding-top: 12px; margin-top: 12px; }
+      .duplicate-match { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
       .duplicate-match:first-of-type { border-top: 0; padding-top: 0; margin-top: 0; }
       .duplicate-label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
-      .callout { background: #f9f4ea; }
+      .callout { background: #fcfdff; }
       .error { color: var(--danger); }
       .add-flow-bar { display: flex; justify-content: flex-start; margin-bottom: 18px; }
       .add-flow-button { border: 1px solid var(--line); background: transparent; color: var(--accent); font-weight: 600; }
-      .modal-backdrop { position: fixed; inset: 0; background: rgba(29,26,22,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; overflow-y: auto; }
-      .modal-card { position: relative; width: min(760px, 100%); max-height: calc(100vh - 96px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(29,26,22,0.18); }
+      .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; overflow-y: auto; }
+      .modal-card { position: relative; width: min(760px, 100%); max-height: calc(100vh - 96px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(15,23,42,0.18); }
       .modal-shell { position: relative; padding-top: 18px; }
-      .modal-close { position: absolute; top: 0; right: 0; border: 1px solid rgba(216,207,191,0.9); background: rgba(255,253,248,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(29,26,22,0.08); }
+      .modal-close { position: absolute; top: 0; right: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(15,23,42,0.08); }
       .modal-close:hover { color: var(--ink); border-color: var(--line); }
+      .detail-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
       .detail-status { margin-top: 2px; }
+      .detail-summary { margin-top: 8px; max-width: 72ch; }
       .detail-actions { margin-top: 10px; }
-      .detail-section { padding-top: 18px; border-top: 1px solid rgba(216,207,191,0.75); }
-      .detail-section h3 { margin: 0 0 10px; font-size: 20px; }
+      .detail-section { padding-top: 18px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+      .detail-section h3 { margin: 0; font-family: var(--font-serif); font-size: 22px; font-weight: 600; line-height: 1.15; color: var(--ink); }
       .detail-section p { margin: 0; }
-      .detail-support { margin-top: 8px; color: var(--muted); }
+      .detail-support { margin-top: 0; color: var(--muted); }
+      .definition-list { display: grid; gap: 8px; }
+      .definition-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .definition-row:first-child { border-top: 0; padding-top: 0; }
+      .definition-term { color: var(--muted); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; }
+      .definition-value { color: var(--ink); }
       ul { margin: 0; padding-left: 18px; }
       li { margin: 4px 0; overflow-wrap: anywhere; word-break: break-word; }
       .pills { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
       .pill { border: 1px solid var(--line); border-radius: 999px; background: #fff; padding: 8px 12px; cursor: pointer; }
       .empty-note { color: var(--muted); }
-      @media (max-width: 900px) { main { grid-template-columns: 1fr; } aside { border-right: 0; border-bottom: 1px solid var(--line); } }
+      @media (max-width: 900px) {
+        main { grid-template-columns: 1fr; }
+        aside { border-right: 0; border-bottom: 1px solid var(--line); }
+        section { padding: 20px; }
+        .panel { padding: 22px 20px; }
+        .definition-row { grid-template-columns: 1fr; gap: 4px; }
+      }
     </style>
   </head>
   <body>
@@ -2064,22 +2617,27 @@ function renderCriticalFlowsPage() {
         const behaviorAction = flow.behavior?.action || "";
         const behaviorQualifiers = Array.isArray(flow.behavior?.qualifiers) ? flow.behavior.qualifiers : [];
         const statusText = flow.status === "covered"
-          ? "✅ Covered"
+          ? "Covered"
           : flow.status === "partial"
-            ? "⚠️ Partially Covered"
-            : "❌ Not Covered";
+            ? "Partially Covered"
+            : "Not Covered";
+        const evidenceMatchMarkup = flow.status === "covered"
+          ? \`<p>Observed execution evidence aligns with this expected behavior.</p>\`
+          : flow.status === "partial"
+            ? \`<p>Observed execution matched the core action, but qualifier-specific evidence was incomplete.</p>
+               \${flow.matchedAction ? \`<p class="detail-support">Matched action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}\`
+            : \`<p>No matching observed behavior was found in the reviewed execution evidence.</p>\`;
         const explanationSection = flow.status === "not_covered"
           ? \`
             <div class="detail-section">
-              <h3>Why it’s missing</h3>
+              <h3>Missing Evidence</h3>
               <p>No test evidence was found for this behavior.</p>
               <p class="detail-support">This may indicate missing test coverage or a mismatch in behavior naming.</p>
             </div>\`
           : flow.status === "partial"
             ? \`
             <div class="detail-section">
-              <h3>Why it’s partially covered</h3>
-              \${flow.matchedAction ? \`<p>Matched action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}
+              <h3>Missing Evidence</h3>
               \${flow.missingQualifiers.length > 0
                 ? \`<p>Missing qualifiers:</p><ul>\${summarizeItems(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
                 : '<p>Some parts of this behavior were not found in observed test execution.</p>'}
@@ -2090,24 +2648,31 @@ function renderCriticalFlowsPage() {
           <div class="stack">
             <div class="detail-header">
               <h2>\${escapeHtml(flow.name)}</h2>
-              <p class="detail-status">Status: <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusText)}</span></p>
+              <div class="detail-meta">
+                <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusText)}</span>
+              </div>
+              <p class="detail-summary">\${escapeHtml(flow.rawText || "Expected behavior used for semantic coverage comparison.")}</p>
               <div class="button-row detail-actions">
                 <button type="button" id="editCriticalFlow">Edit</button>
                 <button type="button" id="deleteCriticalFlow">Delete</button>
               </div>
             </div>
             <div class="detail-section">
-              <h3>Interpreted Behavior</h3>
+              <h3>Expected Intent</h3>
               <ul>\${summarizeItems(interpretedBehavior)}</ul>
             </div>
-            \${behaviorAction || behaviorQualifiers.length > 0 ? \`
             <div class="detail-section">
-              <h3>Structured Behavior</h3>
-              \${behaviorAction ? \`<p>Action: <strong>\${escapeHtml(behaviorAction)}</strong></p>\` : ""}
-              \${behaviorQualifiers.length > 0
-                ? \`<p>Qualifiers:</p><ul>\${summarizeItems(behaviorQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
-                : ""}
-            </div>\` : ""}
+              <h3>Evidence Match</h3>
+              \${evidenceMatchMarkup}
+            </div>
+            <div class="detail-section">
+              <h3>Coverage Analysis</h3>
+              <div class="definition-list">
+                \${behaviorAction ? \`<div class="definition-row"><div class="definition-term">Action</div><div class="definition-value"><strong>\${escapeHtml(behaviorAction)}</strong></div></div>\` : ""}
+                \${behaviorQualifiers.length > 0 ? \`<div class="definition-row"><div class="definition-term">Qualifiers</div><div class="definition-value">\${behaviorQualifiers.map((term) => escapeHtml(term.replaceAll("_", " "))).join(", ")}</div></div>\` : ""}
+                \${flow.matchedAction ? \`<div class="definition-row"><div class="definition-term">Matched action</div><div class="definition-value">\${escapeHtml(flow.matchedAction)}</div></div>\` : ""}
+              </div>
+            </div>
             \${explanationSection}
           </div>\`;
       }
@@ -2653,6 +3218,31 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && requestPath === GETTING_STARTED_PATH) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(renderCaptureGuidePage());
+    return;
+  }
+
+  if (req.method === "GET" && requestPath?.startsWith("/fonts/")) {
+    const relativePath = decodeURIComponent(requestPath.slice("/fonts/".length));
+    const normalizedPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+    const absolutePath = path.join(process.cwd(), "public", "fonts", normalizedPath);
+
+    if (!absolutePath.startsWith(path.join(process.cwd(), "public", "fonts"))) {
+      writeJson(res, 400, { error: "Invalid font path" });
+      return;
+    }
+
+    try {
+      const content = await readFile(absolutePath);
+      const contentType = absolutePath.endsWith(".woff2")
+        ? "font/woff2"
+        : absolutePath.endsWith(".txt")
+          ? "text/plain; charset=utf-8"
+          : "application/octet-stream";
+      res.writeHead(200, { "content-type": contentType, "cache-control": "public, max-age=31536000, immutable" });
+      res.end(content);
+    } catch {
+      writeJson(res, 404, { error: "Font not found" });
+    }
     return;
   }
 

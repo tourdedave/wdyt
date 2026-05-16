@@ -441,6 +441,38 @@ function matchesReviewUnitQuery(unit: ReviewUnitViewRecord, query: string) {
     return true;
   }
 
+  const confidenceFilters = new Set<string>();
+  const normalizedTextQuery = normalizedQuery
+    .replace(/\bconfidence:(low|moderate|high)\b/g, (_match, bucket: string) => {
+      confidenceFilters.add(bucket);
+      return " ";
+    })
+    .replace(/\b(low|moderate|high)\s+confidence\b/g, (_match, bucket: string) => {
+      confidenceFilters.add(bucket);
+      return " ";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (confidenceFilters.size > 0) {
+    const confidence = typeof unit.proposedConfidence === "number" ? unit.proposedConfidence : null;
+    const bucket =
+      confidence == null
+        ? "low"
+        : confidence >= 0.8
+          ? "high"
+          : confidence >= 0.6
+            ? "moderate"
+            : "low";
+    if (!confidenceFilters.has(bucket)) {
+      return false;
+    }
+  }
+
+  if (!normalizedTextQuery) {
+    return true;
+  }
+
   const haystacks = [
     unit.reviewId,
     unit.flowId,
@@ -448,6 +480,8 @@ function matchesReviewUnitQuery(unit: ReviewUnitViewRecord, query: string) {
     unit.proposedDescriptor,
     ...(unit.tests ?? []),
     ...(unit.suites ?? []),
+    ...(unit.tools ?? []),
+    ...(unit.browsers ?? []),
     ...(unit.primaryTerms ?? []),
     ...(unit.prerequisites ?? []),
     ...(unit.outcomeTerms ?? []),
@@ -456,7 +490,7 @@ function matchesReviewUnitQuery(unit: ReviewUnitViewRecord, query: string) {
     ...(unit.headings ?? []),
   ];
 
-  return haystacks.some((value) => String(value ?? "").toLowerCase().includes(normalizedQuery));
+  return haystacks.some((value) => String(value ?? "").toLowerCase().includes(normalizedTextQuery));
 }
 
 export async function queryReviewUnitViews(input?: {
