@@ -1173,7 +1173,7 @@ async function main() {
   const artifactUsage = [
     "Usage:",
     "  wdyt artifact",
-    "  wdyt artifact export [--format zip|pdf] [--output <path>]",
+    "  wdyt artifact export [--format zip] [--output <path>]",
     "  wdyt artifact import <zip-path> [more-zip-paths...]",
     "",
     "Commands:",
@@ -1181,12 +1181,11 @@ async function main() {
     "  import    Restore wdyt runtime data from an artifact zip",
     "",
     "Options:",
-    "  -f, --format <format>  Export format: zip (default) or pdf",
+    "  -f, --format <format>  Export format: zip (default)",
     "  -o, --output <path>   Output zip path or directory for export",
     "",
     "Default export location:",
     `  zip: ./${DEFAULT_EXPORT_FILE_NAMES.zip}`,
-    `  pdf: ./${DEFAULT_EXPORT_FILE_NAMES.pdf}`,
   ].join("\n");
 
   const syntheticUsage = [
@@ -1270,7 +1269,7 @@ async function main() {
         return;
       }
 
-      if (format !== "zip" && format !== "pdf") {
+      if (format !== "zip") {
         console.error(artifactUsage);
         process.exitCode = 1;
         return;
@@ -1279,13 +1278,7 @@ async function main() {
       const targetPath = await exportArtifact({
         format,
         outputPath,
-        pdfMode: process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer",
       });
-
-      if (format === "pdf") {
-        console.log(`Report generated: ${targetPath}`);
-        return;
-      }
 
       console.log(targetPath);
       return;

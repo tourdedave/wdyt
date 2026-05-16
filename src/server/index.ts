@@ -1674,17 +1674,18 @@ function renderReviewSummaryPage() {
         align-items: center;
         justify-content: center;
         gap: 6px;
-        border-radius: 10px;
-        padding: 9px 13px;
-        background: var(--accent);
-        color: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        background: transparent;
+        color: var(--muted);
         text-decoration: none;
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 600;
         white-space: nowrap;
         cursor: pointer;
       }
-      .export-trigger:hover { background: #14532d; }
+      .export-trigger:hover { border-color: var(--line-strong); background: #fff; color: var(--ink); }
       .export-trigger::-webkit-details-marker { display: none; }
       .export-panel {
         position: absolute;
@@ -1700,14 +1701,24 @@ function renderReviewSummaryPage() {
       }
       .export-option {
         display: block;
+        width: 100%;
         padding: 10px 12px;
+        border: 0;
         border-radius: 8px;
+        background: transparent;
         color: var(--ink);
         text-decoration: none;
+        text-align: left;
         font-size: 14px;
         line-height: 1.35;
+        cursor: pointer;
       }
       .export-option:hover { background: #f8fafc; }
+      .export-option:focus,
+      .export-option:focus-visible {
+        outline: none;
+        box-shadow: none;
+      }
       main { padding: 20px 24px 36px; display: grid; gap: 12px; background: #fff; }
       .summary-stack { display: grid; gap: 24px; }
       .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -1805,7 +1816,7 @@ function renderReviewSummaryPage() {
         <details class="export-menu">
           <summary class="export-trigger">Export <span aria-hidden="true">▾</span></summary>
           <div class="export-panel">
-            <a class="export-option" href="/artifacts/export?format=pdf">Download PDF report</a>
+            <button type="button" class="export-option" id="summaryPrintAction">Print / Save as PDF</button>
             <a class="export-option" href="/artifacts/export?format=zip">Download artifact (.zip)</a>
           </div>
         </details>
@@ -1828,6 +1839,9 @@ function renderReviewSummaryPage() {
           });
         });
       }
+      document.getElementById("summaryPrintAction")?.addEventListener("click", () => {
+        window.print();
+      });
 
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -2090,6 +2104,7 @@ function renderReviewSummaryPage() {
               document.querySelector(href)?.scrollIntoView({ behavior: "smooth", block: "start" });
             });
           });
+
         };
 
         renderSummary();
@@ -3169,9 +3184,9 @@ const server = http.createServer(async (req, res) => {
       }
 
       const formatParam = requestUrl?.searchParams.get("format");
-      const format = formatParam === "zip" ? "zip" : formatParam === "pdf" ? "pdf" : null;
+      const format = formatParam === "zip" ? "zip" : null;
       if (!format) {
-        writeJson(res, 400, { error: "Export format must be 'pdf' or 'zip'" });
+        writeJson(res, 400, { error: "Export format must be 'zip'" });
         return;
       }
 
@@ -3181,10 +3196,9 @@ const server = http.createServer(async (req, res) => {
         const generatedPath = await exportArtifact({
           format,
           outputPath,
-          pdfMode: process.env.WDYT_PDF_STUB === "1" ? "stub" : "puppeteer",
         });
         const fileBuffer = await readFile(generatedPath);
-        const contentType = format === "pdf" ? "application/pdf" : "application/zip";
+        const contentType = "application/zip";
         const fileName = DEFAULT_EXPORT_FILE_NAMES[format];
         res.writeHead(200, {
           "content-type": contentType,
