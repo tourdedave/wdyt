@@ -3301,20 +3301,21 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     assert.deepEqual(state.flows[0].missingTerms, ["export report"]);
 
     const page = await fetch(`${serverUrl}/expected-behaviors`).then((response) => response.text());
-    assert.match(page, /Coverage Gaps/);
+    assert.match(page, /Missing Coverage/);
     assert.match(page, /Missing:/);
-    assert.match(page, /Missing in/);
+    assert.match(page, /Expected behavior not observed in/);
     assert.match(page, /Expected Intent/);
-    assert.match(page, /Evidence Match/);
-    assert.match(page, /Coverage Analysis/);
-    assert.match(page, /Missing Evidence/);
-    assert.match(page, /Some parts of this behavior were not found in observed test execution\./);
-    assert.match(page, /The general behavior was observed, but the distinguishing qualifier details were not found\./);
+    assert.match(page, /Observed Match/);
+    assert.match(page, /Coverage Result/);
+    assert.match(page, /Partial coverage\./);
+    assert.match(page, /Potential causes: missing coverage for qualifier-specific cases, behavior naming mismatch, or low-confidence interpretation\./);
     assert.doesNotMatch(page, /Interpreted Terms/);
     assert.doesNotMatch(page, /Matched Concepts/);
     assert.doesNotMatch(page, /Matching Descriptors/);
     assert.doesNotMatch(page, /Original raw text:/);
     assert.doesNotMatch(page, /Potential missing coverage/);
+    assert.doesNotMatch(page, /Coverage Analysis/);
+    assert.doesNotMatch(page, /Missing Evidence/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);

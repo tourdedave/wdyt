@@ -2154,7 +2154,8 @@ function renderCriticalFlowsPage() {
       main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 119px); background: #fff; }
       aside { border-right: 1px solid var(--line); padding: 10px 0 16px; overflow: auto; background: #fff; }
       section { padding: 18px 20px; overflow: auto; background: #fff; }
-      .rail-title { font-size: 12px; color: var(--muted); margin: 0 16px 12px; letter-spacing: 0.01em; font-weight: 600; }
+      .rail-section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 12px; }
+      .rail-title { font-size: 12px; color: var(--muted); margin: 0; letter-spacing: 0.01em; font-weight: 600; }
       .gap-summary { display: grid; gap: 8px; margin: 0 16px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
       .gap-card { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 9px 11px; cursor: pointer; }
       .gap-card.active { border-color: #fde68a; background: #fffdf5; }
@@ -2194,9 +2195,9 @@ function renderCriticalFlowsPage() {
       .missing-preview { margin-top: 8px; font-size: 12px; line-height: 1.4; color: var(--muted); }
       .missing-preview strong { color: var(--danger); }
       .panel { background: var(--panel); border: 1px solid #e8edf5; border-radius: 12px; padding: 20px 22px; }
-      .stack { display: grid; gap: 24px; }
-      .intro h2, .detail-header h2 { margin: 0 0 8px; font-family: var(--font-serif); font-size: 28px; font-weight: 600; line-height: 1.08; letter-spacing: -0.01em; }
-      .intro p, .detail-header p, .meta { color: var(--muted); margin: 0; line-height: 1.55; }
+      .stack { display: grid; gap: 18px; }
+      .intro h2, .detail-header h2 { margin: 0 0 6px; font-family: var(--font-serif); font-size: 27px; font-weight: 600; line-height: 1.08; letter-spacing: -0.01em; }
+      .intro p, .detail-header p, .meta { color: var(--muted); margin: 0; line-height: 1.5; }
       .example-list { margin: 12px 0 0; padding-left: 18px; }
       .form-grid { display: grid; gap: 12px; }
       .field-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; color: var(--ink); letter-spacing: 0.01em; }
@@ -2226,6 +2227,7 @@ function renderCriticalFlowsPage() {
       .error { color: var(--danger); }
       .add-flow-bar { display: flex; justify-content: flex-start; margin-bottom: 18px; }
       .add-flow-button { border: 1px solid var(--line); background: transparent; color: var(--accent); font-weight: 600; }
+      .rail-add-button { padding: 6px 10px; border-radius: 999px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
       .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; overflow-y: auto; }
       .modal-card { position: relative; width: min(760px, 100%); max-height: calc(100vh - 96px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(15,23,42,0.18); }
       .modal-shell { position: relative; padding-top: 18px; }
@@ -2233,14 +2235,14 @@ function renderCriticalFlowsPage() {
       .modal-close:hover { color: var(--ink); border-color: var(--line); }
       .detail-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
       .detail-status { margin-top: 2px; }
-      .detail-summary { margin-top: 8px; max-width: 72ch; }
-      .detail-actions { margin-top: 10px; }
-      .detail-section { padding-top: 16px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+      .detail-summary { margin-top: 6px; max-width: 72ch; font-size: 14px; }
+      .detail-actions { margin-top: 8px; }
+      .detail-section { padding-top: 14px; border-top: 1px solid var(--line); display: grid; gap: 7px; }
       .detail-section h3 { margin: 0; font-family: var(--font-serif); font-size: 20px; font-weight: 600; line-height: 1.15; color: var(--ink); }
       .detail-section p { margin: 0; }
       .detail-support { margin-top: 0; color: var(--muted); }
-      .definition-list { display: grid; gap: 8px; }
-      .definition-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+      .definition-list { display: grid; gap: 6px; }
+      .definition-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding-top: 7px; border-top: 1px solid var(--line); }
       .definition-row:first-child { border-top: 0; padding-top: 0; }
       .definition-term { color: var(--muted); font-size: 12px; letter-spacing: 0.01em; }
       .definition-value { color: var(--ink); }
@@ -2271,7 +2273,10 @@ function renderCriticalFlowsPage() {
     <main>
       <aside>
         <div id="gapSummary"></div>
-        <p class="rail-title">Saved Expected Behaviors</p>
+        <div class="rail-section-header">
+          <p class="rail-title">Saved Expected Behaviors</p>
+          <div id="railActions"></div>
+        </div>
         <div id="flows"></div>
       </aside>
       <section><div id="detail" class="panel">Loading…</div></section>
@@ -2471,11 +2476,11 @@ function renderCriticalFlowsPage() {
 
         container.innerHTML = \`
           <div class="gap-summary">
-            <p class="rail-title">Coverage Gaps</p>
+            <p class="rail-title">Missing Coverage</p>
             \${gaps.map((gap) => \`
               <article class="gap-card \${gap.term === state.activeGapTerm ? "active" : ""}" data-term="\${escapeHtml(gap.term)}">
                 <div class="gap-term">\${escapeHtml(gap.term)}</div>
-                <div class="gap-meta">\${gap.flows.length === 1 ? "Missing in:" : \`Missing in \${escapeHtml(String(gap.flows.length))} flows:\`}</div>
+                <div class="gap-meta">\${gap.flows.length === 1 ? "Expected behavior not observed in:" : \`Expected behavior not observed in \${escapeHtml(String(gap.flows.length))} flows:\`}</div>
                 <div class="gap-meta">
                   \${gap.flows.slice(0, 2).map((flow) => \`<div>\${gap.flows.length === 1 ? escapeHtml(flow.name) : \`- \${escapeHtml(flow.name)}\`}</div>\`).join("")}
                   \${gap.flows.length > 2 ? \`<div>+\${escapeHtml(String(gap.flows.length - 2))} more</div>\` : ""}
@@ -2521,6 +2526,25 @@ function renderCriticalFlowsPage() {
             state.selectedId = node.getAttribute("data-id");
             render();
           });
+        });
+      }
+
+      function renderRailActions() {
+        const container = document.getElementById("railActions");
+        if (state.flows.length === 0) {
+          container.innerHTML = "";
+          return;
+        }
+
+        container.innerHTML = '<button type="button" class="add-flow-button rail-add-button" id="openCriticalFlowForm">+ Add</button>';
+        container.querySelector("#openCriticalFlowForm")?.addEventListener("click", () => {
+          state.showDraftForm = true;
+          state.editingFlowId = null;
+          state.editingBaseline = null;
+          state.draftText = "";
+          state.parsedDraft = null;
+          state.error = "";
+          render();
         });
       }
 
@@ -2634,29 +2658,29 @@ function renderCriticalFlowsPage() {
           : flow.status === "partial"
             ? "Partially Covered"
             : "Not Covered";
-        const evidenceMatchMarkup = flow.status === "covered"
-          ? \`<p>Observed execution evidence aligns with this expected behavior.</p>\`
+        const observedMatchMarkup = flow.status === "covered"
+          ? \`<p>Matching observed execution evidence was found for this expected behavior.</p>\`
           : flow.status === "partial"
-            ? \`<p>Observed execution matched the core action, but qualifier-specific evidence was incomplete.</p>
-               \${flow.matchedAction ? \`<p class="detail-support">Matched action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}\`
-            : \`<p>No matching observed behavior was found in the reviewed execution evidence.</p>\`;
-        const explanationSection = flow.status === "not_covered"
-          ? \`
-            <div class="detail-section">
-              <h3>Missing Evidence</h3>
-              <p>No test evidence was found for this behavior.</p>
-              <p class="detail-support">This may indicate missing test coverage or a mismatch in behavior naming.</p>
-            </div>\`
+            ? \`<p>Observed execution matched the core behavior, but supporting qualifier evidence was incomplete.</p>\`
+            : \`<p>No matching observed behavior was found in reviewed execution evidence.</p>\`;
+        const coverageRows = [
+          behaviorAction
+            ? \`<div class="definition-row"><div class="definition-term">Expected action</div><div class="definition-value"><strong>\${escapeHtml(behaviorAction)}</strong></div></div>\`
+            : "",
+          behaviorQualifiers.length > 0
+            ? \`<div class="definition-row"><div class="definition-term">Qualifiers</div><div class="definition-value">\${behaviorQualifiers.map((term) => escapeHtml(term.replaceAll("_", " "))).join(", ")}</div></div>\`
+            : "",
+          flow.matchedAction
+            ? \`<div class="definition-row"><div class="definition-term">Observed action</div><div class="definition-value">\${escapeHtml(flow.matchedAction)}</div></div>\`
+            : "",
+        ].filter(Boolean).join("");
+        const coverageResultMarkup = flow.status === "covered"
+          ? \`<p>Covered.</p>\`
           : flow.status === "partial"
-            ? \`
-            <div class="detail-section">
-              <h3>Missing Evidence</h3>
-              \${flow.missingQualifiers.length > 0
-                ? \`<p>Missing qualifiers:</p><ul>\${summarizeItems(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
-                : '<p>Some parts of this behavior were not found in observed test execution.</p>'}
-              <p class="detail-support">The general behavior was observed, but the distinguishing qualifier details were not found.</p>
-            </div>\`
-            : "";
+            ? \`\${flow.missingQualifiers.length > 0
+                ? \`<p>Partial coverage.</p><p>Missing qualifiers:</p><ul>\${summarizeItems(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
+                : "<p>Partial coverage.</p><p>Some qualifier details were not found in reviewed execution evidence.</p>"}<p class="detail-support">Potential causes: missing coverage for qualifier-specific cases, behavior naming mismatch, or low-confidence interpretation.</p>\`
+            : \`<p>Missing coverage.</p><p class="detail-support">Potential causes: missing test coverage, naming mismatch, or low-confidence interpretation.</p>\`;
         return \`
           <div class="stack">
             <div class="detail-header">
@@ -2664,7 +2688,6 @@ function renderCriticalFlowsPage() {
               <div class="detail-meta">
                 <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusText)}</span>
               </div>
-              <p class="detail-summary">\${escapeHtml(flow.rawText || "Expected behavior used for semantic coverage comparison.")}</p>
               <div class="button-row detail-actions">
                 <button type="button" id="editCriticalFlow">Edit</button>
                 <button type="button" id="deleteCriticalFlow">Delete</button>
@@ -2675,18 +2698,15 @@ function renderCriticalFlowsPage() {
               <ul>\${summarizeItems(interpretedBehavior)}</ul>
             </div>
             <div class="detail-section">
-              <h3>Evidence Match</h3>
-              \${evidenceMatchMarkup}
+              <h3>Observed Match</h3>
+              \${observedMatchMarkup}
+              \${flow.matchedAction ? \`<p class="detail-support">Observed action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}
             </div>
             <div class="detail-section">
-              <h3>Coverage Analysis</h3>
-              <div class="definition-list">
-                \${behaviorAction ? \`<div class="definition-row"><div class="definition-term">Action</div><div class="definition-value"><strong>\${escapeHtml(behaviorAction)}</strong></div></div>\` : ""}
-                \${behaviorQualifiers.length > 0 ? \`<div class="definition-row"><div class="definition-term">Qualifiers</div><div class="definition-value">\${behaviorQualifiers.map((term) => escapeHtml(term.replaceAll("_", " "))).join(", ")}</div></div>\` : ""}
-                \${flow.matchedAction ? \`<div class="definition-row"><div class="definition-term">Matched action</div><div class="definition-value">\${escapeHtml(flow.matchedAction)}</div></div>\` : ""}
-              </div>
+              <h3>Coverage Result</h3>
+              \${coverageRows ? \`<div class="definition-list">\${coverageRows}</div>\` : ""}
+              \${coverageResultMarkup}
             </div>
-            \${explanationSection}
           </div>\`;
       }
 
@@ -2701,7 +2721,7 @@ function renderCriticalFlowsPage() {
         const hasFlows = state.flows.length > 0;
         detail.innerHTML =
           (hasFlows
-            ? \`<div class="add-flow-bar"><button type="button" class="add-flow-button" id="openCriticalFlowForm">+ Add Expected Behavior</button></div>\`
+            ? ""
             : renderDraftArea()) +
           (selectedFlow ? renderSelectedFlow(selectedFlow) : "") +
           (hasFlows && state.showDraftForm
@@ -2736,16 +2756,6 @@ function renderCriticalFlowsPage() {
             state.isWorking = false;
             render();
           });
-        });
-
-        detail.querySelector("#openCriticalFlowForm")?.addEventListener("click", () => {
-          state.showDraftForm = true;
-          state.editingFlowId = null;
-          state.editingBaseline = null;
-          state.draftText = "";
-          state.parsedDraft = null;
-          state.error = "";
-          render();
         });
 
         detail.querySelector("#cancelCriticalFlow")?.addEventListener("click", () => {
@@ -3005,6 +3015,7 @@ function renderCriticalFlowsPage() {
 
       function render() {
         renderGapSummary();
+        renderRailActions();
         renderList();
         renderDetail();
       }
