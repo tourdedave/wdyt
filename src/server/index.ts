@@ -92,6 +92,172 @@ function renderFontFaceStyles() {
   `;
 }
 
+function renderAppShellStyles() {
+  return `
+      ${renderFontFaceStyles()}
+      :root {
+        color-scheme: light;
+        --bg: #f8fafc;
+        --bg-soft: #f1f5f9;
+        --panel: #ffffff;
+        --line: #e2e8f0;
+        --line-strong: #cbd5e1;
+        --ink: #0f172a;
+        --muted: #64748b;
+        --muted-2: #94a3b8;
+        --accent: #166534;
+        --accent-soft: #f0fdf4;
+        --accent-border: #bbf7d0;
+        --accent-ink: #15803d;
+        --danger: #b91c1c;
+        --warn: #a16207;
+        --info: #1d4ed8;
+        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
+        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); }
+      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); position: relative; z-index: 30; isolation: isolate; }
+      .header-shell { position: relative; z-index: 1; }
+      .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+      .header-copy { min-width: 0; }
+      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
+      header h1 a { color: inherit; text-decoration: none; }
+      header h1 a:hover { text-decoration: underline; }
+      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+      nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
+      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
+      nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+      .page-utility { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 31; }
+      .page-utility.open { z-index: 40; }
+      .page-utility-trigger {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 7px 10px;
+        background: transparent;
+        color: var(--muted);
+        text-decoration: none;
+        font-size: 13px;
+        font-weight: 600;
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .page-utility-trigger:hover { border-color: var(--line-strong); background: #fff; color: var(--ink); }
+      .page-utility-trigger:focus,
+      .page-utility-trigger:focus-visible { outline: none; }
+      .page-utility-panel {
+        position: absolute;
+        top: calc(100% + 10px);
+        right: 0;
+        z-index: 41;
+        min-width: 220px;
+        padding: 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: rgba(255,255,255,0.98);
+        box-shadow: 0 14px 28px rgba(15,23,42,0.08);
+      }
+      .page-utility-panel[hidden] { display: none; }
+      .page-utility-option {
+        display: block;
+        width: 100%;
+        padding: 10px 12px;
+        border: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--ink);
+        text-decoration: none;
+        text-align: left;
+        font-size: 14px;
+        line-height: 1.35;
+        cursor: pointer;
+      }
+      .page-utility-option:hover { background: #f8fafc; }
+      .page-utility-option:focus,
+      .page-utility-option:focus-visible { outline: none; box-shadow: none; }
+  `;
+}
+
+function renderAppHeader(options: {
+  subtitle: string;
+  active: "review" | "expected" | "summary";
+  utilityMarkup?: string;
+}) {
+  const utilityMarkup = options.utilityMarkup ?? "";
+  return `
+    <header>
+      <div class="header-shell">
+        <div class="header-bar">
+          <div class="header-copy">
+            <h1><a href="/review/summary">What Did You Test?</a></h1>
+            <p>${options.subtitle}</p>
+            <nav>
+              <a ${options.active === "review" ? 'class="active"' : ""} href="/review">Observed Behaviors</a>
+              <a ${options.active === "expected" ? 'class="active"' : ""} href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
+              <a ${options.active === "summary" ? 'class="active"' : ""} href="/review/summary">Summary</a>
+            </nav>
+          </div>
+        </div>
+        ${utilityMarkup}
+      </div>
+    </header>`;
+}
+
+function renderUtilityMenuScript() {
+  return `
+      document.querySelectorAll("[data-page-utility]").forEach((menu) => {
+        const trigger = menu.querySelector("[data-page-utility-trigger]");
+        const panel = menu.querySelector("[data-page-utility-panel]");
+        if (!trigger || !panel) {
+          return;
+        }
+
+        const closeMenu = () => {
+          menu.classList.remove("open");
+          panel.hidden = true;
+          trigger.setAttribute("aria-expanded", "false");
+        };
+
+        const openMenu = () => {
+          menu.classList.add("open");
+          panel.hidden = false;
+          trigger.setAttribute("aria-expanded", "true");
+        };
+
+        trigger.addEventListener("click", (event) => {
+          event.preventDefault();
+          if (panel.hidden) {
+            openMenu();
+            return;
+          }
+          closeMenu();
+        });
+
+        document.addEventListener("click", (event) => {
+          if (!menu.contains(event.target)) {
+            closeMenu();
+          }
+        });
+
+        menu.querySelectorAll("[data-page-utility-close]").forEach((item) => {
+          item.addEventListener("click", () => {
+            closeMenu();
+          });
+        });
+
+        menu.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            closeMenu();
+          }
+        });
+      });
+  `;
+}
+
 function renderEmptyStatePage() {
   return `<!doctype html>
 <html lang="en">
@@ -476,86 +642,7 @@ function renderReviewPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Review</title>
     <style>
-      ${renderFontFaceStyles()}
-      :root {
-        color-scheme: light;
-        --bg: #f8fafc;
-        --bg-soft: #f1f5f9;
-        --panel: #ffffff;
-        --line: #e2e8f0;
-        --line-strong: #cbd5e1;
-        --ink: #0f172a;
-        --muted: #64748b;
-        --muted-2: #94a3b8;
-        --accent: #166534;
-        --accent-soft: #f0fdf4;
-        --accent-border: #bbf7d0;
-        --accent-ink: #15803d;
-        --danger: #b91c1c;
-        --warn: #a16207;
-        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
-        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
-      }
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); }
-      .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-      .header-copy { min-width: 0; }
-      .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
-      header h1 a { color: inherit; text-decoration: none; }
-      header h1 a:hover { text-decoration: underline; }
-      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
-      nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
-      nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      .settings-menu { position: relative; }
-      .settings-menu[open] { z-index: 40; }
-      .settings-trigger {
-        list-style: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 7px 10px;
-        background: transparent;
-        color: var(--muted);
-        text-decoration: none;
-        font-size: 13px;
-        font-weight: 600;
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .settings-trigger:hover { border-color: var(--line-strong); background: #fff; color: var(--ink); }
-      .settings-trigger::-webkit-details-marker { display: none; }
-      .settings-panel {
-        position: absolute;
-        top: calc(100% + 10px);
-        right: 0;
-        z-index: 41;
-        min-width: 240px;
-        padding: 8px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(255,255,255,0.98);
-        box-shadow: 0 14px 28px rgba(15,23,42,0.08);
-      }
-      .settings-option {
-        display: block;
-        width: 100%;
-        padding: 10px 12px;
-        border: none;
-        border-radius: 8px;
-        color: var(--ink);
-        background: transparent;
-        text-align: left;
-        font-size: 14px;
-        line-height: 1.35;
-        cursor: pointer;
-      }
-      .settings-option:hover { background: #f8fafc; }
+      ${renderAppShellStyles()}
       main { display: grid; grid-template-columns: 336px 1fr; min-height: calc(100vh - 89px); background: #fff; }
       aside {
         border-right: 1px solid var(--line);
@@ -724,38 +811,28 @@ function renderReviewPage() {
       .transition-banner { margin-bottom: 18px; padding: 10px 12px; border-radius: 10px; border: 1px solid #bbf7d0; background: var(--accent-soft); color: var(--accent); font-size: 14px; }
       .panel.is-submitting { opacity: 0.72; transition: opacity 120ms ease; }
       @media (max-width: 900px) {
+        .page-utility { position: static; transform: none; margin-top: 12px; }
         main { grid-template-columns: 1fr; }
         aside { border-right: 0; border-bottom: 1px solid var(--line); }
         .evidence-grid { grid-template-columns: 1fr; }
         .detail-header-top { flex-direction: column; }
-        .settings-panel { right: auto; left: 0; }
+        .page-utility-panel { right: auto; left: 0; }
         section { padding: 16px; }
         .panel { padding: 18px 16px; }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div class="header-bar">
-        <div class="header-copy">
-          <h1><a href="/review/summary">What Did You Test?</a></h1>
-          <p>Review and refine observed behaviors before evaluating coverage.</p>
-          <nav>
-            <a class="active" href="/review">Observed Behaviors</a>
-            <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
-            <a href="/review/summary">Summary</a>
-          </nav>
-        </div>
-        <div class="header-actions">
-          <details class="settings-menu" id="reviewSettingsMenu">
-            <summary class="settings-trigger">Settings <span aria-hidden="true">▾</span></summary>
-            <div class="settings-panel">
-              <button type="button" class="settings-option" id="rebuildReviewUnits">Rebuild Observed Behaviors</button>
-            </div>
-          </details>
-        </div>
-      </div>
-    </header>
+    ${renderAppHeader({
+      subtitle: "Review and refine observed behaviors before evaluating coverage.",
+      active: "review",
+      utilityMarkup: `<div class="page-utility" id="reviewSettingsMenu" data-page-utility>
+          <button type="button" class="page-utility-trigger" id="reviewSettingsTrigger" data-page-utility-trigger aria-haspopup="menu" aria-expanded="false">Settings <span aria-hidden="true">▾</span></button>
+          <div class="page-utility-panel" id="reviewSettingsPanel" data-page-utility-panel hidden>
+            <button type="button" class="page-utility-option" id="rebuildReviewUnits" data-page-utility-close>Rebuild Observed Behaviors</button>
+          </div>
+        </div>`,
+    })}
     <main>
       <aside><div id="listControls"></div><div id="overlapSummary"></div><div id="units"></div><div id="listPagination"></div></aside>
       <section><div id="detail" class="panel"><p id="empty">Select a flow variant to review.</p></div></section>
@@ -1559,14 +1636,11 @@ function renderReviewPage() {
         });
       }
 
+      ${renderUtilityMenuScript()}
+
       document.getElementById("rebuildReviewUnits")?.addEventListener("click", async () => {
         if (state.rebuilding) {
           return;
-        }
-
-        const settingsMenu = document.getElementById("reviewSettingsMenu");
-        if (settingsMenu && "open" in settingsMenu) {
-          settingsMenu.open = false;
         }
 
         state.rebuilding = true;
@@ -1633,92 +1707,8 @@ function renderReviewSummaryPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Summary</title>
     <style>
-      ${renderFontFaceStyles()}
-      :root {
-        color-scheme: light;
-        --bg: #f8fafc;
-        --bg-soft: #f1f5f9;
-        --panel: #ffffff;
-        --line: #e2e8f0;
-        --line-strong: #cbd5e1;
-        --ink: #0f172a;
-        --muted: #64748b;
-        --muted-2: #94a3b8;
-        --accent: #166534;
-        --accent-soft: #f0fdf4;
-        --danger: #b91c1c;
-        --warn: #a16207;
-        --info: #1d4ed8;
-        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
-        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
-      }
+      ${renderAppShellStyles()}
       html { scroll-behavior: smooth; }
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: var(--font-sans); background: var(--bg); color: var(--ink); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); position: relative; z-index: 30; isolation: isolate; }
-      .header-shell { position: relative; z-index: 1; }
-      .header-bar { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-      .header-copy { min-width: 0; }
-      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
-      header h1 a { color: inherit; text-decoration: none; }
-      header h1 a:hover { text-decoration: underline; }
-      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
-      nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
-      nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
-      .export-menu { position: absolute; top: 50%; right: 0; transform: translateY(-50%); z-index: 31; }
-      .export-menu[open] { z-index: 40; }
-      .export-trigger {
-        list-style: none;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        border: 1px solid var(--line);
-        border-radius: 8px;
-        padding: 7px 10px;
-        background: transparent;
-        color: var(--muted);
-        text-decoration: none;
-        font-size: 13px;
-        font-weight: 600;
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .export-trigger:hover { border-color: var(--line-strong); background: #fff; color: var(--ink); }
-      .export-trigger::-webkit-details-marker { display: none; }
-      .export-panel {
-        position: absolute;
-        top: calc(100% + 10px);
-        right: 0;
-        z-index: 41;
-        min-width: 220px;
-        padding: 8px;
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: rgba(255,255,255,0.98);
-        box-shadow: 0 14px 28px rgba(15,23,42,0.08);
-      }
-      .export-option {
-        display: block;
-        width: 100%;
-        padding: 10px 12px;
-        border: 0;
-        border-radius: 8px;
-        background: transparent;
-        color: var(--ink);
-        text-decoration: none;
-        text-align: left;
-        font-size: 14px;
-        line-height: 1.35;
-        cursor: pointer;
-      }
-      .export-option:hover { background: #f8fafc; }
-      .export-option:focus,
-      .export-option:focus-visible {
-        outline: none;
-        box-shadow: none;
-      }
       main { padding: 20px 24px 36px; display: grid; gap: 12px; background: #fff; }
       .summary-stack { display: grid; gap: 24px; }
       .kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -1792,53 +1782,30 @@ function renderReviewSummaryPage() {
       .unique-link:hover .unique-title { color: var(--accent); }
       .back { color: var(--accent); text-decoration: none; font-weight: 600; }
       @media (max-width: 900px) {
-        .export-menu { position: static; transform: none; margin-top: 12px; }
-        .export-panel { right: auto; left: 0; }
+        .page-utility { position: static; transform: none; margin-top: 12px; }
+        .page-utility-panel { right: auto; left: 0; }
         .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         main { padding: 18px; }
       }
     </style>
   </head>
   <body>
-    <header>
-      <div class="header-shell">
-        <div class="header-bar">
-          <div class="header-copy">
-            <h1><a href="/review/summary">What Did You Test?</a></h1>
-            <p>See what was exercised based on observed evidence, and evaluate coverage of critical business flows.</p>
-            <nav>
-              <a href="/review">Observed Behaviors</a>
-              <a href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
-              <a class="active" href="/review/summary">Summary</a>
-            </nav>
+    ${renderAppHeader({
+      subtitle: "See what was exercised based on observed evidence, and evaluate coverage of critical business flows.",
+      active: "summary",
+      utilityMarkup: `<div class="page-utility" data-page-utility>
+          <button type="button" class="page-utility-trigger" data-page-utility-trigger aria-haspopup="menu" aria-expanded="false">Export <span aria-hidden="true">▾</span></button>
+          <div class="page-utility-panel" data-page-utility-panel hidden>
+            <button type="button" class="page-utility-option" id="summaryPrintAction" data-page-utility-close>Print / Save as PDF</button>
+            <a class="page-utility-option" href="/artifacts/export?format=zip" data-page-utility-close>Download artifact (.zip)</a>
           </div>
-        </div>
-        <details class="export-menu">
-          <summary class="export-trigger">Export <span aria-hidden="true">▾</span></summary>
-          <div class="export-panel">
-            <button type="button" class="export-option" id="summaryPrintAction">Print / Save as PDF</button>
-            <a class="export-option" href="/artifacts/export?format=zip">Download artifact (.zip)</a>
-          </div>
-        </details>
-      </div>
-    </header>
+        </div>`,
+    })}
     <main>
       <div id="summary">Loading…</div>
     </main>
     <script>
-      const exportMenu = document.querySelector(".export-menu");
-      if (exportMenu) {
-        document.addEventListener("click", (event) => {
-          if (!exportMenu.contains(event.target)) {
-            exportMenu.removeAttribute("open");
-          }
-        });
-        exportMenu.querySelectorAll(".export-option").forEach((link) => {
-          link.addEventListener("click", () => {
-            exportMenu.removeAttribute("open");
-          });
-        });
-      }
+      ${renderUtilityMenuScript()}
       document.getElementById("summaryPrintAction")?.addEventListener("click", () => {
         window.print();
       });
@@ -2123,34 +2090,8 @@ function renderCriticalFlowsPage() {
     <meta charset="utf-8" />
     <title>What Did You Test? | Critical Flows</title>
     <style>
-      ${renderFontFaceStyles()}
-      :root {
-        color-scheme: light;
-        --bg: #f8fafc;
-        --bg-soft: #f1f5f9;
-        --panel: #ffffff;
-        --line: #e2e8f0;
-        --line-strong: #cbd5e1;
-        --ink: #0f172a;
-        --muted: #64748b;
-        --muted-2: #94a3b8;
-        --accent: #166534;
-        --accent-soft: #f0fdf4;
-        --danger: #b91c1c;
-        --warn: #a16207;
-        --info: #1d4ed8;
-        --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
-        --font-serif: "Newsreader", "Iowan Old Style", "Palatino Linotype", serif;
-      }
-      * { box-sizing: border-box; }
-      body { margin: 0; font-family: var(--font-sans); color: var(--ink); background: var(--bg); }
-      header { padding: 20px 24px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,0.92); backdrop-filter: blur(10px); position: sticky; top: 0; z-index: 10; }
-      header h1 { margin: 0; font-family: var(--font-serif); font-size: 32px; font-weight: 600; letter-spacing: -0.01em; }
-      header h1 a { color: inherit; text-decoration: none; }
-      header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
-      nav { margin-top: 10px; display: flex; gap: 12px; flex-wrap: wrap; }
-      nav a { color: var(--accent); text-decoration: none; font-family: var(--font-sans); font-size: 15px; font-weight: 600; }
-      nav a.active { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+      ${renderAppShellStyles()}
+      header { position: sticky; top: 0; z-index: 10; }
       main { display: grid; grid-template-columns: 320px 1fr; min-height: calc(100vh - 119px); background: #fff; }
       aside { border-right: 1px solid var(--line); padding: 10px 0 16px; overflow: auto; background: #fff; }
       section { padding: 18px 20px; overflow: auto; background: #fff; }
@@ -2261,15 +2202,10 @@ function renderCriticalFlowsPage() {
     </style>
   </head>
   <body>
-    <header>
-      <h1><a href="/review/summary">What Did You Test?</a></h1>
-      <p>Define expected behaviors and evaluate them against observed execution evidence.</p>
-      <nav>
-        <a href="/review">Observed Behaviors</a>
-        <a class="active" href="${EXPECTED_BEHAVIORS_PATH}">Expected Behaviors</a>
-        <a href="/review/summary">Summary</a>
-      </nav>
-    </header>
+    ${renderAppHeader({
+      subtitle: "Define expected behaviors and evaluate them against observed execution evidence.",
+      active: "expected",
+    })}
     <main>
       <aside>
         <div id="gapSummary"></div>
