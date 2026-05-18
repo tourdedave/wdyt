@@ -2182,6 +2182,8 @@ function renderCriticalFlowsPage() {
       .detail-section h3 { margin: 0; font-family: var(--font-serif); font-size: 20px; font-weight: 600; line-height: 1.15; color: var(--ink); }
       .detail-section p { margin: 0; }
       .detail-support { margin-top: 0; color: var(--muted); }
+      .detail-link { color: var(--accent); text-decoration: none; font-weight: 600; }
+      .detail-link:hover { text-decoration: underline; }
       .definition-list { display: grid; gap: 6px; }
       .definition-row { display: grid; grid-template-columns: 140px 1fr; gap: 12px; padding-top: 7px; border-top: 1px solid var(--line); }
       .definition-row:first-child { border-top: 0; padding-top: 0; }
@@ -2589,34 +2591,39 @@ function renderCriticalFlowsPage() {
           .filter(Boolean);
         const behaviorAction = flow.behavior?.action || "";
         const behaviorQualifiers = Array.isArray(flow.behavior?.qualifiers) ? flow.behavior.qualifiers : [];
+        const formattedQualifiers = behaviorQualifiers.map((term) => term.replaceAll("_", " "));
+        const expectedIntentLabel = behaviorAction
+          ? (formattedQualifiers.length > 0
+              ? behaviorAction + " (" + formattedQualifiers.join(", ") + ")"
+              : behaviorAction)
+          : interpretedBehavior[0] || flow.name;
         const statusText = flow.status === "covered"
           ? "Covered"
           : flow.status === "partial"
             ? "Partially Covered"
             : "Not Covered";
-        const observedMatchMarkup = flow.status === "covered"
-          ? \`<p>Matching observed execution evidence was found for this expected behavior.</p>\`
-          : flow.status === "partial"
-            ? \`<p>Observed execution matched the core behavior, but supporting qualifier evidence was incomplete.</p>\`
-            : \`<p>No matching observed behavior was found in reviewed execution evidence.</p>\`;
-        const coverageRows = [
-          behaviorAction
-            ? \`<div class="definition-row"><div class="definition-term">Expected action</div><div class="definition-value"><strong>\${escapeHtml(behaviorAction)}</strong></div></div>\`
-            : "",
-          behaviorQualifiers.length > 0
-            ? \`<div class="definition-row"><div class="definition-term">Qualifiers</div><div class="definition-value">\${behaviorQualifiers.map((term) => escapeHtml(term.replaceAll("_", " "))).join(", ")}</div></div>\`
-            : "",
-          flow.matchedAction
-            ? \`<div class="definition-row"><div class="definition-term">Observed action</div><div class="definition-value">\${escapeHtml(flow.matchedAction)}</div></div>\`
-            : "",
-        ].filter(Boolean).join("");
+        const renderObservedBehaviorLink = (label) => {
+          if (!label) {
+            return "";
+          }
+          const href = \`/review?q=\${encodeURIComponent(label)}\`;
+          return \`<a class="detail-link" href="\${href}">\${escapeHtml(label)}</a>\`;
+        };
+        const closestObservedMarkup = flow.matchedAction
+          ? \`<p><strong>Closest observed behavior:</strong> \${renderObservedBehaviorLink(flow.matchedAction)}</p>\`
+          : "";
         const coverageResultMarkup = flow.status === "covered"
-          ? \`<p>Covered.</p>\`
+          ? \`<p>Coverage confirmed.</p>\${closestObservedMarkup}\`
           : flow.status === "partial"
-            ? \`\${flow.missingQualifiers.length > 0
-                ? \`<p>Partial coverage.</p><p>Missing qualifiers:</p><ul>\${summarizeItems(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")))}</ul>\`
-                : "<p>Partial coverage.</p><p>Some qualifier details were not found in reviewed execution evidence.</p>"}<p class="detail-support">Potential causes: missing coverage for qualifier-specific cases, behavior naming mismatch, or low-confidence interpretation.</p>\`
-            : \`<p>Missing coverage.</p><p class="detail-support">Potential causes: missing test coverage, naming mismatch, or low-confidence interpretation.</p>\`;
+            ? \`<p>Partial match detected.</p>
+               \${flow.matchedAction ? \`<p><strong>Matched behavior:</strong> \${renderObservedBehaviorLink(flow.matchedAction)}</p>\` : ""}
+               \${flow.missingQualifiers.length > 0
+                 ? \`<p><strong>Missing qualifiers:</strong> \${escapeHtml(flow.missingQualifiers.map((term) => term.replaceAll("_", " ")).join(", "))}</p>\`
+                 : ""}
+               <p class="detail-support">Potential causes: qualifier-specific coverage missing or naming mismatch.</p>\`
+            : \`<p>Missing coverage.</p>
+               \${closestObservedMarkup}
+               <p class="detail-support">Potential causes: missing test coverage, naming mismatch, or low-confidence interpretation.</p>\`;
         return \`
           <div class="stack">
             <div class="detail-header">
@@ -2631,16 +2638,11 @@ function renderCriticalFlowsPage() {
             </div>
             <div class="detail-section">
               <h3>Expected Intent</h3>
-              <ul>\${summarizeItems(interpretedBehavior)}</ul>
-            </div>
-            <div class="detail-section">
-              <h3>Observed Match</h3>
-              \${observedMatchMarkup}
-              \${flow.matchedAction ? \`<p class="detail-support">Observed action: <strong>\${escapeHtml(flow.matchedAction)}</strong></p>\` : ""}
+              <p><strong>\${escapeHtml(expectedIntentLabel)}</strong></p>
+              \${interpretedBehavior.length > 1 ? \`<p class="detail-support">\${escapeHtml(interpretedBehavior.join(" • "))}</p>\` : ""}
             </div>
             <div class="detail-section">
               <h3>Coverage Result</h3>
-              \${coverageRows ? \`<div class="definition-list">\${coverageRows}</div>\` : ""}
               \${coverageResultMarkup}
             </div>
           </div>\`;
