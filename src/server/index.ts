@@ -912,55 +912,6 @@ function renderReviewPage() {
           (unit) =>
             unit.proposalState === "proposed" && (unit.activeDescriptor || unit.proposedDescriptor)
         );
-      const getOverlapGroups = () => {
-        const groups = [];
-        getComparableUnits()
-          .slice()
-          .sort((a, b) => getOverlapVocab(a).length - getOverlapVocab(b).length || a.reviewId.localeCompare(b.reviewId))
-          .forEach((unit) => {
-            const vocab = getOverlapVocab(unit);
-            if (vocab.length === 0) {
-              return;
-            }
-
-            const matchedGroup = groups.find((group) =>
-              group.units.some((candidate) => isOverlapMatch(vocab, getOverlapVocab(candidate)) || isSubsetOverlapMatch(unit, candidate))
-            );
-
-            if (matchedGroup) {
-              matchedGroup.units.push(unit);
-              matchedGroup.vocab = [...new Set([...matchedGroup.vocab, ...vocab])].sort();
-              matchedGroup.key = matchedGroup.vocab.join("||");
-              return;
-            }
-
-            groups.push({
-              key: [...vocab].sort().join("||"),
-              vocab: [...vocab],
-              units: [unit],
-            });
-          });
-
-        return groups
-          .filter((group) => group.units.length > 1)
-          .sort((a, b) => b.units.length - a.units.length || a.vocab.join(" ").localeCompare(b.vocab.join(" ")));
-      };
-      const getOverlapTitle = (group) => {
-        const descriptors = group.units
-          .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
-          .filter(Boolean);
-        if (descriptors.length === 0) {
-          return group.vocab.join(" + ");
-        }
-
-        const counts = new Map();
-        descriptors.forEach((descriptor) => {
-          counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
-        });
-
-        return [...counts.entries()]
-          .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
-      };
       const getStructureKey = (unit) => String(unit.structureKey || "").trim();
       const getStructureGroupTitle = (units) => {
         const descriptors = units
@@ -976,6 +927,31 @@ function renderReviewPage() {
         return [...counts.entries()]
           .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
       };
+      const getOverlapGroups = () => {
+        const groups = new Map();
+        getComparableUnits().forEach((unit) => {
+          const structureKey = getStructureKey(unit);
+          if (!structureKey) {
+            return;
+          }
+
+          const current = groups.get(structureKey);
+          if (current) {
+            current.units.push(unit);
+            return;
+          }
+
+          groups.set(structureKey, {
+            key: structureKey,
+            units: [unit],
+          });
+        });
+
+        return [...groups.values()]
+          .filter((group) => group.units.length > 1)
+          .sort((a, b) => b.units.length - a.units.length || getStructureGroupTitle(a.units).localeCompare(getStructureGroupTitle(b.units)));
+      };
+      const getOverlapTitle = (group) => getStructureGroupTitle(group.units);
       const getDisplayStatus = (unit) => {
         if (unit.interpretationStatus === "edited") return "edited";
         if (unit.interpretationStatus === "reprocessed") return "reprocessed";
@@ -1380,9 +1356,9 @@ function renderReviewPage() {
             \${groups.map((group) => \`
               <article class="overlap-card \${group.key === state.activeOverlapKey ? "active" : ""}" data-key="\${escapeHtml(group.key)}">
                 <div class="overlap-term">\${escapeHtml(getOverlapTitle(group))}</div>
-                <div class="meta">Appears in \${escapeHtml(String(group.units.length))} flows:</div>
+                <div class="meta">\${escapeHtml(group.units.length === 1 ? "Observed in 1 execution:" : \`Observed in \${group.units.length} executions:\`)}</div>
                 <div class="meta">
-                  \${group.units.map((unit) => \`<div>- \${escapeHtml(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
+                  \${group.units.map((unit) => \`<div>- \${escapeHtml(getPrimaryTest(unit) || unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
                 </div>
               </article>\`).join("")}
           </div>\`;

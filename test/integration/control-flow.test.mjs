@@ -4212,7 +4212,7 @@ test("expected behavior edit UI always renders save action and toggles disabled 
   }
 });
 
-test("review page surfaces repeated coverage for proposed review units with matching vocab sets", { timeout: 15_000 }, async () => {
+test("review page surfaces repeated coverage for structurally repeated runs", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-overlap-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -4225,7 +4225,7 @@ test("review page surfaces repeated coverage for proposed review units with matc
       [
         {
           reviewId: "sample-login-dashboard-1",
-          flowId: "sample-login-dashboard-1",
+          flowId: "sample-login-dashboard",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4249,7 +4249,7 @@ test("review page surfaces repeated coverage for proposed review units with matc
         },
         {
           reviewId: "sample-login-dashboard-2",
-          flowId: "sample-login-dashboard-2",
+          flowId: "sample-login-dashboard",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4273,7 +4273,7 @@ test("review page surfaces repeated coverage for proposed review units with matc
         },
         {
           reviewId: "sample-login-dashboard-3",
-          flowId: "sample-login-dashboard-3",
+          flowId: "sample-login-dashboard",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4297,7 +4297,7 @@ test("review page surfaces repeated coverage for proposed review units with matc
         },
         {
           reviewId: "sample-create-report-1",
-          flowId: "sample-create-report-1",
+          flowId: "sample-create-report",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4321,7 +4321,7 @@ test("review page surfaces repeated coverage for proposed review units with matc
         },
         {
           reviewId: "sample-create-report-2",
-          flowId: "sample-create-report-2",
+          flowId: "sample-create-report",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4352,15 +4352,15 @@ test("review page surfaces repeated coverage for proposed review units with matc
   await writeFile(
     path.join(dataDir, "runs.processed.jsonl"),
     [
-      "sample-login-dashboard-1",
-      "sample-login-dashboard-2",
-      "sample-login-dashboard-3",
-      "sample-create-report-1",
-      "sample-create-report-2",
+      ["sample-login-dashboard-1", "sample-login-dashboard"],
+      ["sample-login-dashboard-2", "sample-login-dashboard"],
+      ["sample-login-dashboard-3", "sample-login-dashboard"],
+      ["sample-create-report-1", "sample-create-report"],
+      ["sample-create-report-2", "sample-create-report"],
     ]
-      .map((flowId) =>
+      .map(([reviewId, flowId]) =>
         JSON.stringify({
-          runId: `run-${flowId}`,
+          runId: `run-${reviewId}`,
           suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
           environment: { tool: "demo" },
           endState: {},
@@ -4404,11 +4404,20 @@ test("review page surfaces repeated coverage for proposed review units with matc
 
     const reviewPage = await fetch(`${serverUrl}/review`).then((response) => response.text());
     assert.match(reviewPage, /Repeated Coverage/);
-    assert.match(reviewPage, /Appears in/);
+    assert.match(reviewPage, /Observed in .* executions/);
     assert.doesNotMatch(reviewPage, /reviewed flows/);
 
     const units = await getJson(serverUrl, "/review/units");
     assert.equal(units.length, 5);
+    const loginStructures = units
+      .filter((unit) => (unit.tests || []).some((testName) => testName.startsWith("sample-login-dashboard")))
+      .map((unit) => unit.structureKey);
+    const reportStructures = units
+      .filter((unit) => (unit.tests || []).some((testName) => testName.startsWith("sample-create-report")))
+      .map((unit) => unit.structureKey);
+    assert.equal(new Set(loginStructures).size, 1);
+    assert.equal(new Set(reportStructures).size, 1);
+    assert.notEqual(loginStructures[0], reportStructures[0]);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
@@ -4516,8 +4525,8 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
   }
 });
 
-test("review page groups semantically similar repeated coverage with divergent active vocab", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-semantic-overlap-"));
+test("review page groups structurally identical repeated coverage despite descriptor and vocab drift", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-structural-repeat-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const dataDir = path.join(tempDir, ".wdyt");
@@ -4529,7 +4538,7 @@ test("review page groups semantically similar repeated coverage with divergent a
       [
         {
           reviewId: "dashboard-a",
-          flowId: "dashboard-a",
+          flowId: "dashboard-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4554,7 +4563,7 @@ test("review page groups semantically similar repeated coverage with divergent a
         },
         {
           reviewId: "dashboard-b",
-          flowId: "dashboard-b",
+          flowId: "dashboard-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4579,7 +4588,7 @@ test("review page groups semantically similar repeated coverage with divergent a
         },
         {
           reviewId: "dashboard-c",
-          flowId: "dashboard-c",
+          flowId: "dashboard-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4604,7 +4613,7 @@ test("review page groups semantically similar repeated coverage with divergent a
         },
         {
           reviewId: "search-a",
-          flowId: "search-a",
+          flowId: "search-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4629,7 +4638,7 @@ test("review page groups semantically similar repeated coverage with divergent a
         },
         {
           reviewId: "search-b",
-          flowId: "search-b",
+          flowId: "search-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4661,15 +4670,15 @@ test("review page groups semantically similar repeated coverage with divergent a
   await writeFile(
     path.join(dataDir, "runs.processed.jsonl"),
     [
-      "dashboard-a",
-      "dashboard-b",
-      "dashboard-c",
-      "search-a",
-      "search-b",
+      ["dashboard-a", "dashboard-flow"],
+      ["dashboard-b", "dashboard-flow"],
+      ["dashboard-c", "dashboard-flow"],
+      ["search-a", "search-flow"],
+      ["search-b", "search-flow"],
     ]
-      .map((flowId) =>
+      .map(([reviewId, flowId]) =>
         JSON.stringify({
-          runId: `run-${flowId}`,
+          runId: `run-${reviewId}`,
           suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
           environment: { tool: "demo" },
           endState: {},
@@ -4725,29 +4734,17 @@ test("review page groups semantically similar repeated coverage with divergent a
     );
     assert.equal(dashboardUnits.length, 3);
     assert.equal(searchUnits.length, 2);
-    assert.deepEqual(
-      dashboardUnits.map((unit) => unit.overlapTerms),
-      [
-        ["dashboard", "login"],
-        ["dashboard", "login"],
-        ["dashboard", "login"],
-      ]
-    );
-    assert.deepEqual(
-      searchUnits.map((unit) => unit.overlapTerms),
-      [
-        ["search", "search results"],
-        ["search", "search results"],
-      ]
-    );
+    assert.equal(new Set(dashboardUnits.map((unit) => unit.structureKey)).size, 1);
+    assert.equal(new Set(searchUnits.map((unit) => unit.structureKey)).size, 1);
+    assert.notEqual(dashboardUnits[0].structureKey, searchUnits[0].structureKey);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
   }
 });
 
-test("review page groups identical descriptors when one overlap-term set is a subset of the other", { timeout: 15_000 }, async () => {
-  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-subset-overlap-"));
+test("review page treats structurally distinct runs as separate repeated-coverage groups even when descriptors match", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-distinct-structure-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const dataDir = path.join(tempDir, ".wdyt");
@@ -4759,7 +4756,7 @@ test("review page groups identical descriptors when one overlap-term set is a su
       [
         {
           reviewId: "search-single",
-          flowId: "search-single",
+          flowId: "search-single-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4787,7 +4784,7 @@ test("review page groups identical descriptors when one overlap-term set is a su
         },
         {
           reviewId: "search-repeat",
-          flowId: "search-repeat",
+          flowId: "search-repeat-flow",
           canonical: ["NAVIGATE"],
           count: 1,
           suites: ["examples/demo/sample"],
@@ -4821,10 +4818,13 @@ test("review page groups identical descriptors when one overlap-term set is a su
   );
   await writeFile(
     path.join(dataDir, "runs.processed.jsonl"),
-    ["search-single", "search-repeat"]
-      .map((flowId) =>
+    [
+      ["search-single", "search-single-flow"],
+      ["search-repeat", "search-repeat-flow"],
+    ]
+      .map(([reviewId, flowId]) =>
         JSON.stringify({
-          runId: `run-${flowId}`,
+          runId: `run-${reviewId}`,
           suite: { id: "examples-demo-sample", name: "examples/demo/sample", normalizedName: "examples-demo-sample" },
           environment: { tool: "demo" },
           endState: {},
@@ -4869,16 +4869,9 @@ test("review page groups identical descriptors when one overlap-term set is a su
       ["search-results", "search-results-repeat"].some((testName) => (unit.tests || []).includes(testName))
     );
     assert.equal(searchUnits.length, 2);
-    assert.deepEqual(
-      searchUnits.map((unit) => unit.overlapTerms).sort((a, b) => a.length - b.length || a.join(" ").localeCompare(b.join(" "))),
-      [
-        ["search results"],
-        ["search", "search results"],
-      ]
-    );
-    assert.match(reviewPage, /const isSubsetOverlapMatch = \(leftUnit, rightUnit\) =>/);
-    assert.match(reviewPage, /return minCount > 0 && shared === minCount;/);
-    assert.match(reviewPage, /matchedGroup\.key = matchedGroup\.vocab\.join\("\|\|"\);/);
+    assert.equal(new Set(searchUnits.map((unit) => unit.structureKey)).size, 2);
+    assert.match(reviewPage, /Repeated Coverage/);
+    assert.match(reviewPage, /Observed in .* executions/);
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
