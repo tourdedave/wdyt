@@ -27,14 +27,14 @@ async function main() {
   if (process.env.CHROMIUM_BINARY) {
     options.setChromeBinaryPath(process.env.CHROMIUM_BINARY);
   }
-  // Launch Chromium with the unpacked wdyt extension loaded.
+  // 1. Launch Chromium with the unpacked wdyt extension loaded.
   options.addArguments(`--load-extension=${extensionPath}`);
   if (headless) {
     options.addArguments("--headless=new");
   }
 
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
-  // Bind wdyt capture before visiting the target page.
+  // 2. Bind wdyt capture before visiting the target page.
   await bootstrapBind(driver, buildBootstrapUrl("start"));
 
   try {
@@ -52,7 +52,7 @@ async function main() {
     await driver.wait(until.urlContains("/search"), 15_000);
     await driver.sleep(2_000);
   } finally {
-    // Finalize capture before quitting the browser session.
+    // 3. Finalize capture before quitting the browser session.
     await bootstrapBind(driver, buildBootstrapUrl("finalize"));
     await driver.sleep(4_000);
     await driver.quit();
