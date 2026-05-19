@@ -3,6 +3,13 @@
 This example launches Chromium with the unpacked wdyt extension and performs a
 small Google search flow.
 
+The wdyt-specific pieces are intentionally minimal:
+
+- load the unpacked extension with Chromium launch args
+- visit `/bootstrap?action=start`
+- run a browser flow
+- visit `/bootstrap?action=finalize`
+
 Setup:
 
 ```bash

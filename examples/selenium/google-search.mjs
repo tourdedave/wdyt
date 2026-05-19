@@ -14,12 +14,7 @@ const headless = process.env.HEADLESS === "1";
 function buildBootstrapUrl(action, reason = "completed") {
   const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
   url.searchParams.set("action", action);
-  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
-  if (action === "start") {
-    url.searchParams.set("suiteName", "examples/selenium");
-    url.searchParams.set("testName", "google search hello world");
-    url.searchParams.set("tool", "selenium");
-  } else {
+  if (action === "finalize") {
     url.searchParams.set("reason", reason);
   }
   return url.toString();
@@ -28,7 +23,9 @@ function buildBootstrapUrl(action, reason = "completed") {
 async function main() {
   const options = new chrome.Options();
   options.setBrowserName("chrome");
-  options.setChromeBinaryPath(process.env.CHROMIUM_BINARY ?? "/Applications/Chromium.app/Contents/MacOS/Chromium");
+  if (process.env.CHROMIUM_BINARY) {
+    options.setChromeBinaryPath(process.env.CHROMIUM_BINARY);
+  }
   options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
   if (headless) {

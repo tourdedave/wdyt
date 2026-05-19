@@ -3,6 +3,13 @@
 This example launches Chromium with the unpacked wdyt extension and performs a
 small Google search flow.
 
+The wdyt-specific pieces are intentionally minimal:
+
+- load the unpacked extension with Chromium launch args
+- visit `/bootstrap?action=start`
+- run a browser flow
+- visit `/bootstrap?action=finalize`
+
 Setup:
 
 ```bash
@@ -12,21 +19,13 @@ npm install
 
 Requirements:
 
-- Chromium installed locally
-- ChromeDriver available on your PATH, or Selenium Manager able to resolve a compatible driver
+- a Chromium-compatible browser
+- ChromeDriver on your PATH, or Selenium Manager able to resolve a compatible driver
 
-On macOS, the simplest setup is:
-
-```bash
-brew install --cask chromium
-```
-
-If macOS blocks Chromium with a message like `"Chromium" is damaged and can't be opened`,
-remove the quarantine attribute and launch it once manually:
+If Selenium is not selecting the browser you want, set:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Chromium.app
-open -a /Applications/Chromium.app
+CHROMIUM_BINARY=/path/to/chromium npm run test:selenium
 ```
 
 Run:

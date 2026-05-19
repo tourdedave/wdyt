@@ -40,4 +40,6 @@ Notes:
 - Google may present locale-specific consent or anti-bot UI. The examples use
   `https://www.google.com/ncr` to reduce redirects, but some environments may
   still need minor adjustments.
+- The examples intentionally keep bootstrap metadata minimal. Only `action` is
+  required for the capture handoff shown here.
 - For the controlled app and richer reference suites, use `demo/`.

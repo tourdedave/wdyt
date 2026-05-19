@@ -13,12 +13,7 @@ const headless = process.env.HEADLESS === "1";
 function buildBootstrapUrl(action, reason = "completed") {
   const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
   url.searchParams.set("action", action);
-  url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
-  if (action === "start") {
-    url.searchParams.set("suiteName", "examples/playwright");
-    url.searchParams.set("testName", "google search hello world");
-    url.searchParams.set("tool", "playwright");
-  } else {
+  if (action === "finalize") {
     url.searchParams.set("reason", reason);
   }
   return url.toString();
