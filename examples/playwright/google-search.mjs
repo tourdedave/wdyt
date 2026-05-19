@@ -4,10 +4,9 @@ import { getExtensionPath } from "../../scripts/browser-runtime-helpers.mjs";
 
 const extensionPath = getExtensionPath(import.meta.url);
 const headless = process.env.HEADLESS === "1";
-const serverUrl = "http://127.0.0.1:3876";
 
 function buildBootstrapUrl(action, reason = "completed") {
-  const url = new URL("/bootstrap", serverUrl);
+  const url = new URL("/bootstrap", "http://127.0.0.1:3876");
   url.searchParams.set("action", action);
   if (action === "finalize") {
     url.searchParams.set("reason", reason);
