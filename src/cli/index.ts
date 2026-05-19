@@ -1119,6 +1119,22 @@ async function rebuildReviewArtifacts() {
   console.log("Rebuilt review units from captured evidence.");
 }
 
+async function waitForPendingEnrichment(timeoutMs: number) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    const reviewUnits = await readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), []);
+    const hasPending = reviewUnits.some((unit) => unit.proposalState === "pending" || unit.proposalState === "processing");
+    if (!hasPending) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  throw new Error(`Timed out waiting for pending enrichment after ${timeoutMs}ms`);
+}
+
 function parseSyntheticNumber(args: string[], ...flags: string[]) {
   for (let index = 0; index < args.length; index += 1) {
     if (!flags.includes(args[index])) {
@@ -1173,7 +1189,7 @@ async function main() {
   const artifactUsage = [
     "Usage:",
     "  wdyt artifact",
-    "  wdyt artifact export [--format zip] [--output <path>]",
+    "  wdyt artifact export [--format zip] [--output <path>] [--wait-for-enrichment] [--wait-timeout-ms <ms>]",
     "  wdyt artifact import <zip-path> [more-zip-paths...]",
     "",
     "Commands:",
@@ -1183,6 +1199,8 @@ async function main() {
     "Options:",
     "  -f, --format <format>  Export format: zip (default)",
     "  -o, --output <path>   Output zip path or directory for export",
+    "      --wait-for-enrichment  Wait for pending/processing review-unit enrichment to settle before export",
+    "      --wait-timeout-ms <ms> Timeout for --wait-for-enrichment (default: 300000)",
     "",
     "Default export location:",
     `  zip: ./${DEFAULT_EXPORT_FILE_NAMES.zip}`,
@@ -1243,6 +1261,8 @@ async function main() {
     if (subcommand === "export") {
       let outputPath;
       let format = "zip";
+      let waitForEnrichment = false;
+      let waitTimeoutMs = 300_000;
       for (let index = 1; index < args.length; index += 1) {
         const value = args[index];
         if (value === "--format" || value === "-f") {
@@ -1252,6 +1272,16 @@ async function main() {
         }
         if (value === "--output" || value === "-o") {
           outputPath = args[index + 1];
+          index += 1;
+          continue;
+        }
+        if (value === "--wait-for-enrichment") {
+          waitForEnrichment = true;
+          continue;
+        }
+        if (value === "--wait-timeout-ms") {
+          const parsed = Number.parseInt(args[index + 1] ?? "", 10);
+          waitTimeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
           index += 1;
           continue;
         }
@@ -1269,10 +1299,20 @@ async function main() {
         return;
       }
 
+      if (args.includes("--wait-timeout-ms") && !Number.isFinite(waitTimeoutMs)) {
+        console.error(artifactUsage);
+        process.exitCode = 1;
+        return;
+      }
+
       if (format !== "zip") {
         console.error(artifactUsage);
         process.exitCode = 1;
         return;
+      }
+
+      if (waitForEnrichment) {
+        await waitForPendingEnrichment(waitTimeoutMs);
       }
 
       const targetPath = await exportArtifact({

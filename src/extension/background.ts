@@ -53,8 +53,8 @@ type GetStateMessage = {
 type BeginCaptureMessage = {
   kind: "BEGIN_CAPTURE";
   serverUrl: string;
-  suiteName: string;
-  testName: string;
+  suiteName?: string;
+  testName?: string;
   environment?: ActiveCapture["environment"];
 };
 
@@ -86,11 +86,12 @@ function normalizeName(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, "-");
 }
 
-function createSuiteInfo(name: string) {
+function createSuiteInfo(name?: string) {
+  const nextName = name?.trim() || "unknown-suite";
   return {
-    id: normalizeName(name),
-    name,
-    normalizedName: normalizeName(name),
+    id: normalizeName(nextName),
+    name: nextName,
+    normalizedName: normalizeName(nextName),
   };
 }
 
@@ -223,7 +224,7 @@ function beginCapture(message: BeginCaptureMessage) {
     serverUrl: message.serverUrl,
     suite: createSuiteInfo(message.suiteName),
     environment: message.environment,
-    testName: message.testName,
+    testName: message.testName?.trim() || "unnamed-test",
     startedAt: Date.now(),
     events: [],
     nextSeq: 0,

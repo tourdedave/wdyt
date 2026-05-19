@@ -2302,6 +2302,106 @@ test("artifact export supports an explicit output path", { timeout: 15_000 }, as
   }
 });
 
+test("artifact export can wait for pending enrichment to settle", { timeout: 15_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-artifact-wait-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    const reviewUnitsPath = path.join(dataDir, "review-units.json");
+    await writeFile(
+      reviewUnitsPath,
+      `${JSON.stringify(
+        [
+          {
+            reviewId: "run-pending",
+            runId: "run-pending",
+            flowId: "flow-pending",
+            canonical: ["NAVIGATE"],
+            count: 1,
+            suites: ["integration"],
+            tests: ["pending-flow"],
+            tools: ["integration-test"],
+            browsers: ["chromium 146"],
+            urls: [],
+            targets: [],
+            finalUrls: [],
+            titles: [],
+            headings: [],
+            alerts: [],
+            proposalState: "pending",
+            approvedVocabUsed: [],
+            proposedVocab: [],
+            activeVocab: [],
+            overlapTerms: [],
+            updatedAt: 1,
+          },
+        ],
+        null,
+        2
+      )}\n`,
+      "utf8"
+    );
+
+    const settlePending = new Promise((resolve) => {
+      setTimeout(async () => {
+        await writeFile(
+          reviewUnitsPath,
+          `${JSON.stringify(
+            [
+              {
+                reviewId: "run-pending",
+                runId: "run-pending",
+                flowId: "flow-pending",
+                canonical: ["NAVIGATE"],
+                count: 1,
+                suites: ["integration"],
+                tests: ["pending-flow"],
+                tools: ["integration-test"],
+                browsers: ["chromium 146"],
+                urls: [],
+                targets: [],
+                finalUrls: [],
+                titles: [],
+                headings: [],
+                alerts: [],
+                proposalState: "proposed",
+                approvedVocabUsed: [],
+                proposedVocab: [],
+                activeVocab: [],
+                overlapTerms: [],
+                updatedAt: 2,
+              },
+            ],
+            null,
+            2
+          )}\n`,
+          "utf8"
+        );
+        resolve(undefined);
+      }, 400);
+    });
+
+    const exportPromise = runCli(tempDir, [
+      "artifact",
+      "export",
+      "--wait-for-enrichment",
+      "--wait-timeout-ms",
+      "5000",
+    ]);
+
+    await settlePending;
+    const zipPath = await exportPromise;
+    assert.match(zipPath, /wdyt-artifact\.zip$/);
+
+    const zipEntries = await readZipEntries(zipPath);
+    assert.ok(zipEntries.has("manifest.json"));
+    assert.ok(zipEntries.has("data/review-units.json"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("review module materializes review units, proposes descriptors, and saves review decisions", { timeout: 20_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-ui-"));
   const llmPort = randomPort();
@@ -2654,7 +2754,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /\/review\?q=.*&from=summary/);
     assert.doesNotMatch(page, /\* repeated coverage/);
     assert.doesNotMatch(page, /number = how many flows/);
-    assert.match(page, /Observed Behaviors<\/a>\s*<a href="\/expected-behaviors">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
+    assert.match(page, /Observed Behaviors<\/a>\s*<a\s+href="\/expected-behaviors">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);
   } finally {
     if (child) {
       await stopChildProcess(child);
@@ -2773,7 +2873,7 @@ test("summary page exposes print action and zip download", { timeout: 15_000 }, 
   }
 });
 
-test("API validation rejects missing required fields and accepts omitted optional metadata", { timeout: 15_000 }, async () => {
+test("API validation rejects missing required fields and accepts omitted bootstrap metadata", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-validation-"));
   const port = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
@@ -2791,9 +2891,6 @@ test("API validation rejects missing required fields and accepts omitted optiona
 
     const validBootstrap = await fetchBootstrap(serverUrl, {
       action: "start",
-      serverUrl,
-      suiteName: "validation",
-      testName: "optional metadata omitted",
     });
     assert.match(validBootstrap, /WDYT initializing/);
 
@@ -3305,10 +3402,10 @@ test("critical flows frame missing terms as missing reviewed evidence", { timeou
     assert.match(page, /Missing:/);
     assert.match(page, /Expected behavior not observed in/);
     assert.match(page, /Expected Intent/);
-    assert.match(page, /Observed Match/);
     assert.match(page, /Coverage Result/);
-    assert.match(page, /Partial coverage\./);
-    assert.match(page, /Potential causes: missing coverage for qualifier-specific cases, behavior naming mismatch, or low-confidence interpretation\./);
+    assert.match(page, /Partial match detected\./);
+    assert.match(page, /Missing qualifiers:/);
+    assert.match(page, /Potential causes: qualifier-specific coverage missing or naming mismatch\./);
     assert.doesNotMatch(page, /Interpreted Terms/);
     assert.doesNotMatch(page, /Matched Concepts/);
     assert.doesNotMatch(page, /Matching Descriptors/);
