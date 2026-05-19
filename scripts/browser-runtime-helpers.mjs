@@ -19,3 +19,14 @@ export function getExtensionPath(importMetaUrl) {
     currentDir = parentDir;
   }
 }
+
+export function getHeadlessMode() {
+  return process.env.HEADLESS === "1";
+}
+
+export function getChromiumBinary() {
+  const defaultChromiumBinary =
+    process.platform === "darwin" ? "/Applications/Chromium.app/Contents/MacOS/Chromium" : null;
+
+  return process.env.CHROMIUM_BINARY ?? defaultChromiumBinary;
+}

@@ -1,13 +1,6 @@
 import { Builder, By, Key, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
-
-import { getExtensionPath } from "../../scripts/browser-runtime-helpers.mjs";
-
-const extensionPath = getExtensionPath(import.meta.url);
-const headless = process.env.HEADLESS === "1";
-const defaultChromiumBinary =
-  process.platform === "darwin" ? "/Applications/Chromium.app/Contents/MacOS/Chromium" : null;
-const chromiumBinary = process.env.CHROMIUM_BINARY ?? defaultChromiumBinary;
+import { getChromiumBinary, getExtensionPath, getHeadlessMode } from "../../scripts/browser-runtime-helpers.mjs";
 
 function buildBootstrapUrl(action, reason = "completed") {
   const url = new URL("/bootstrap", "http://127.0.0.1:3876");
@@ -24,6 +17,7 @@ async function bootstrapBind(driver, bootstrapUrl) {
 }
 
 async function main() {
+  const chromiumBinary = getChromiumBinary();
   if (!chromiumBinary) {
     throw new Error(
       "The Selenium example requires Chromium or Chrome for Testing. Set CHROMIUM_BINARY to a compatible browser binary."
@@ -34,8 +28,8 @@ async function main() {
   options.setBrowserName("chrome");
   options.setChromeBinaryPath(chromiumBinary);
   // 1. Launch Chromium with the unpacked wdyt extension loaded.
-  options.addArguments(`--load-extension=${extensionPath}`);
-  if (headless) {
+  options.addArguments(`--load-extension=${getExtensionPath(import.meta.url)}`);
+  if (getHeadlessMode()) {
     options.addArguments("--headless=new");
   }
 

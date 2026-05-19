@@ -1,9 +1,5 @@
 import { chromium } from "playwright";
-
-import { getExtensionPath } from "../../scripts/browser-runtime-helpers.mjs";
-
-const extensionPath = getExtensionPath(import.meta.url);
-const headless = process.env.HEADLESS === "1";
+import { getExtensionPath, getHeadlessMode } from "../../scripts/browser-runtime-helpers.mjs";
 
 function buildBootstrapUrl(action, reason = "completed") {
   const url = new URL("/bootstrap", "http://127.0.0.1:3876");
@@ -23,8 +19,8 @@ async function main() {
   // 1. Launch Chromium with the unpacked wdyt extension loaded.
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
-    headless,
-    args: [`--load-extension=${extensionPath}`],
+    headless: getHeadlessMode(),
+    args: [`--load-extension=${getExtensionPath(import.meta.url)}`],
   });
   const page = context.pages()[0] ?? (await context.newPage());
 
