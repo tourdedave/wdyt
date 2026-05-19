@@ -1,11 +1,10 @@
 # Selenium Example
 
-This example launches Chromium with the unpacked wdyt extension and performs a
-small Google search flow.
+This example performs a small Google search flow with wdyt loaded into Chromium or Chrome for Testing as an unpacked extension.
 
 The wdyt-specific pieces are intentionally minimal:
 
-- load the unpacked extension with Chromium launch args
+- load wdyt into the browser
 - visit `/bootstrap?action=start`
 - run a browser flow
 - visit `/bootstrap?action=finalize`
@@ -19,13 +18,10 @@ npm install
 
 Requirements:
 
-- a Chromium-compatible browser
+- Chromium or Chrome for Testing
 - ChromeDriver on your PATH, or Selenium Manager able to resolve a compatible driver
 
-This example should not run against branded Google Chrome. Use Chromium or
-Chrome for Testing.
-
-On macOS, it defaults to:
+On macOS, the example defaults to:
 
 ```bash
 /Applications/Chromium.app/Contents/MacOS/Chromium
@@ -62,7 +58,8 @@ This example uses the same control flow as Playwright:
 - navigate to the wdyt bootstrap page with `action=finalize`
 - wait briefly for the extension to flush the run
 
-Note:
+Notes:
 
-- Branded Google Chrome 137+ no longer reliably supports unpacked extension loading via the
-  command-line flags used by local automation. Use Chromium or Chrome for Testing for this example.
+- Branded Google Chrome is not a reliable target for extension loading in this automation flow.
+- Use Chromium or Chrome for Testing instead. See the Chromium extensions thread:
+  https://groups.google.com/a/chromium.org/g/chromium-extensions/c/1-g8EFx2BBY/m/S0ET5wPjCAAJ

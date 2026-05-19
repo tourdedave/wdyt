@@ -1,6 +1,11 @@
 import { Builder, By, Key, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
-import { getChromiumBinary, getExtensionPath, getHeadlessMode } from "../../scripts/browser-runtime-helpers.mjs";
+
+import {
+  getChromiumBinary,
+  getExtensionPath,
+  getHeadlessMode,
+} from "../../scripts/browser-runtime-helpers.mjs";
 
 function buildBootstrapUrl(action, reason = "completed") {
   const url = new URL("/bootstrap", "http://127.0.0.1:3876");
@@ -27,17 +32,17 @@ async function main() {
   const options = new chrome.Options();
   options.setBrowserName("chrome");
   options.setChromeBinaryPath(chromiumBinary);
-  // 1. Launch Chromium with the unpacked wdyt extension loaded.
+  // 1. Launch Chromium with the unpacked wdyt extension loaded through Chromium args.
   options.addArguments(`--load-extension=${getExtensionPath(import.meta.url)}`);
   if (getHeadlessMode()) {
     options.addArguments("--headless=new");
   }
 
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
-  // 2. Bind wdyt capture before visiting the target page.
-  await bootstrapBind(driver, buildBootstrapUrl("start"));
 
   try {
+    // 2. Bind wdyt capture before visiting the target page.
+    await bootstrapBind(driver, buildBootstrapUrl("start"));
     await driver.get("https://www.google.com/ncr");
 
     const searchBox = await driver.wait(
