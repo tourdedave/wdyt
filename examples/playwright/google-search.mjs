@@ -26,9 +26,9 @@ async function main() {
     headless,
     args: [`--load-extension=${extensionPath}`],
   });
+  const page = context.pages()[0] ?? (await context.newPage());
 
   try {
-    const page = context.pages()[0] ?? (await context.newPage());
     await bootstrapBind(page, buildBootstrapUrl("start"));
     await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded" });
 
@@ -40,10 +40,9 @@ async function main() {
 
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2_000);
-
+  } finally {
     await bootstrapBind(page, buildBootstrapUrl("finalize"));
     await page.waitForTimeout(4_000);
-  } finally {
     await context.close();
   }
 }

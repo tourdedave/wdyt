@@ -33,10 +33,9 @@ async function main() {
   }
 
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
+  await bootstrapBind(driver, buildBootstrapUrl("start"));
 
   try {
-    await bootstrapBind(driver, buildBootstrapUrl("start"));
-
     await driver.get("https://www.google.com/ncr");
 
     const searchBox = await driver.wait(
@@ -50,10 +49,9 @@ async function main() {
 
     await driver.wait(until.urlContains("/search"), 15_000);
     await driver.sleep(2_000);
-
+  } finally {
     await bootstrapBind(driver, buildBootstrapUrl("finalize"));
     await driver.sleep(4_000);
-  } finally {
     await driver.quit();
   }
 }
