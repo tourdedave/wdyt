@@ -25,7 +25,6 @@ async function main() {
   if (process.env.CHROMIUM_BINARY) {
     options.setChromeBinaryPath(process.env.CHROMIUM_BINARY);
   }
-  options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
   if (headless) {
     options.addArguments("--headless=new");

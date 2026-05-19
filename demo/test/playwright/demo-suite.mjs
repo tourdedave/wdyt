@@ -61,10 +61,7 @@ async function main() {
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
     headless,
-    args: [
-      `--disable-extensions-except=${extensionPath}`,
-      `--load-extension=${extensionPath}`,
-    ],
+    args: [`--load-extension=${extensionPath}`],
   });
 
   try {

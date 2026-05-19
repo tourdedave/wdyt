@@ -70,7 +70,6 @@ function buildChromeOptions() {
   const options = new chrome.Options();
   options.setBrowserName("chrome");
   options.setChromeBinaryPath(process.env.CHROMIUM_BINARY ?? "/Applications/Chromium.app/Contents/MacOS/Chromium");
-  options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
   if (headless) {
     options.addArguments("--headless=new");
