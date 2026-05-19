@@ -4,15 +4,14 @@ import { fileURLToPath } from "node:url";
 import { Builder, By, Key, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 
-import { DEFAULT_SERVER_URL } from "../../dist/shared/constants.js";
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const headless = process.env.HEADLESS === "1";
+const serverUrl = "http://127.0.0.1:3876";
 
 function buildBootstrapUrl(action, reason = "completed") {
-  const url = new URL("/bootstrap", DEFAULT_SERVER_URL);
+  const url = new URL("/bootstrap", serverUrl);
   url.searchParams.set("action", action);
   if (action === "finalize") {
     url.searchParams.set("reason", reason);
