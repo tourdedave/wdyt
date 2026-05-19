@@ -16,6 +16,11 @@ function buildBootstrapUrl(action, reason = "completed") {
   return url.toString();
 }
 
+async function bootstrapBind(driver, bootstrapUrl) {
+  await driver.get(bootstrapUrl);
+  await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
+}
+
 async function main() {
   const options = new chrome.Options();
   options.setBrowserName("chrome");
@@ -30,8 +35,7 @@ async function main() {
   const driver = await new Builder().forBrowser("chrome").setChromeOptions(options).build();
 
   try {
-    await driver.get(buildBootstrapUrl("start"));
-    await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
+    await bootstrapBind(driver, buildBootstrapUrl("start"));
 
     await driver.get("https://www.google.com/ncr");
 
@@ -47,8 +51,7 @@ async function main() {
     await driver.wait(until.urlContains("/search"), 15_000);
     await driver.sleep(2_000);
 
-    await driver.get(buildBootstrapUrl("finalize"));
-    await driver.wait(until.elementLocated(By.css('#status[data-status="ok"]')), 15_000);
+    await bootstrapBind(driver, buildBootstrapUrl("finalize"));
     await driver.sleep(4_000);
   } finally {
     await driver.quit();
