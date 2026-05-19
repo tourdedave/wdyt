@@ -22,7 +22,16 @@ Requirements:
 - a Chromium-compatible browser
 - ChromeDriver on your PATH, or Selenium Manager able to resolve a compatible driver
 
-If Selenium is not selecting the browser you want, set:
+This example should not run against branded Google Chrome. Use Chromium or
+Chrome for Testing.
+
+On macOS, it defaults to:
+
+```bash
+/Applications/Chromium.app/Contents/MacOS/Chromium
+```
+
+Otherwise, or if Selenium is not selecting the browser you want, set:
 
 ```bash
 CHROMIUM_BINARY=/path/to/chromium npm run test:selenium
