@@ -2615,6 +2615,265 @@ test("review rebuild is manual-only and available from the observed behaviors pa
   }
 });
 
+test("refreshing review units preserves already-proposed runs and only enriches new runs", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-incremental-refresh-"));
+  const llmPort = randomPort();
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort);
+  const originalBaseUrl = process.env.WDYT_LLM_BASE_URL;
+  const originalApiKey = process.env.WDYT_LLM_API_KEY;
+  const originalModel = process.env.WDYT_LLM_MODEL;
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    process.env.WDYT_LLM_BASE_URL = llmUrl;
+    process.env.WDYT_LLM_API_KEY = "ollama";
+    process.env.WDYT_LLM_MODEL = "mistral:instruct";
+
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+    const { refreshReviewUnits, loadReviewUnits } = await import(path.join(repoRoot, "dist", "server", "review.js"));
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: "run-existing-reviewed",
+        testName: "existing reviewed flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    await refreshReviewUnits();
+
+    const firstReviewedUnit = await waitForCondition(async () => {
+      const units = await loadReviewUnits();
+      const match = units.find((unit) => unit.reviewId === "run-existing-reviewed");
+      return match?.proposalState === "proposed" ? match : null;
+    });
+
+    const firstProposedAt = firstReviewedUnit.proposedAt;
+    assert.equal(firstReviewedUnit.interpretationStatus, "auto-generated");
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/reports",
+        title: "Reports",
+        heading: "Reports",
+        alertText: null,
+      },
+      run: {
+        id: "run-newly-added",
+        testName: "newly added flow",
+        startedAt: 2,
+        endedAt: 3,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 2000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 2010, seq: 1, target: { tag: "a", text: "Open reports" } },
+      ],
+    });
+
+    await refreshReviewUnits();
+
+    const bothReviewedUnits = await waitForCondition(async () => {
+      const units = await loadReviewUnits();
+      const existing = units.find((unit) => unit.reviewId === "run-existing-reviewed");
+      const added = units.find((unit) => unit.reviewId === "run-newly-added");
+      return existing?.proposalState === "proposed" && added?.proposalState === "proposed"
+        ? { existing, added }
+        : null;
+    });
+
+    assert.equal(bothReviewedUnits.existing.proposedAt, firstProposedAt);
+    assert.equal(bothReviewedUnits.existing.interpretationStatus, "auto-generated");
+    assert.equal(bothReviewedUnits.added.reviewId, "run-newly-added");
+  } finally {
+    process.chdir(originalCwd);
+    process.env.WDYT_LLM_BASE_URL = originalBaseUrl;
+    process.env.WDYT_LLM_API_KEY = originalApiKey;
+    process.env.WDYT_LLM_MODEL = originalModel;
+    llmServer.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("proposal worker resets stranded processing units back to pending on restart", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-recover-processing-"));
+  const llmPort = randomPort();
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmServer = await startMockLlmServer(llmPort);
+  const originalBaseUrl = process.env.WDYT_LLM_BASE_URL;
+  const originalApiKey = process.env.WDYT_LLM_API_KEY;
+  const originalModel = process.env.WDYT_LLM_MODEL;
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    process.env.WDYT_LLM_BASE_URL = llmUrl;
+    process.env.WDYT_LLM_API_KEY = "ollama";
+    process.env.WDYT_LLM_MODEL = "mistral:instruct";
+
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+    const { buildReviewUnits, loadReviewUnits, queueProposalProcessing } = await import(
+      path.join(repoRoot, "dist", "server", "review.js")
+    );
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: "run-stalled-processing",
+        testName: "stalled processing flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    await buildReviewUnits();
+
+    const { writeJsonFile, getReviewUnitsPath, readJsonFile } = await import(path.join(repoRoot, "dist", "shared", "fs.js"));
+    const persistedUnits = await readJsonFile(getReviewUnitsPath(), []);
+    persistedUnits[0].proposalState = "processing";
+    await writeJsonFile(getReviewUnitsPath(), persistedUnits);
+
+    await queueProposalProcessing();
+
+    const recoveredUnit = await waitForCondition(async () => {
+      const units = await loadReviewUnits();
+      const match = units.find((unit) => unit.reviewId === "run-stalled-processing");
+      return match?.proposalState === "proposed" ? match : null;
+    });
+
+    assert.equal(recoveredUnit.reviewId, "run-stalled-processing");
+  } finally {
+    process.chdir(originalCwd);
+    process.env.WDYT_LLM_BASE_URL = originalBaseUrl;
+    process.env.WDYT_LLM_API_KEY = originalApiKey;
+    process.env.WDYT_LLM_MODEL = originalModel;
+    llmServer.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("server startup resumes stranded processing review units", { timeout: 20_000 }, async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-startup-resume-"));
+  const llmPort = randomPort();
+  const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const port = randomPort();
+  const serverUrl = `http://127.0.0.1:${port}`;
+  const llmServer = await startMockLlmServer(llmPort);
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+    const { buildReviewUnits } = await import(path.join(repoRoot, "dist", "server", "review.js"));
+    const { getReviewUnitsPath, readJsonFile, writeJsonFile } = await import(path.join(repoRoot, "dist", "shared", "fs.js"));
+
+    await persistRun({
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/dashboard",
+        title: "Dashboard",
+        heading: "Dashboard",
+        alertText: null,
+      },
+      run: {
+        id: "run-startup-resume",
+        testName: "startup resume flow",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "button", text: "Search" } },
+      ],
+    });
+
+    await buildReviewUnits();
+    const reviewUnits = await readJsonFile(getReviewUnitsPath(), []);
+    reviewUnits[0].proposalState = "processing";
+    await writeJsonFile(getReviewUnitsPath(), reviewUnits);
+
+    const { child } = spawnServer(tempDir, port, {
+      WDYT_LLM_BASE_URL: llmUrl,
+      WDYT_LLM_API_KEY: "ollama",
+      WDYT_LLM_MODEL: "mistral:instruct",
+      WDYT_SKIP_STARTUP_REVIEW_REFRESH: "1",
+    });
+
+    try {
+      await waitForHealth(serverUrl);
+      const recoveredUnit = await waitForCondition(async () => {
+        const units = await getJson(serverUrl, "/review/units");
+        const first = units[0];
+        return first?.proposalState === "proposed" ? first : null;
+      });
+
+      assert.equal(recoveredUnit.reviewId, "run-startup-resume");
+    } finally {
+      await stopChildProcess(child);
+    }
+  } finally {
+    process.chdir(originalCwd);
+    llmServer.close();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("summary page renders executive overview shell with reordered navigation", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-page-"));
   const dataDir = path.join(tempDir, ".wdyt");

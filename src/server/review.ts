@@ -521,12 +521,17 @@ export async function queryReviewUnitViews(input?: {
   };
 }
 
-export async function buildReviewUnits() {
+export async function buildReviewUnits(input?: { preserveExisting?: boolean }) {
   console.log("[WDYT] rebuilding review units from persisted runs");
   logProcessMemoryUsage("review-build:start");
+  const preserveExisting = input?.preserveExisting === true;
   const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
   const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
   const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
+  const existingReviewUnits = preserveExisting
+    ? await readJsonFile<ReviewUnitRecord[]>(getReviewUnitsPath(), [])
+    : [];
+  const existingByReviewId = new Map(existingReviewUnits.map((unit) => [unit.reviewId, unit]));
 
   const reviewUnits: ReviewUnit[] = [];
 
@@ -591,8 +596,8 @@ export async function buildReviewUnits() {
 
   const materialized: ReviewUnitRecord[] = reviewUnits
     .sort((a, b) => b.count - a.count || a.reviewId.localeCompare(b.reviewId))
-    .map((unit) =>
-      materializeActiveFields({
+    .map((unit) => {
+      const baseRecord = {
         reviewId: unit.reviewId,
         runId: unit.runId,
         flowId: unit.flowId,
@@ -609,19 +614,32 @@ export async function buildReviewUnits() {
         titles: [...unit.titles].sort(),
         headings: [...unit.headings].sort(),
         alerts: [...unit.alerts].sort(),
-        proposalState: "pending",
-        approvedVocabUsed: [],
-        proposedVocab: [],
-        activeVocab: [],
-        prerequisiteTerms: [],
-        primaryTerms: [],
-        outcomeTerms: [],
-        uncertainTerms: [],
-        evidenceItems: [],
-        conceptResolutions: [],
-        updatedAt: now,
-      }, vocabulary)
-    );
+      } satisfies Partial<ReviewUnitRecord>;
+      const existing = existingByReviewId.get(unit.reviewId);
+
+      return materializeActiveFields(
+        existing
+          ? {
+              ...existing,
+              ...baseRecord,
+            }
+          : {
+              ...baseRecord,
+              proposalState: "pending",
+              approvedVocabUsed: [],
+              proposedVocab: [],
+              activeVocab: [],
+              prerequisiteTerms: [],
+              primaryTerms: [],
+              outcomeTerms: [],
+              uncertainTerms: [],
+              evidenceItems: [],
+              conceptResolutions: [],
+              updatedAt: now,
+            },
+        vocabulary
+      );
+    });
 
   await saveReviewUnits(materialized);
   console.log(`[WDYT] review units ready count=${materialized.length}`);
@@ -972,6 +990,23 @@ export async function queueProposalProcessing() {
   logProcessMemoryUsage("proposal-worker:start");
 
   try {
+    const reviewUnits = await loadReviewUnits();
+    const stalledUnits = reviewUnits.filter((unit) => unit.proposalState === "processing");
+    if (stalledUnits.length > 0) {
+      const stalledIds = new Set(stalledUnits.map((unit) => unit.reviewId));
+      await saveReviewUnits(
+        reviewUnits.map((unit) =>
+          stalledIds.has(unit.reviewId)
+            ? {
+                ...unit,
+                proposalState: "pending",
+                updatedAt: Date.now(),
+              }
+            : unit
+        )
+      );
+    }
+
     while (true) {
       const reviewUnits = await loadReviewUnits();
       const vocabulary = await loadVocabulary();
@@ -1015,7 +1050,7 @@ export async function queueProposalProcessing() {
 export async function refreshReviewUnits() {
   console.log("[WDYT] refreshing review units");
   logProcessMemoryUsage("review-refresh:start");
-  await buildReviewUnits();
+  await buildReviewUnits({ preserveExisting: true });
   void queueProposalProcessing();
   logProcessMemoryUsage("review-refresh:queued");
 }

@@ -26,6 +26,7 @@ import {
   loadReviewUnits,
   loadReviewUnitView,
   loadReviewUnitViews,
+  queueProposalProcessing,
   queryReviewUnitViews,
   refreshReviewUnits,
   requestReviewUnitReprocess,
@@ -3495,6 +3496,7 @@ const server = http.createServer(async (req, res) => {
 
 await ensureDataDir();
 startMemoryLogging();
+void queueProposalProcessing();
 
 server.listen(PORT, HOST, () => {
   console.log(`WDYT server listening on http://${HOST}:${PORT}`);
