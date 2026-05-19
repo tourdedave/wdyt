@@ -1,0 +1,14 @@
+{
+  "name": "wdyt-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:playwright": "node playwright/google-search.mjs",
+    "test:selenium": "node selenium/google-search.mjs",
+    "test": "npm run test:playwright && npm run test:selenium"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.2",
+    "selenium-webdriver": "^4.35.0"
+  }
+}

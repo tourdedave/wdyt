@@ -1,12 +1,12 @@
 # Selenium Demo Suite
 
 This suite exercises the controlled demo app using Selenium + Chromium with
-WDYT integration managed through setup/teardown hooks.
+wdyt integration managed through setup/teardown hooks.
 
 Setup:
 
 ```bash
-cd examples/demo/selenium
+cd demo
 npm install
 ```
 
@@ -27,17 +27,17 @@ open -a /Applications/Chromium.app
 Run:
 
 ```bash
-npm test
+npm run test:selenium
 ```
 
 Optional headless mode:
 
 ```bash
-HEADLESS=1 npm test
+HEADLESS=1 npm run test:selenium
 ```
 
 Optional bounded parallelism:
 
 ```bash
-DEMO_CONCURRENCY=10 npm test
+DEMO_CONCURRENCY=10 npm run test:selenium
 ```

@@ -1,12 +1,12 @@
 # Selenium Example
 
-This example launches Chromium with the unpacked WDYT extension and performs a
+This example launches Chromium with the unpacked wdyt extension and performs a
 small Google search flow.
 
 Setup:
 
 ```bash
-cd examples/selenium
+cd examples
 npm install
 ```
 
@@ -32,13 +32,13 @@ open -a /Applications/Chromium.app
 Run:
 
 ```bash
-npm test
+npm run test:selenium
 ```
 
 Optional headless mode:
 
 ```bash
-HEADLESS=1 npm test
+HEADLESS=1 npm run test:selenium
 ```
 
 After running the example, inspect flows from the repo root:
@@ -49,9 +49,9 @@ wdyt flows
 
 This example uses the same control flow as Playwright:
 
-- navigate to the WDYT bootstrap page with `action=start`
+- navigate to the wdyt bootstrap page with `action=start`
 - perform the Google search
-- navigate to the WDYT bootstrap page with `action=finalize`
+- navigate to the wdyt bootstrap page with `action=finalize`
 - wait briefly for the extension to flush the run
 
 Note:

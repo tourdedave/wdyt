@@ -1,23 +1,23 @@
 # Playwright Demo Suite
 
-This suite exercises the controlled demo app using Playwright with WDYT
+This suite exercises the controlled demo app using Playwright with wdyt
 integration managed through setup/teardown hooks.
 
 Setup:
 
 ```bash
-cd examples/demo/playwright
+cd demo
 npm install
 ```
 
 Run:
 
 ```bash
-npm test
+npm run test:playwright
 ```
 
 Optional headless mode:
 
 ```bash
-HEADLESS=1 npm test
+HEADLESS=1 npm run test:playwright
 ```

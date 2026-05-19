@@ -1,28 +1,28 @@
 # Playwright Example
 
-This example launches Chromium with the unpacked WDYT extension and performs a
+This example launches Chromium with the unpacked wdyt extension and performs a
 small Google search flow.
 
 Setup:
 
 ```bash
-cd examples/playwright
+cd examples
 npm install
 ```
 
 Run:
 
 ```bash
-npm test
+npm run test:playwright
 ```
 
 Optional headless mode:
 
 ```bash
-HEADLESS=1 npm test
+HEADLESS=1 npm run test:playwright
 ```
 
-Expected WDYT behavior:
+Expected wdyt behavior:
 
 - the bootstrap page is opened with `action=start` to begin capture
 - page navigation and user interactions are captured by the extension

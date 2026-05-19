@@ -17,7 +17,7 @@ function buildBootstrapUrl(action, testName, reason = "completed") {
   url.searchParams.set("action", action);
   url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
   if (action === "start") {
-    url.searchParams.set("suiteName", "examples/demo/playwright");
+    url.searchParams.set("suiteName", "demo/test/playwright");
     url.searchParams.set("testName", testName);
     url.searchParams.set("tool", "playwright");
   } else {

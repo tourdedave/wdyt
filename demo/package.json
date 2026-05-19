@@ -1,0 +1,18 @@
+{
+  "name": "wdyt-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "app:build": "node ../node_modules/typescript/bin/tsc -p app/tsconfig.json && node app/scripts/copy-static.mjs",
+    "app:start": "node app/dist/server.js",
+    "app:dev": "npm run app:build && npm run app:start",
+    "test:playwright": "node test/playwright/demo-suite.mjs",
+    "test:selenium": "node test/selenium/demo-suite.mjs",
+    "test": "npm run test:playwright && npm run test:selenium"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.2",
+    "selenium-webdriver": "^4.35.0",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,36 +1,43 @@
-# WDYT Example Tests
+# wdyt examples
 
-This directory contains end-to-end example tests that exercise WDYT with
-different browser automation tools.
+This directory contains framework-level reference implementations for wdyt.
 
-Current suites:
+Current references:
 
-- `smoke/playwright/`: Chromium + extension + Google search smoke test
-- `smoke/selenium/`: Chromium + extension + Google search smoke test
-- `demo/playwright/`: hook-based suite against the controlled demo app
-- `demo/selenium/`: hook-based suite against the controlled demo app
+- `playwright/`: Chromium + extension + Google search flow
+- `selenium/`: Chromium + extension + Google search flow
 
-Smoke examples are intentionally small and focused on proving the WDYT loop:
+These examples are intentionally small and focused on proving the wdyt loop:
 
-1. launch a browser with the built WDYT extension loaded
-2. open the WDYT bootstrap page with `action=start` to begin capture for a named suite/test
-4. perform a small interaction flow on a real page
-5. open the WDYT bootstrap page with `action=finalize`
-6. let the extension flush one buffered capture to `/ingest`
-7. inspect `wdyt flows` on the server side
+1. launch a browser with the built wdyt extension loaded
+2. open the wdyt bootstrap page with `action=start` to begin capture
+3. perform a small interaction flow on a real page
+4. open the wdyt bootstrap page with `action=finalize`
+5. let the extension flush one buffered capture to `/ingest`
+6. inspect `wdyt flows` on the server side
+
+Setup:
+
+```bash
+cd examples
+npm install
+```
+
+Run:
+
+```bash
+npm run test:playwright
+npm run test:selenium
+```
 
 Prerequisites:
 
 - run `npm run build` in the repo root so `dist/extension/` exists
-- start the WDYT server with `node dist/server/index.js`
-- install the dependencies in the specific example directory you want to run
+- start the wdyt server with `node dist/server/index.js`
 
 Notes:
 
-- These are smoke tests, not stable production tests.
 - Google may present locale-specific consent or anti-bot UI. The examples use
   `https://www.google.com/ncr` to reduce redirects, but some environments may
   still need minor adjustments.
-
-The `demo/` suites are the recommended structure for evaluating reducer quality
-and future semantic descriptions against the controlled app in `apps/demo`.
+- For the controlled app and richer reference suites, use `demo/`.

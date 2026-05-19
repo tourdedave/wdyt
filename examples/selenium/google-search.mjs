@@ -4,10 +4,10 @@ import { fileURLToPath } from "node:url";
 import { Builder, By, Key, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 
-import { DEFAULT_SERVER_URL } from "../../../dist/shared/constants.js";
+import { DEFAULT_SERVER_URL } from "../../dist/shared/constants.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../../..");
+const repoRoot = path.resolve(__dirname, "../..");
 const extensionPath = path.join(repoRoot, "dist", "extension");
 const headless = process.env.HEADLESS === "1";
 
@@ -16,7 +16,7 @@ function buildBootstrapUrl(action, reason = "completed") {
   url.searchParams.set("action", action);
   url.searchParams.set("serverUrl", DEFAULT_SERVER_URL);
   if (action === "start") {
-    url.searchParams.set("suiteName", "examples/smoke/selenium");
+    url.searchParams.set("suiteName", "examples/selenium");
     url.searchParams.set("testName", "google search hello world");
     url.searchParams.set("tool", "selenium");
   } else {
