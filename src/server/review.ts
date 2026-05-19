@@ -124,6 +124,18 @@ function getVariantSignature(record: ProcessedRunRecord) {
   });
 }
 
+function normalizeStructureValues(values: string[] | undefined) {
+  return [...new Set((values ?? []).map((value) => String(value).trim().toLowerCase()).filter(Boolean))].sort();
+}
+
+export function getReviewUnitStructureKey(
+  unit: Pick<ReviewUnitRecord, "flowId" | "canonical">
+) {
+  return String(unit.flowId || "").trim() || JSON.stringify({
+    canonical: Array.isArray(unit.canonical) ? unit.canonical.map((step) => String(step).trim()) : [],
+  });
+}
+
 function normalizeStringList(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -304,6 +316,7 @@ function materializeActiveFields(unit: ReviewUnitRecord, vocabulary: VocabularyE
 
   return {
     ...unit,
+    structureKey: getReviewUnitStructureKey(unit),
     activeDescriptor,
     activeVocab,
     prerequisiteTerms: Array.isArray(unit.prerequisiteTerms) ? unit.prerequisiteTerms : [],
@@ -497,14 +510,21 @@ export async function queryReviewUnitViews(input?: {
   page?: number;
   pageSize?: number;
   query?: string;
+  structureKey?: string;
 }) {
   const page = Number.isFinite(input?.page) && (input?.page ?? 0) > 0 ? Math.floor(input?.page ?? 1) : 1;
   const requestedPageSize =
     Number.isFinite(input?.pageSize) && (input?.pageSize ?? 0) > 0 ? Math.floor(input?.pageSize ?? 50) : 50;
   const pageSize = Math.max(1, Math.min(requestedPageSize, 100));
   const query = input?.query?.trim() ?? "";
+  const structureKey = input?.structureKey?.trim() ?? "";
   const allUnits = await loadReviewUnitViews();
-  const filteredUnits = query ? allUnits.filter((unit) => matchesReviewUnitQuery(unit, query)) : allUnits;
+  const structurallyFilteredUnits = structureKey
+    ? allUnits.filter((unit) => unit.structureKey === structureKey)
+    : allUnits;
+  const filteredUnits = query
+    ? structurallyFilteredUnits.filter((unit) => matchesReviewUnitQuery(unit, query))
+    : structurallyFilteredUnits;
   const total = filteredUnits.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const clampedPage = Math.min(page, totalPages);
@@ -518,6 +538,7 @@ export async function queryReviewUnitViews(input?: {
     pageSize,
     totalPages,
     query,
+    structureKey,
   };
 }
 

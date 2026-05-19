@@ -2874,6 +2874,84 @@ test("server startup resumes stranded processing review units", { timeout: 20_00
   }
 });
 
+test("review units with the same structural flow share a structure key despite final URL drift", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-structure-key-"));
+  const originalCwd = process.cwd();
+
+  try {
+    process.chdir(tempDir);
+    const { persistRun } = await import(path.join(repoRoot, "dist", "server", "storage.js"));
+    const { buildReviewUnits, loadReviewUnits, queryReviewUnitViews } = await import(
+      path.join(repoRoot, "dist", "server", "review.js")
+    );
+
+    const baseRun = {
+      suite: {
+        id: "integration",
+        name: "integration",
+        normalizedName: "integration",
+      },
+      environment: {
+        tool: "integration-test",
+      },
+      events: [
+        { type: "navigate", ts: 1000, seq: 0, url: "http://127.0.0.1:4010/login" },
+        { type: "click", ts: 1010, seq: 1, target: { tag: "a", text: "Open reports" } },
+      ],
+    };
+
+    await persistRun({
+      ...baseRun,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/reports?source=first",
+        title: "Reports",
+        heading: "Reports",
+        alertText: null,
+      },
+      run: {
+        id: "run-structure-a",
+        testName: "reports first",
+        startedAt: 0,
+        endedAt: 1,
+        reason: "completed",
+      },
+    });
+
+    await persistRun({
+      ...baseRun,
+      endState: {
+        finalUrl: "http://127.0.0.1:4010/reports?source=second",
+        title: "Reports",
+        heading: "Reports",
+        alertText: null,
+      },
+      run: {
+        id: "run-structure-b",
+        testName: "reports second",
+        startedAt: 2,
+        endedAt: 3,
+        reason: "completed",
+      },
+    });
+
+    await buildReviewUnits();
+
+    const units = await loadReviewUnits();
+    assert.equal(units.length, 2);
+    assert.equal(units[0].structureKey, units[1].structureKey);
+
+    const groupedQuery = await queryReviewUnitViews({
+      structureKey: units[0].structureKey,
+      page: 1,
+      pageSize: 10,
+    });
+    assert.equal(groupedQuery.total, 2);
+  } finally {
+    process.chdir(originalCwd);
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("summary page renders executive overview shell with reordered navigation", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-summary-page-"));
   const dataDir = path.join(tempDir, ".wdyt");
@@ -3010,7 +3088,7 @@ test("summary page renders executive overview shell with reordered navigation", 
     assert.match(page, /Missing/);
     assert.doesNotMatch(page, /Repeated Coverage/);
     assert.match(page, /Observed in \d+ execution(?:s)?/);
-    assert.match(page, /\/review\?q=.*&from=summary/);
+    assert.match(page, /\/review\?structureKey=.*&from=summary/);
     assert.doesNotMatch(page, /\* repeated coverage/);
     assert.doesNotMatch(page, /number = how many flows/);
     assert.match(page, /Observed Behaviors<\/a>\s*<a\s+href="\/expected-behaviors">Expected Behaviors<\/a>\s*<a class="active" href="\/review\/summary">Summary<\/a>/);

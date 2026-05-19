@@ -92,6 +92,7 @@ export type ReviewUnitRecord = {
   reviewId: string;
   runId: string;
   flowId: string;
+  structureKey?: string;
   variantSignature?: string;
   canonical: ReducedStep[];
   count: number;

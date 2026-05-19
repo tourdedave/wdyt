@@ -858,6 +858,7 @@ function renderReviewPage() {
         totalUnits: 0,
         totalPages: 1,
         query: "",
+        structureKey: "",
         fromSummary: false,
       };
       const summarize = (value) => Array.isArray(value) && value.length > 0 ? value.join(", ") : "-";
@@ -957,6 +958,21 @@ function renderReviewPage() {
           counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
         });
 
+        return [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
+      };
+      const getStructureKey = (unit) => String(unit.structureKey || "").trim();
+      const getStructureGroupTitle = (units) => {
+        const descriptors = units
+          .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
+          .filter(Boolean);
+        if (descriptors.length === 0) {
+          return units[0]?.canonical?.join(" → ") || "Observed behavior";
+        }
+        const counts = new Map();
+        descriptors.forEach((descriptor) => {
+          counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
+        });
         return [...counts.entries()]
           .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
       };
@@ -1159,26 +1175,36 @@ function renderReviewPage() {
 
         return haystacks.some((value) => String(value || "").toLowerCase().includes(textQuery));
       };
+      const matchesStructureKey = (unit, structureKey) => {
+        const normalizedKey = String(structureKey || "").trim();
+        if (!normalizedKey) {
+          return true;
+        }
+        return String(unit.structureKey || "") === normalizedKey;
+      };
       const getVisibleUnits = () => {
         if (state.mode === "scaled") {
           return state.units;
         }
-        return state.query ? state.allUnits.filter((unit) => matchesReviewQuery(unit, state.query)) : state.allUnits;
+        return state.allUnits.filter((unit) => matchesStructureKey(unit, state.structureKey) && matchesReviewQuery(unit, state.query));
       };
       const syncReviewUrl = () => {
         const params = new URLSearchParams();
+        if (state.structureKey) {
+          params.set("structureKey", state.structureKey);
+        }
         if (state.query) {
           params.set("q", state.query);
-          if (state.fromSummary) {
-            params.set("from", "summary");
-          }
-        } else {
+        } else if (!state.structureKey) {
           if (state.selectedId) {
             params.set("reviewId", state.selectedId);
           }
           if (state.activeOverlapKey) {
             params.set("overlapKey", state.activeOverlapKey);
           }
+        }
+        if (state.fromSummary && (state.query || state.structureKey)) {
+          params.set("from", "summary");
         }
         const next = params.toString() ? \`/review?\${params.toString()}\` : "/review";
         window.history.replaceState(null, "", next);
@@ -1199,6 +1225,7 @@ function renderReviewPage() {
         const initialReviewId = state.initialized ? null : params.get("reviewId");
         const initialOverlapKey = state.initialized ? null : params.get("overlapKey");
         const initialQuery = state.initialized ? state.query : (params.get("q") ?? "").trim();
+        const initialStructureKey = state.initialized ? state.structureKey : (params.get("structureKey") ?? "").trim();
         const fromSummary = state.initialized ? state.fromSummary : params.get("from") === "summary";
         const [vocabRes, runtimeRes, metaRes] = await Promise.all([
           fetch("/review/vocabulary"),
@@ -1217,7 +1244,8 @@ function renderReviewPage() {
         state.pageSize = meta.pageSize;
         state.totalUnits = meta.total;
         state.query = initialQuery;
-        state.fromSummary = fromSummary && initialQuery.length > 0;
+        state.structureKey = initialStructureKey;
+        state.fromSummary = fromSummary && (initialQuery.length > 0 || initialStructureKey.length > 0);
 
         if (state.mode === "full") {
           const unitsRes = await fetch("/review/units");
@@ -1245,7 +1273,7 @@ function renderReviewPage() {
             state.selectedId = activeUnits[0]?.reviewId ?? visibleUnits[0]?.reviewId ?? null;
           }
         } else {
-          const queryRes = await fetch(\`/review/units/query?page=\${encodeURIComponent(String(state.page))}&pageSize=\${encodeURIComponent(String(state.pageSize))}&q=\${encodeURIComponent(state.query)}\`);
+          const queryRes = await fetch(\`/review/units/query?page=\${encodeURIComponent(String(state.page))}&pageSize=\${encodeURIComponent(String(state.pageSize))}&q=\${encodeURIComponent(state.query)}&structureKey=\${encodeURIComponent(state.structureKey)}\`);
           const paged = await queryRes.json();
           state.units = paged.units;
           state.allUnits = [];
@@ -1288,7 +1316,7 @@ function renderReviewPage() {
               <span>Search observed behaviors</span>
               <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search behaviors, tests, terms, or confidence:low" />
             </label>
-            \${state.fromSummary && state.query ? '<div class="filter-indicator">Filtered from Summary <button type="button" id="clearSummaryFilter" aria-label="Clear summary filter">×</button></div>' : ""}
+            \${state.fromSummary && (state.query || state.structureKey) ? '<div class="filter-indicator">Filtered from Summary <button type="button" id="clearSummaryFilter" aria-label="Clear summary filter">×</button></div>' : ""}
           </div>\`;
 
         const input = document.getElementById("reviewSearchInput");
@@ -1298,6 +1326,7 @@ function renderReviewPage() {
           }
           state.query = input.value.trim();
           state.fromSummary = false;
+          state.structureKey = "";
           state.page = 1;
           state.selectedId = null;
           await loadState();
@@ -1305,6 +1334,7 @@ function renderReviewPage() {
         input?.addEventListener("search", async () => {
           state.query = input.value.trim();
           state.fromSummary = false;
+          state.structureKey = "";
           state.page = 1;
           state.selectedId = null;
           await loadState();
@@ -1316,12 +1346,14 @@ function renderReviewPage() {
           }
           state.query = nextQuery;
           state.fromSummary = false;
+          state.structureKey = "";
           state.page = 1;
           state.selectedId = null;
           await loadState();
         });
         document.getElementById("clearSummaryFilter")?.addEventListener("click", async () => {
           state.query = "";
+          state.structureKey = "";
           state.fromSummary = false;
           state.page = 1;
           state.selectedId = null;
@@ -1896,6 +1928,21 @@ function renderReviewSummaryPage() {
         return [...counts.entries()]
           .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
       };
+      const getStructureKey = (unit) => String(unit.structureKey || "").trim();
+      const getStructureGroupTitle = (units) => {
+        const descriptors = units
+          .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → ")).trim())
+          .filter(Boolean);
+        if (descriptors.length === 0) {
+          return units[0]?.canonical?.join(" → ") || "Observed behavior";
+        }
+        const counts = new Map();
+        descriptors.forEach((descriptor) => {
+          counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
+        });
+        return [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
+      };
       const getGapSummary = (flows) => {
         const summary = new Map();
         flows.forEach((flow) => {
@@ -1925,45 +1972,38 @@ function renderReviewSummaryPage() {
       const redirectToLaunchpad = () => {
         window.location.assign("/review");
       };
-      const getUniqueFlows = (units, overlapGroups) => {
-        const clusteredIds = new Set(overlapGroups.flatMap((group) => group.units.map((unit) => unit.reviewId)));
-        const representatives = overlapGroups.map((group) => ({
-          kind: "cluster",
-          key: group.key,
-          title: getOverlapTitle(group),
-          count: group.units.length,
-          reviewId: group.units[0]?.reviewId || "",
-          prerequisites: [...new Set(group.units.flatMap((unit) => unit.prerequisites || []))].sort(),
-        }));
-        const singletons = getActiveUnits(units)
-          .filter((unit) => !clusteredIds.has(unit.reviewId))
-          .map((unit) => ({
-            kind: "unit",
-            reviewId: unit.reviewId,
-            title: unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "),
-            count: 1,
-            prerequisites: unit.prerequisites || [],
-          }));
-        const grouped = new Map();
-        [...representatives, ...singletons].forEach((item) => {
-          const title = String(item.title || "").trim();
-          const key = title.toLowerCase();
-          const current = grouped.get(key);
+      const getUniqueFlows = (units) => {
+        const groups = new Map();
+        getActiveUnits(units).forEach((unit) => {
+          const structureKey = getStructureKey(unit);
+          const key = structureKey || unit.reviewId;
+          const current = groups.get(key);
           if (!current) {
-            grouped.set(key, { ...item, title, prerequisites: [...new Set(item.prerequisites || [])] });
+            groups.set(key, {
+              structureKey,
+              reviewId: unit.reviewId,
+              units: [unit],
+              count: 1,
+              prerequisites: [...new Set(unit.prerequisites || [])],
+            });
             return;
           }
 
-          current.count += item.count;
-          current.prerequisites = [...new Set([...(current.prerequisites || []), ...(item.prerequisites || [])])];
-          if (current.kind !== "cluster" && item.kind === "cluster") {
-            current.kind = item.kind;
-            current.reviewId = item.reviewId;
-            current.key = item.key;
-          }
+          current.units.push(unit);
+          current.count += 1;
+          current.prerequisites = [...new Set([...(current.prerequisites || []), ...(unit.prerequisites || [])])];
         });
 
-        return [...grouped.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
+        return [...groups.values()]
+          .map((group) => ({
+            kind: group.count > 1 ? "cluster" : "unit",
+            structureKey: group.structureKey,
+            reviewId: group.reviewId,
+            title: getStructureGroupTitle(group.units),
+            count: group.count,
+            prerequisites: [...new Set(group.prerequisites || [])].sort(),
+          }))
+          .sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
       };
       const renderKpiCard = (label, value, href, tone = "", filter = "") => \`
         <a class="kpi-card \${escapeHtml(tone)}" href="\${escapeHtml(href)}" \${filter ? \`data-kpi-filter="\${escapeHtml(filter)}"\` : ""}>
@@ -1983,7 +2023,7 @@ function renderReviewSummaryPage() {
         }
         const activeUnits = getActiveUnits(units);
         const overlapGroups = getOverlapGroups(units);
-        const uniqueFlows = getUniqueFlows(units, overlapGroups);
+        const uniqueFlows = getUniqueFlows(units);
         const criticalFlows = criticalFlowState.flows || [];
         const coveredCount = criticalFlows.filter((flow) => flow.status === "covered").length;
         const partialCount = criticalFlows.filter((flow) => flow.status === "partial").length;
@@ -2019,11 +2059,11 @@ function renderReviewSummaryPage() {
                 <div class="unique-list">
                   \${uniqueFlows.map((item) => \`
                     \${item.kind === "cluster"
-                      ? \`<a class="unique-link unique-row" href="/review?q=\${encodeURIComponent(item.title)}&from=summary">
+                      ? \`<a class="unique-link unique-row" href="/review?structureKey=\${encodeURIComponent(item.structureKey || "")}&from=summary">
                           <div class="unique-title">\${escapeHtml(item.title)}</div>
                           <div class="unique-meta">\${escapeHtml(item.count === 1 ? "Observed in 1 execution" : \`Observed in \${item.count} executions\`)}</div>
                         </a>\`
-                      : \`<a class="unique-link unique-row" href="/review?q=\${encodeURIComponent(item.title)}&from=summary">
+                      : \`<a class="unique-link unique-row" href="/review?structureKey=\${encodeURIComponent(item.structureKey || "")}&from=summary">
                           <div class="unique-title">\${escapeHtml(item.title)}</div>
                           <div class="unique-meta">\${escapeHtml(item.count === 1 ? "Observed in 1 execution" : \`Observed in \${item.count} executions\`)}</div>
                         </a>\`}\`).join("")}
@@ -3228,6 +3268,7 @@ const server = http.createServer(async (req, res) => {
     const page = Number.parseInt(requestUrl?.searchParams.get("page") ?? "1", 10);
     const pageSize = Number.parseInt(requestUrl?.searchParams.get("pageSize") ?? String(REVIEW_PAGE_SIZE), 10);
     const query = requestUrl?.searchParams.get("q") ?? "";
+    const structureKey = requestUrl?.searchParams.get("structureKey") ?? "";
     writeJson(
       res,
       200,
@@ -3235,6 +3276,7 @@ const server = http.createServer(async (req, res) => {
         page,
         pageSize,
         query,
+        structureKey,
       })
     );
     return;
