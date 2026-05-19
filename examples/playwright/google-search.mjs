@@ -1,11 +1,8 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { chromium } from "playwright";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../..");
-const extensionPath = path.join(repoRoot, "dist", "extension");
+import { getExtensionPath } from "../../scripts/browser-runtime-helpers.mjs";
+
+const extensionPath = getExtensionPath(import.meta.url);
 const headless = process.env.HEADLESS === "1";
 const serverUrl = "http://127.0.0.1:3876";
 

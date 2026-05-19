@@ -1,14 +1,10 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
 import { Builder, By, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 
 import { DEFAULT_SERVER_URL } from "../../../dist/shared/constants.js";
+import { getExtensionPath } from "../../../scripts/browser-runtime-helpers.mjs";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(__dirname, "../../..");
-const extensionPath = path.join(repoRoot, "dist", "extension");
+const extensionPath = getExtensionPath(import.meta.url);
 const demoBaseUrl = "http://127.0.0.1:4010";
 const headless = process.env.HEADLESS === "1";
 const demoPassword = "wdyt-demo-2026!";
