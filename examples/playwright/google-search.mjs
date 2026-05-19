@@ -21,6 +21,7 @@ async function bootstrapBind(page, bootstrapUrl) {
 }
 
 async function main() {
+  // Launch Chromium with the unpacked wdyt extension loaded.
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
     headless,
@@ -29,6 +30,7 @@ async function main() {
   const page = context.pages()[0] ?? (await context.newPage());
 
   try {
+    // Bind wdyt capture before visiting the target page.
     await bootstrapBind(page, buildBootstrapUrl("start"));
     await page.goto("https://www.google.com/ncr", { waitUntil: "domcontentloaded" });
 
@@ -41,6 +43,7 @@ async function main() {
     await page.waitForLoadState("domcontentloaded");
     await page.waitForTimeout(2_000);
   } finally {
+    // Finalize capture before closing the browser context.
     await bootstrapBind(page, buildBootstrapUrl("finalize"));
     await page.waitForTimeout(4_000);
     await context.close();
