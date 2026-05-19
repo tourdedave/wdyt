@@ -28,6 +28,7 @@ async function main() {
     options.setChromeBinaryPath(process.env.CHROMIUM_BINARY);
   }
   // 1. Launch Chromium with the unpacked wdyt extension loaded.
+  options.addArguments(`--disable-extensions-except=${extensionPath}`);
   options.addArguments(`--load-extension=${extensionPath}`);
   if (headless) {
     options.addArguments("--headless=new");

@@ -25,7 +25,10 @@ async function main() {
   const context = await chromium.launchPersistentContext("", {
     channel: "chromium",
     headless,
-    args: [`--load-extension=${extensionPath}`],
+    args: [
+      `--disable-extensions-except=${extensionPath}`,
+      `--load-extension=${extensionPath}`,
+    ],
   });
   const page = context.pages()[0] ?? (await context.newPage());
 
