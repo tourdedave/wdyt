@@ -32,7 +32,7 @@ If using a release tarball, install from that artifact. If using a published pac
 After install, the main entry point is:
 
 ```bash
-wdyt
+wdyt server start
 ```
 
 ## 3. Start The `wdyt` Server
@@ -57,7 +57,7 @@ Example:
 WDYT_LLM_BASE_URL=https://your-llm-endpoint.example.com/v1 \
 WDYT_LLM_API_KEY=your-token \
 WDYT_LLM_MODEL=your-model \
-wdyt
+wdyt server start
 ```
 
 Optional server overrides:
@@ -91,7 +91,7 @@ Example on Unix/Linux:
 WDYT_LLM_BASE_URL=https://your-llm-endpoint.example.com/v1 \
 WDYT_LLM_API_KEY=your-token \
 WDYT_LLM_MODEL=your-model \
-wdyt > wdyt.log 2>&1 &
+wdyt server start > wdyt.log 2>&1 &
 
 WDYT_PID=$!
 

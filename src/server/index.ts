@@ -3500,10 +3500,28 @@ const server = http.createServer(async (req, res) => {
   writeJson(res, 404, { error: "Not found" });
 });
 
-await ensureDataDir();
-startMemoryLogging();
-void queueProposalProcessing();
+let serverStarted = false;
 
-server.listen(PORT, HOST, () => {
-  console.log(`WDYT server listening on http://${HOST}:${PORT}`);
-});
+export async function startWdytServer() {
+  if (serverStarted) {
+    return server;
+  }
+
+  await ensureDataDir();
+  startMemoryLogging();
+  void queueProposalProcessing();
+
+  await new Promise<void>((resolve) => {
+    server.listen(PORT, HOST, () => {
+      console.log(`WDYT server listening on http://${HOST}:${PORT}`);
+      resolve();
+    });
+  });
+
+  serverStarted = true;
+  return server;
+}
+
+if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
+  await startWdytServer();
+}

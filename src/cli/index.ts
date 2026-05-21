@@ -6,7 +6,8 @@ import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
-import { buildReviewUnits, queueProposalProcessing } from "../server/review.js";
+import { buildReviewUnits, loadReviewUnitViews, queueProposalProcessing } from "../server/review.js";
+import { startWdytServer } from "../server/index.js";
 import { seedSyntheticRuntimeData } from "../server/synthetic.js";
 import {
   getProcessedRunsPath,
@@ -29,6 +30,7 @@ import type {
   VocabStats,
   ProcessedRunRecord,
   ReviewUnitRecord,
+  ReviewUnitViewRecord,
   VocabularyEntry,
 } from "../shared/types.js";
 import { collectVocabStats, inferEvidenceTerms, inferSourceAwareTermCandidates, scoreFlowTermRoles } from "../shared/flow-suppression.js";
@@ -83,6 +85,7 @@ type GroupedFlow = {
   titles: Set<string>;
   headings: Set<string>;
   alerts: Set<string>;
+  displayTitle?: string;
 };
 
 type ReviewUnit = GroupedFlow & {
@@ -109,6 +112,26 @@ type FlowRow = {
 
 function formatFlow(steps: string[]) {
   return steps.join(" \u2192 ");
+}
+
+function getFlowTitleFromUnits(
+  units: Array<Pick<ReviewUnitViewRecord, "activeDescriptor" | "proposedDescriptor" | "canonical">>
+) {
+  const descriptors = units
+    .map((unit) => String(unit.activeDescriptor || unit.proposedDescriptor || "").trim())
+    .filter(Boolean);
+
+  if (descriptors.length === 0) {
+    return units[0] ? formatFlow(units[0].canonical) : "-";
+  }
+
+  const counts = new Map<string, number>();
+  descriptors.forEach((descriptor) => {
+    counts.set(descriptor, (counts.get(descriptor) || 0) + 1);
+  });
+
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0];
 }
 
 function summarizeList(values: string[]) {
@@ -361,17 +384,15 @@ async function requestJsonCompletion(input: {
 }
 
 async function loadGroupedFlows() {
-  const records = await readJsonLines<ProcessedRunRecord>(getProcessedRunsPath());
-  const rawRuns = await readJsonLines<IngestPayload>(getRawRunsPath());
-  const rawRunById = new Map(rawRuns.map((run) => [run.run.id, run]));
-  const groups = new Map<string, GroupedFlow>();
+  const units = await loadReviewUnitViews();
+  const groups = new Map<string, GroupedFlow & { sourceUnits: ReviewUnitViewRecord[] }>();
 
-  for (const record of records) {
-    const rawRun = rawRunById.get(record.runId);
-    const current = groups.get(record.flowId) ?? {
-      flowId: record.flowId,
+  for (const unit of units) {
+    const key = String(unit.structureKey || unit.flowId || unit.reviewId).trim();
+    const current = groups.get(key) ?? {
+      flowId: key,
       count: 0,
-      canonical: record.canonical,
+      canonical: unit.canonical,
       suites: new Set<string>(),
       tests: new Set<string>(),
       tools: new Set<string>(),
@@ -382,44 +403,30 @@ async function loadGroupedFlows() {
       titles: new Set<string>(),
       headings: new Set<string>(),
       alerts: new Set<string>(),
+      displayTitle: undefined,
+      sourceUnits: [],
     };
 
     current.count += 1;
-    current.suites.add(record.suite.name);
-    if (rawRun?.run.testName) {
-      current.tests.add(rawRun.run.testName);
-    }
-    current.tools.add(formatTool(record.environment));
-    current.browsers.add(formatBrowser(record.environment));
+    current.sourceUnits.push(unit);
+    unit.suites.forEach((value) => current.suites.add(value));
+    unit.tests.forEach((value) => current.tests.add(value));
+    unit.tools.forEach((value) => current.tools.add(value));
+    unit.browsers.forEach((value) => current.browsers.add(value));
+    unit.urls.forEach((value) => current.urls.add(value));
+    unit.targets.forEach((value) => current.targets.add(value));
+    unit.finalUrls.forEach((value) => current.finalUrls.add(value));
+    unit.titles.forEach((value) => current.titles.add(value));
+    unit.headings.forEach((value) => current.headings.add(value));
+    unit.alerts.forEach((value) => current.alerts.add(value));
+    current.displayTitle = getFlowTitleFromUnits(current.sourceUnits);
 
-    for (const event of rawRun?.events ?? []) {
-      if (event.type === "navigate" && event.url) {
-        current.urls.add(event.url);
-      }
-
-      const targetLabel = extractTargetLabel(event);
-      if (targetLabel) {
-        current.targets.add(targetLabel);
-      }
-    }
-
-    if (record.endState?.finalUrl) {
-      current.finalUrls.add(record.endState.finalUrl);
-    }
-    if (record.endState?.title) {
-      current.titles.add(record.endState.title);
-    }
-    if (record.endState?.heading) {
-      current.headings.add(record.endState.heading);
-    }
-    if (record.endState?.alertText) {
-      current.alerts.add(record.endState.alertText);
-    }
-
-    groups.set(record.flowId, current);
+    groups.set(key, current);
   }
 
-  return [...groups.values()].sort((a, b) => b.count - a.count);
+  return [...groups.values()]
+    .sort((a, b) => b.count - a.count || (a.displayTitle || "").localeCompare(b.displayTitle || ""))
+    .map(({ sourceUnits: _sourceUnits, ...group }) => group);
 }
 
 async function loadReviewUnits() {
@@ -495,7 +502,7 @@ function toFlowRows(groupedFlows: GroupedFlow[]): FlowRow[] {
     tests: summarizeList([...flow.tests].sort()),
     tool: summarizeList([...flow.tools].filter((value) => value !== "-").sort()),
     browser: summarizeList([...flow.browsers].filter((value) => value !== "-").sort()),
-    flow: formatFlow(flow.canonical),
+    flow: flow.displayTitle || formatFlow(flow.canonical),
     urls: summarizeSamples([...flow.urls].sort()),
     targets: summarizeSamples([...flow.targets].sort()),
     finalUrls: summarizeSamples([...flow.finalUrls].sort()),
@@ -1219,6 +1226,27 @@ async function main() {
     "  Use WDYT_LLM_FAKE=1 and WDYT_LLM_FAKE_LATENCY_MS=<ms> to stress the proposal worker without spending tokens.",
   ].join("\n");
 
+  const topLevelUsage = [
+    "Usage:",
+    "  wdyt server start",
+    "  wdyt flows [--verbose]",
+    "  wdyt review [--rebuild]",
+    "  wdyt artifact",
+    "  wdyt synthetic",
+  ].join("\n");
+
+  if (command === "server") {
+    const subcommand = args[0];
+    if (subcommand === "start") {
+      await startWdytServer();
+      return;
+    }
+
+    console.error(topLevelUsage);
+    process.exitCode = 1;
+    return;
+  }
+
   if (command === "flows") {
     await printFlows({
       verbose: args.includes("--verbose"),
@@ -1351,7 +1379,7 @@ async function main() {
     return;
   }
 
-  console.error("Usage: wdyt flows [--verbose] | wdyt review [--propose|--rebuild] | wdyt artifact");
+  console.error(topLevelUsage);
   process.exitCode = 1;
 }
 

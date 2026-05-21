@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "bin": {
-    "wdyt": "./dist/cli/index.js"
+    "wdyt": "./bin/wdyt"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs && node scripts/copy-cli-assets.mjs",
