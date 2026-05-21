@@ -1,8 +1,6 @@
 #!/usr/bin/env node
 import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { createInterface } from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
@@ -934,192 +932,6 @@ async function proposeDescriptor(
   };
 }
 
-async function reviewFlows(options: { propose: boolean }) {
-  const reviewUnits = await loadReviewUnits();
-  if (reviewUnits.length === 0) {
-    console.log("No flows found.");
-    return;
-  }
-
-  const storedReviewUnits = await loadStoredReviewUnits();
-  const reviewRecords = new Map(
-    reviewUnits.map((flow) => [flow.reviewId, materializeReviewUnitRecord(flow, storedReviewUnits.get(flow.reviewId))])
-  );
-  const vocabulary = await loadVocabulary();
-  const suppressionStats = collectVocabStats(
-    reviewUnits.map((flow) => ({
-      activeDescriptor: reviewRecords.get(flow.reviewId)?.activeDescriptor,
-      proposedDescriptor: reviewRecords.get(flow.reviewId)?.proposedDescriptor,
-      activeVocab: reviewRecords.get(flow.reviewId)?.activeVocab ?? [],
-      approvedVocabUsed: reviewRecords.get(flow.reviewId)?.approvedVocabUsed ?? [],
-      proposedVocab: reviewRecords.get(flow.reviewId)?.proposedVocab ?? [],
-    })),
-    vocabulary.values(),
-  );
-  const semanticIndex = buildSemanticIndex(
-    reviewUnits.map((flow) => ({
-      activeVocab: reviewRecords.get(flow.reviewId)?.activeVocab ?? [],
-      approvedVocabUsed: reviewRecords.get(flow.reviewId)?.approvedVocabUsed ?? [],
-      proposedVocab: reviewRecords.get(flow.reviewId)?.proposedVocab ?? [],
-      activeDescriptor: reviewRecords.get(flow.reviewId)?.activeDescriptor,
-      proposedDescriptor: reviewRecords.get(flow.reviewId)?.proposedDescriptor,
-    })),
-    vocabulary.values(),
-    suppressionStats
-  );
-  if (reviewUnits.length === 0) {
-    console.log("No flows to review.");
-    return;
-  }
-
-  const rl = createInterface({ input, output });
-
-  try {
-    for (const flow of reviewUnits) {
-      const existing = reviewRecords.get(flow.reviewId);
-      const proposal =
-        options.propose && !existing?.proposedDescriptor
-          ? await proposeDescriptor(flow, vocabulary, suppressionStats, semanticIndex)
-          : {
-              descriptor: existing?.proposedDescriptor ?? buildProposedDescriptor(flow),
-              approvedVocab: existing?.approvedVocabUsed ?? [],
-              proposedVocab: existing?.proposedVocab ?? [],
-              confidence: existing?.proposedConfidence ?? 0,
-              rationale: existing?.proposedRationale ?? "No LLM proposal.",
-            };
-      const row = toFlowRows([flow])[0];
-
-      console.log("");
-      console.log(`Flow: ${row.flow}`);
-      if (flow.variantSignature) {
-        console.log(`Variant: ${flow.reviewId}`);
-      }
-      console.log(`Count: ${row.count}`);
-      console.log(`Suites: ${row.suites}`);
-      console.log(`Tests: ${row.tests}`);
-      console.log(`Tool: ${row.tool}`);
-      console.log(`Browser: ${row.browser}`);
-      printDetailList("Final URLs", row.finalUrls);
-      printDetailList("Headings", row.headings);
-      printDetailList("Alerts", row.alerts);
-      printDetailList("Targets", row.targets);
-      console.log(`  Proposed descriptor: ${proposal.descriptor}`);
-      console.log(`  Confidence: ${proposal.confidence.toFixed(2)}`);
-      console.log(`  Rationale: ${proposal.rationale}`);
-      console.log(`  Approved vocab: ${proposal.approvedVocab.join(", ") || "-"}`);
-      console.log(`  Proposed vocab: ${proposal.proposedVocab.join(", ") || "-"}`);
-      console.log(`  Approved vocabulary: ${[...vocabulary.keys()].sort().join(", ") || "-"}`);
-
-      const action = (
-        await rl.question("Action [a=approve, e=edit/override, r=reject, s=skip, q=quit]: ")
-      ).trim().toLowerCase();
-
-      if (action === "q") {
-        break;
-      }
-
-      if (action === "s" || action === "") {
-        continue;
-      }
-
-      const now = Date.now();
-
-      if (action === "a") {
-        reviewRecords.set(flow.reviewId, {
-          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
-          proposedDescriptor: proposal.descriptor,
-          proposedConfidence: proposal.confidence,
-          proposedRationale: proposal.rationale,
-          proposalState: "proposed",
-          activeDescriptor: proposal.descriptor,
-          approvedVocabUsed:
-            proposal.approvedVocab.length > 0
-              ? proposal.approvedVocab
-              : collectUsedVocab(proposal.descriptor, vocabulary),
-          proposedVocab: proposal.proposedVocab,
-          activeVocab: sortStrings([
-            ...(proposal.approvedVocab.length > 0
-              ? proposal.approvedVocab
-              : collectUsedVocab(proposal.descriptor, vocabulary)),
-            ...proposal.proposedVocab,
-          ]),
-          proposalError: undefined,
-          updatedAt: now,
-        });
-        await saveReviewUnits(reviewRecords);
-        continue;
-      }
-
-      if (action === "r") {
-        const notes = (await rl.question("Rejection notes (optional): ")).trim();
-        reviewRecords.set(flow.reviewId, {
-          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
-          proposedDescriptor: proposal.descriptor,
-          proposedConfidence: proposal.confidence,
-          proposedRationale: proposal.rationale,
-          proposalState: "error",
-          proposalError: notes || "Rejected via CLI review",
-          notes: notes || undefined,
-          approvedVocabUsed: proposal.approvedVocab,
-          proposedVocab: proposal.proposedVocab,
-          activeDescriptor: undefined,
-          activeVocab: [],
-          updatedAt: now,
-        });
-        await saveReviewUnits(reviewRecords);
-        continue;
-      }
-
-      if (action === "e") {
-        const approvedDescriptor = (await rl.question("Approved descriptor: ")).trim();
-        if (!approvedDescriptor) {
-          console.log("Descriptor cannot be empty. Skipping.");
-          continue;
-        }
-
-        const promotedTermsInput = (await rl.question("Promote vocab terms (comma-separated, optional): ")).trim();
-        const promotedTerms = promotedTermsInput
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean);
-
-        for (const term of promotedTerms) {
-          vocabulary.set(term, {
-            term,
-            status: "approved",
-            updatedAt: now,
-          });
-        }
-
-        const notes = (await rl.question("Notes (optional): ")).trim();
-        const approvedVocabUsed = collectUsedVocab(approvedDescriptor, vocabulary);
-        reviewRecords.set(flow.reviewId, {
-          ...materializeReviewUnitRecord(flow, reviewRecords.get(flow.reviewId)),
-          proposedDescriptor: proposal.descriptor,
-          proposedConfidence: proposal.confidence,
-          proposedRationale: proposal.rationale,
-          proposalState: "proposed",
-          activeDescriptor: approvedDescriptor,
-          notes: notes || undefined,
-          approvedVocabUsed,
-          proposedVocab: [...new Set([...proposal.proposedVocab, ...promotedTerms])].sort((a, b) => a.localeCompare(b)),
-          activeVocab: sortStrings([...approvedVocabUsed, ...proposal.proposedVocab, ...promotedTerms]),
-          interpretationStatus: "edited",
-          proposalError: undefined,
-          updatedAt: now,
-        });
-        await saveVocabulary(vocabulary);
-        await saveReviewUnits(reviewRecords);
-        continue;
-      }
-
-      console.log("Unknown action. Skipping.");
-    }
-  } finally {
-    rl.close();
-  }
-}
-
 async function rebuildReviewArtifacts() {
   await buildReviewUnits();
   await queueProposalProcessing();
@@ -1215,8 +1027,8 @@ async function main() {
 
   const syntheticUsage = [
     "Usage:",
-    "  wdyt synthetic seed [--units <count>] [--offset <count>] [--build] [--propose]",
-    "  wdyt synthetic benchmark [--units <count>] [--offset <count>]",
+    "  wdyt settings synthetic seed [--units <count>] [--offset <count>] [--build] [--propose]",
+    "  wdyt settings synthetic benchmark [--units <count>] [--offset <count>]",
     "",
     "Commands:",
     "  seed       Replace the current wdyt runtime data with a synthetic dataset",
@@ -1226,13 +1038,19 @@ async function main() {
     "  Use WDYT_LLM_FAKE=1 and WDYT_LLM_FAKE_LATENCY_MS=<ms> to stress the proposal worker without spending tokens.",
   ].join("\n");
 
+  const settingsUsage = [
+    "Usage:",
+    "  wdyt settings rebuild",
+    "  wdyt settings synthetic seed [--units <count>] [--offset <count>] [--build] [--propose]",
+    "  wdyt settings synthetic benchmark [--units <count>] [--offset <count>]",
+  ].join("\n");
+
   const topLevelUsage = [
     "Usage:",
     "  wdyt server start",
     "  wdyt flows [--verbose]",
-    "  wdyt review [--rebuild]",
     "  wdyt artifact",
-    "  wdyt synthetic",
+    "  wdyt settings",
   ].join("\n");
 
   if (command === "server") {
@@ -1250,18 +1068,6 @@ async function main() {
   if (command === "flows") {
     await printFlows({
       verbose: args.includes("--verbose"),
-    });
-    return;
-  }
-
-  if (command === "review") {
-    if (args.includes("--rebuild")) {
-      await rebuildReviewArtifacts();
-      return;
-    }
-
-    await reviewFlows({
-      propose: args.includes("--propose"),
     });
     return;
   }
@@ -1357,24 +1163,46 @@ async function main() {
     return;
   }
 
-  if (command === "synthetic") {
+  if (command === "settings") {
     const subcommand = args[0];
     if (!subcommand || subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
-      console.log(syntheticUsage);
+      console.log(settingsUsage);
       return;
     }
 
-    if (subcommand === "seed") {
-      await seedSyntheticDataset(args.slice(1));
+    if (subcommand === "rebuild") {
+      await rebuildReviewArtifacts();
       return;
     }
 
-    if (subcommand === "benchmark") {
-      await benchmarkSyntheticDataset(args.slice(1));
+    if (subcommand === "synthetic") {
+      const syntheticCommand = args[1];
+      if (
+        !syntheticCommand ||
+        syntheticCommand === "help" ||
+        syntheticCommand === "--help" ||
+        syntheticCommand === "-h"
+      ) {
+        console.log(syntheticUsage);
+        return;
+      }
+
+      if (syntheticCommand === "seed") {
+        await seedSyntheticDataset(args.slice(2));
+        return;
+      }
+
+      if (syntheticCommand === "benchmark") {
+        await benchmarkSyntheticDataset(args.slice(2));
+        return;
+      }
+
+      console.error(syntheticUsage);
+      process.exitCode = 1;
       return;
     }
 
-    console.error(syntheticUsage);
+    console.error(settingsUsage);
     process.exitCode = 1;
     return;
   }
