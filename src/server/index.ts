@@ -1289,8 +1289,7 @@ function renderReviewPage() {
         container.innerHTML = \`
           <div class="list-controls">
             <label>
-              <span>Search observed behaviors</span>
-              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search behaviors, tests, terms, or confidence:low" />
+              <input id="reviewSearchInput" type="search" value="\${escapeHtml(state.query)}" placeholder="Search observed behaviors" />
             </label>
             \${state.fromSummary && (state.query || state.structureKey) ? '<div class="filter-indicator">Filtered from Summary <button type="button" id="clearSummaryFilter" aria-label="Clear summary filter">×</button></div>' : ""}
           </div>\`;
@@ -1356,10 +1355,7 @@ function renderReviewPage() {
             \${groups.map((group) => \`
               <article class="overlap-card \${group.key === state.activeOverlapKey ? "active" : ""}" data-key="\${escapeHtml(group.key)}">
                 <div class="overlap-term">\${escapeHtml(getOverlapTitle(group))}</div>
-                <div class="meta">\${escapeHtml(group.units.length === 1 ? "Observed in 1 execution:" : \`Observed in \${group.units.length} executions:\`)}</div>
-                <div class="meta">
-                  \${group.units.map((unit) => \`<div>- \${escapeHtml(getPrimaryTest(unit) || unit.activeDescriptor || unit.proposedDescriptor || unit.canonical.join(" → "))}</div>\`).join("")}
-                </div>
+                <div class="meta">\${escapeHtml(group.units.length === 1 ? "Observed in 1 execution" : \`Observed in \${group.units.length} executions\`)}</div>
               </article>\`).join("")}
           </div>\`;
 
@@ -2113,6 +2109,7 @@ function renderCriticalFlowsPage() {
       aside { border-right: 1px solid var(--line); padding: 10px 0 16px; overflow: auto; background: #fff; }
       section { padding: 18px 20px; overflow: auto; background: #fff; }
       .rail-section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 12px; }
+      .rail-empty { margin: 0 16px; }
       .rail-title { font-size: 12px; color: var(--muted); margin: 0; letter-spacing: 0.01em; font-weight: 600; }
       .gap-summary { display: grid; gap: 8px; margin: 0 16px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
       .gap-card { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 9px 11px; cursor: pointer; }
@@ -2461,7 +2458,7 @@ function renderCriticalFlowsPage() {
       function renderList() {
         const container = document.getElementById("flows");
         if (state.flows.length === 0) {
-          container.innerHTML = '<p class="empty-note">No expected behaviors saved yet.</p>';
+          container.innerHTML = '<div class="rail-empty"><p class="empty-note">No expected behaviors saved yet.</p></div>';
           return;
         }
 
@@ -2523,14 +2520,6 @@ function renderCriticalFlowsPage() {
             <li>Create and export a report</li>
             <li>Invite a new user</li>
           </ul>\` : "";
-        const suggestions = !state.editingFlowId && state.hasDescriptors && state.suggestions.length > 0
-          ? \`<div class="suggestions">
-              <strong>Suggested from reviewed tests</strong>
-              <div class="pills">
-                \${state.suggestions.map((suggestion) => \`<button type="button" class="pill" data-suggestion="\${escapeHtml(suggestion)}">+ \${escapeHtml(suggestion)}</button>\`).join("")}
-              </div>
-            </div>\`
-          : "";
 
         return \`
           <div class="stack">
@@ -2539,7 +2528,6 @@ function renderCriticalFlowsPage() {
               <p>Define expected behaviors and compare them against what was exercised during testing.</p>
               \${examples}
             </div>
-            \${suggestions}
             <div class="form-grid">
               <label>
                 <span class="field-label">Input</span>
