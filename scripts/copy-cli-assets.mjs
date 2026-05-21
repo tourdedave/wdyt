@@ -4,8 +4,13 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-const sourceDir = path.join(projectRoot, "src", "prompts");
-const targetDir = path.join(projectRoot, "dist", "prompts");
+const promptsSourceDir = path.join(projectRoot, "src", "prompts");
+const promptsTargetDir = path.join(projectRoot, "dist", "prompts");
+const fontsSourceDir = path.join(projectRoot, "public", "fonts");
+const fontsTargetDir = path.join(projectRoot, "dist", "public", "fonts");
 
-await mkdir(targetDir, { recursive: true });
-await cp(sourceDir, targetDir, { recursive: true });
+await mkdir(promptsTargetDir, { recursive: true });
+await cp(promptsSourceDir, promptsTargetDir, { recursive: true });
+
+await mkdir(fontsTargetDir, { recursive: true });
+await cp(fontsSourceDir, fontsTargetDir, { recursive: true });

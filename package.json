@@ -2,12 +2,28 @@
   "name": "wdyt",
   "version": "0.1.0",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "wdyt": "./bin/wdyt"
   },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "dist/artifact/",
+    "dist/cli/index.js",
+    "dist/prompts/",
+    "dist/server/",
+    "dist/shared/",
+    "dist/public/fonts/",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs && node scripts/copy-cli-assets.mjs",
+    "release:package": "npm run build && node scripts/package-release.mjs",
     "dev:server": "node --watch dist/server/index.js",
     "start:server": "node dist/server/index.js",
     "flows": "node dist/cli/index.js flows",

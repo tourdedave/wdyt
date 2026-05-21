@@ -3,6 +3,10 @@ dist/
 .wdit/
 .wdyt/
 .wdyt-artifacts/
+release/
+*.tgz
+wdyt-artifact.zip
+wdyt.log
 
 .DS_Store
 Thumbs.db

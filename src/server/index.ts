@@ -3190,9 +3190,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "GET" && requestPath?.startsWith("/fonts/")) {
     const relativePath = decodeURIComponent(requestPath.slice("/fonts/".length));
     const normalizedPath = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
-    const absolutePath = path.join(process.cwd(), "public", "fonts", normalizedPath);
+    const fontsDir = path.join(__dirname, "../public/fonts");
+    const absolutePath = path.join(fontsDir, normalizedPath);
 
-    if (!absolutePath.startsWith(path.join(process.cwd(), "public", "fonts"))) {
+    if (!absolutePath.startsWith(fontsDir)) {
       writeJson(res, 400, { error: "Invalid font path" });
       return;
     }
