@@ -29,6 +29,14 @@ Install `wdyt` in the environment where you want to run the server and review da
 
 If using a release tarball, install from that artifact. If using a published package later, install from npm.
 
+If you install `wdyt` globally, for example with `npm i -g`, you can invoke `wdyt` directly from your shell.
+
+If you install it into a local npm project instead, run the same commands in this guide with an `npx` prefix, for example:
+
+```bash
+npx wdyt server start
+```
+
 After install, the main entry point is:
 
 ```bash
