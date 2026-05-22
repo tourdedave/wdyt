@@ -30,6 +30,13 @@ npm run test:playwright
 npm run test:selenium
 ```
 
+To use a different unpacked extension build with the demo suites:
+
+```bash
+WDYT_EXTENSION_PATH=/path/to/unpacked/extension npm run test:playwright
+WDYT_EXTENSION_PATH=/path/to/unpacked/extension npm run test:selenium
+```
+
 Optional headless mode:
 
 ```bash

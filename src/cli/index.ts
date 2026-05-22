@@ -996,7 +996,7 @@ async function benchmarkSyntheticDataset(args: string[]) {
   const proposeMs = Date.now() - proposeStart;
 
   console.log(
-    `Synthetic benchmark complete: units=${seeded.units} runs=${seeded.totalRuns} buildMs=${buildMs} proposeMs=${proposeMs} concurrency=${process.env.WDYT_REVIEW_CONCURRENCY ?? "10"} fakeLlm=${process.env.WDYT_LLM_FAKE === "1" ? "1" : "0"} fakeLatencyMs=${process.env.WDYT_LLM_FAKE_LATENCY_MS ?? "0"}`
+    `Synthetic benchmark complete: units=${seeded.units} runs=${seeded.totalRuns} buildMs=${buildMs} proposeMs=${proposeMs} concurrency=${process.env.WDYT_LLM_CONCURRENCY ?? "10"} fakeLlm=${process.env.WDYT_LLM_FAKE === "1" ? "1" : "0"} fakeLatencyMs=${process.env.WDYT_LLM_FAKE_LATENCY_MS ?? "0"}`
   );
 }
 

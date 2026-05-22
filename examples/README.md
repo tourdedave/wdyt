@@ -34,6 +34,7 @@ Prerequisites:
 
 - run `npm run build` in the repo root so `dist/extension/` exists
 - start the wdyt server with `node dist/server/index.js`
+- or set `WDYT_EXTENSION_PATH=/path/to/unpacked/extension` to use a different extension build
 
 Notes:
 

@@ -33,6 +33,12 @@ Otherwise, or if Selenium is not selecting the browser you want, set:
 CHROMIUM_BINARY=/path/to/chromium npm run test:selenium
 ```
 
+To use a different unpacked extension build:
+
+```bash
+WDYT_EXTENSION_PATH=/path/to/unpacked/extension npm run test:selenium
+```
+
 Run:
 
 ```bash

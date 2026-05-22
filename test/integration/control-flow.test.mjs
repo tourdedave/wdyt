@@ -102,12 +102,18 @@ async function fetchBootstrap(serverUrl, params, userAgent = TEST_USER_AGENT) {
 }
 
 function spawnServer(workdir, port, extraEnv = {}) {
+  const hasExplicitLlmConfig =
+    typeof extraEnv.WDYT_LLM_BASE_URL === "string" ||
+    typeof extraEnv.WDYT_LLM_API_KEY === "string" ||
+    typeof extraEnv.WDYT_LLM_MODEL === "string" ||
+    typeof extraEnv.WDYT_LLM_FAKE === "string";
   const child = spawn(process.execPath, [serverEntry], {
     cwd: workdir,
     env: {
       ...process.env,
       WDYT_HOST: "127.0.0.1",
       WDYT_PORT: String(port),
+      ...(hasExplicitLlmConfig ? {} : { WDYT_LLM_FAKE: "1" }),
       ...extraEnv,
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -1326,21 +1332,6 @@ test("capture lifecycle persists and reduces a browser flow", { timeout: 15_000 
     assert.match(processedRuns, /"family":"chromium"/);
     assert.match(processedRuns, /"heading":"Dashboard"/);
 
-    const flowsOutput = await runCliFlows(tempDir);
-    assert.match(flowsOutput, /^Count\s+Suites\s+Tests\s+Tool\s+Browser\s+Flow/m);
-    assert.match(flowsOutput, /1\s+integration\s+search flow\s+integration-test\s+chromium 146\.0\.7680\.178\s+NAVIGATE → CLICK → INPUT → SUBMIT/);
-
-    const verboseFlowsOutput = await runCliFlows(tempDir, { verbose: true });
-    assert.match(verboseFlowsOutput, /URLs:\n\s+- https:\/\/www\.google\.com\/ncr/);
-    assert.match(verboseFlowsOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
-    assert.match(verboseFlowsOutput, /Titles:\n\s+- Dashboard/);
-    assert.match(verboseFlowsOutput, /Headings:\n\s+- Dashboard/);
-    assert.match(verboseFlowsOutput, /Alerts:\n\s+- -/);
-    assert.match(verboseFlowsOutput, /Targets:\n\s+- form\n\s+- textarea\("Search"\)\n\s+- textarea\("wdyt testing"\)/);
-
-    const reviewOutput = await runCli(tempDir, ["review"], "a\n");
-    assert.match(reviewOutput, /Proposed descriptor:/);
-
   } finally {
     await stopChildProcess(child);
     await rm(tempDir, { recursive: true, force: true });
@@ -1349,13 +1340,17 @@ test("capture lifecycle persists and reduces a browser flow", { timeout: 15_000 
   assert.match(getOutput(), /WDYT server listening/);
 });
 
-test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_000 }, async () => {
+test("proposal processing stores LLM-backed descriptor proposals", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-review-"));
   const port = randomPort();
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
   const llmServer = await startMockLlmServer(llmPort);
 
   try {
@@ -1401,21 +1396,15 @@ test("review --propose stores LLM-backed descriptor proposals", { timeout: 15_00
       ],
     });
 
-    const reviewOutput = await runCli(
-      tempDir,
-      ["review", "--propose"],
-      "a\n",
-      {
-        WDYT_LLM_BASE_URL: llmUrl,
-        WDYT_LLM_API_KEY: "ollama",
-        WDYT_LLM_MODEL: "mistral:instruct",
-      }
-    );
+    const proposedUnit = await waitForCondition(async () => {
+      const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+      return reviewUnits.find((unit) => unit.proposalState === "proposed") ?? null;
+    });
 
-    assert.match(reviewOutput, /Confidence: 0\.87/);
-    assert.match(reviewOutput, /Rationale: The flow ends at Dashboard and includes search interactions\./);
-    assert.match(reviewOutput, /Approved vocab: -/);
-    assert.match(reviewOutput, /Proposed vocab: search/);
+    assert.equal(proposedUnit.proposedConfidence, 0.87);
+    assert.equal(proposedUnit.proposedRationale, "The flow ends at Dashboard and includes search interactions.");
+    assert.deepEqual(proposedUnit.approvedVocabUsed, []);
+    assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
 
   } finally {
     llmServer.close();
@@ -1467,7 +1456,11 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
   const capturedRequests = [];
   const llmServer = await startMockLlmServer(llmPort, {
     responseContent: {
@@ -1533,16 +1526,10 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
       ],
     });
 
-    const reviewOutput = await runCli(
-      tempDir,
-      ["review", "--propose"],
-      "a\n",
-      {
-        WDYT_LLM_BASE_URL: llmUrl,
-        WDYT_LLM_API_KEY: "ollama",
-        WDYT_LLM_MODEL: "mistral:instruct",
-      }
-    );
+    const proposedUnit = await waitForCondition(async () => {
+      const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+      return reviewUnits.find((unit) => unit.proposalState === "proposed") ?? null;
+    });
 
     const evidenceRequest = capturedRequests.find((request) =>
       String(request?.messages?.[0]?.content ?? "").includes("label each provided evidence item with one bucket")
@@ -1574,8 +1561,8 @@ test("review proposal prompt uses registry matches and canonical approved vocabu
     assert.match(descriptorRequest.messages[0].content, /descriptor should normally be expressible without mentioning prerequisiteTerms/);
     assert.match(descriptorRequest.messages[1].content, /"registryMatches": \[\n\s+"Google Search"\n\s+\]/);
     assert.match(descriptorRequest.messages[1].content, /"allFlowTerms": \[/);
-    assert.match(reviewOutput, /Approved vocab: Google Search/);
-    assert.match(reviewOutput, /Proposed vocab: error message, search query/);
+    assert.deepEqual(proposedUnit.approvedVocabUsed, ["Google Search"]);
+    assert.deepEqual(proposedUnit.proposedVocab, ["error message", "search query"]);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1589,7 +1576,11 @@ test("review caps confidence for literal typed values even when descriptor is me
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
   const requests = [];
   const llmServer = await startMockLlmServer(llmPort, {
     responseContent: {
@@ -1649,16 +1640,10 @@ test("review caps confidence for literal typed values even when descriptor is me
       ],
     });
 
-    const reviewOutput = await runCli(
-      tempDir,
-      ["review", "--propose"],
-      "a\n",
-      {
-        WDYT_LLM_BASE_URL: llmUrl,
-        WDYT_LLM_API_KEY: "ollama",
-        WDYT_LLM_MODEL: "mistral:instruct",
-      }
-    );
+    const proposedUnit = await waitForCondition(async () => {
+      const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+      return reviewUnits.find((unit) => unit.proposalState === "proposed") ?? null;
+    });
 
     const descriptorRequest = requests.find((request) =>
       String(request?.messages?.[0]?.content ?? "").includes("Step 1 — Extract signals")
@@ -1669,9 +1654,9 @@ test("review caps confidence for literal typed values even when descriptor is me
     assert.match(descriptorRequest.messages[0].content, /Else propose new terms \(only if needed\)/);
     assert.match(descriptorRequest.messages[0].content, /proposedVocab:[\s\S]*max 3 items/);
     assert.match(descriptorRequest.messages[0].content, /if vocabulary is empty, briefly explain why evidence is insufficient/);
-    assert.match(reviewOutput, /Proposed descriptor: Access search/);
-    assert.match(reviewOutput, /Confidence: 0\.20/);
-    assert.match(reviewOutput, /Proposed vocab: -/);
+    assert.equal(proposedUnit.proposedDescriptor, "Access search");
+    assert.equal(proposedUnit.proposedConfidence, 0.2);
+    assert.deepEqual(proposedUnit.proposedVocab, []);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1685,7 +1670,11 @@ test("review raises confidence for explicit successful end-state signals", { tim
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
   const llmServer = await startMockLlmServer(llmPort, {
     responseContent: {
       descriptor: "Search query is submitted and results are displayed",
@@ -1752,18 +1741,12 @@ test("review raises confidence for explicit successful end-state signals", { tim
       ],
     });
 
-    const reviewOutput = await runCli(
-      tempDir,
-      ["review", "--propose"],
-      "a\n",
-      {
-        WDYT_LLM_BASE_URL: llmUrl,
-        WDYT_LLM_API_KEY: "ollama",
-        WDYT_LLM_MODEL: "mistral:instruct",
-      }
-    );
+    const proposedUnit = await waitForCondition(async () => {
+      const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+      return reviewUnits.find((unit) => unit.proposalState === "proposed") ?? null;
+    });
 
-    assert.match(reviewOutput, /Confidence: 0\.70/);
+    assert.equal(proposedUnit.proposedConfidence, 0.7);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1777,7 +1760,11 @@ test("review keeps deterministic confidence for successful login despite mechani
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
-  const { child } = spawnServer(tempDir, port);
+  const { child } = spawnServer(tempDir, port, {
+    WDYT_LLM_BASE_URL: llmUrl,
+    WDYT_LLM_API_KEY: "ollama",
+    WDYT_LLM_MODEL: "mistral:instruct",
+  });
   const llmServer = await startMockLlmServer(llmPort, {
     responseContent: {
       descriptor: "Login succeeds and navigates to dashboard",
@@ -1837,18 +1824,12 @@ test("review keeps deterministic confidence for successful login despite mechani
       ],
     });
 
-    const reviewOutput = await runCli(
-      tempDir,
-      ["review", "--propose"],
-      "a\n",
-      {
-        WDYT_LLM_BASE_URL: llmUrl,
-        WDYT_LLM_API_KEY: "ollama",
-        WDYT_LLM_MODEL: "mistral:instruct",
-      }
-    );
+    const proposedUnit = await waitForCondition(async () => {
+      const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
+      return reviewUnits.find((unit) => unit.proposalState === "proposed") ?? null;
+    });
 
-    assert.match(reviewOutput, /Confidence: 0\.70/);
+    assert.equal(proposedUnit.proposedConfidence, 0.7);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
@@ -1959,12 +1940,15 @@ test("review splits one canonical flow into separate outcome variants", { timeou
       "utf8"
     );
 
-    const reviewOutput = await runCli(tempDir, ["review"], "a\na\n");
-    assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/dashboard/);
-    assert.match(reviewOutput, /Final URLs:\n\s+- http:\/\/127\.0\.0\.1:4010\/login/);
+    const rebuildOutput = await runCli(tempDir, ["settings", "rebuild"], "", { WDYT_LLM_FAKE: "1" });
+    assert.match(rebuildOutput, /Rebuilt review units from captured evidence\./);
 
     const reviewFile = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
     assert.equal(reviewFile.length, 2);
+    assert.deepEqual(
+      reviewFile.map((record) => record.finalUrls[0]).sort(),
+      ["http://127.0.0.1:4010/dashboard", "http://127.0.0.1:4010/login"]
+    );
     assert.ok(reviewFile.every((record) => typeof record.reviewId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.runId === "string"));
     assert.ok(reviewFile.every((record) => typeof record.flowId === "string"));
@@ -4496,7 +4480,7 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-synthetic-cli-"));
 
   try {
-    const seedResult = await runCli(tempDir, ["synthetic", "seed", "--units", "24", "--build"]);
+    const seedResult = await runCli(tempDir, ["settings", "synthetic", "seed", "--units", "24", "--build"]);
     assert.match(seedResult, /Seeded synthetic dataset: units=24 runs=24 built=1/);
 
     const reviewUnits = JSON.parse(await readFile(path.join(tempDir, ".wdyt", "review-units.json"), "utf8"));
@@ -4510,12 +4494,12 @@ test("synthetic cli seed and benchmark support large dataset hydration and fake 
 
     const benchmarkResult = await runCli(
       tempDir,
-      ["synthetic", "benchmark", "--units", "12"],
+      ["settings", "synthetic", "benchmark", "--units", "12"],
       "",
       {
         WDYT_LLM_FAKE: "1",
         WDYT_LLM_FAKE_LATENCY_MS: "1",
-        WDYT_REVIEW_CONCURRENCY: "4",
+        WDYT_LLM_CONCURRENCY: "4",
       }
     );
     assert.match(benchmarkResult, /Synthetic benchmark complete: units=12 runs=12/);

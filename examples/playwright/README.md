@@ -23,6 +23,12 @@ Run:
 npm run test:playwright
 ```
 
+To use a different unpacked extension build:
+
+```bash
+WDYT_EXTENSION_PATH=/path/to/unpacked/extension npm run test:playwright
+```
+
 Optional headless mode:
 
 ```bash

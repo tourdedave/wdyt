@@ -66,7 +66,10 @@ Optional server overrides:
 WDYT_HOST      # default: 127.0.0.1
 WDYT_PORT      # default: 3876
 WDYT_DATA_DIR  # default: .wdyt under the current working directory
+WDYT_LLM_CONCURRENCY  # default: 10 concurrent LLM requests
 ```
+
+`WDYT_LLM_CONCURRENCY` controls how many enrichment requests `wdyt` will run in parallel.
 
 Default local address:
 

@@ -2,7 +2,28 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 
+function resolveExtensionOverridePath() {
+  const overridePath = process.env.WDYT_EXTENSION_PATH?.trim();
+  if (!overridePath) {
+    return null;
+  }
+
+  const manifestPath = path.join(overridePath, "manifest.json");
+  if (!fs.existsSync(manifestPath)) {
+    throw new Error(
+      `WDYT_EXTENSION_PATH must point to an unpacked extension directory containing manifest.json: ${overridePath}`
+    );
+  }
+
+  return overridePath;
+}
+
 export function getExtensionPath(importMetaUrl) {
+  const overridePath = resolveExtensionOverridePath();
+  if (overridePath) {
+    return overridePath;
+  }
+
   let currentDir = path.dirname(fileURLToPath(importMetaUrl));
 
   while (true) {

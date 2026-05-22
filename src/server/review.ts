@@ -930,7 +930,7 @@ async function proposeDescriptor(
 }
 
 function getProposalWorkerConcurrency() {
-  const parsed = Number.parseInt(process.env.WDYT_REVIEW_CONCURRENCY ?? "10", 10);
+  const parsed = Number.parseInt(process.env.WDYT_LLM_CONCURRENCY ?? "10", 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
     return 10;
   }
