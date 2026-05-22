@@ -2152,11 +2152,6 @@ function renderCriticalFlowsPage() {
       .rail-section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 16px 12px; }
       .rail-empty { margin: 0 16px; }
       .rail-title { font-size: 12px; color: var(--muted); margin: 0; letter-spacing: 0.01em; font-weight: 600; }
-      .gap-summary { display: grid; gap: 8px; margin: 0 16px 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-      .gap-card { border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 9px 11px; cursor: pointer; }
-      .gap-card.active { border-color: #fde68a; background: #fffdf5; }
-      .gap-term { display: inline-block; font-weight: 700; font-size: 14px; margin-bottom: 4px; }
-      .gap-meta { color: var(--muted); font-size: 13px; line-height: 1.45; }
       #flows { display: grid; }
       .flow-card {
         border: 1px solid transparent;
@@ -2227,7 +2222,7 @@ function renderCriticalFlowsPage() {
       .modal-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.28); display: flex; align-items: flex-start; justify-content: center; padding: 48px 20px; z-index: 20; overflow-y: auto; }
       .modal-card { position: relative; width: min(760px, 100%); max-height: calc(100vh - 96px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; box-shadow: 0 24px 60px rgba(15,23,42,0.18); }
       .modal-shell { position: relative; padding-top: 18px; }
-      .modal-close { position: absolute; top: 0; right: 0; border: 1px solid var(--line); background: rgba(255,255,255,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(15,23,42,0.08); }
+      .modal-close { position: absolute; top: -10px; right: -10px; border: 1px solid var(--line); background: rgba(255,255,255,0.94); color: var(--muted); width: 30px; height: 30px; padding: 0; border-radius: 999px; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(15,23,42,0.08); }
       .modal-close:hover { color: var(--ink); border-color: var(--line); }
       .detail-meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
       .detail-status { margin-top: 2px; }
@@ -2265,7 +2260,6 @@ function renderCriticalFlowsPage() {
     })}
     <main>
       <aside>
-        <div id="gapSummary"></div>
         <div class="rail-section-header">
           <p class="rail-title">Saved Expected Behaviors</p>
           <div id="railActions"></div>
@@ -2275,7 +2269,7 @@ function renderCriticalFlowsPage() {
       <section><div id="detail" class="panel">Loading…</div></section>
     </main>
     <script>
-      let state = { flows: [], suggestions: [], hasDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", loadError: "", activeGapTerm: null, showDraftForm: false, editingFlowId: null, editingBaseline: null };
+      let state = { flows: [], suggestions: [], hasDescriptors: false, selectedId: null, draftText: "", parsedDraft: null, isWorking: false, error: "", loadError: "", showDraftForm: false, editingFlowId: null, editingBaseline: null };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
         .replaceAll("<", "&lt;")
@@ -2415,7 +2409,6 @@ function renderCriticalFlowsPage() {
       async function loadState() {
         try {
           const params = new URLSearchParams(window.location.search);
-          const initialGapTerm = params.get("gapTerm");
           const initialFlowId = params.get("flowId");
           const [response, runtimeResponse] = await Promise.all([
             fetch("${EXPECTED_BEHAVIORS_PATH}/state"),
@@ -2438,13 +2431,6 @@ function renderCriticalFlowsPage() {
           if (initialFlowId && nextState.flows.some((flow) => flow.id === initialFlowId)) {
             state.selectedId = initialFlowId;
           }
-          if (initialGapTerm && nextState.flows.some((flow) => (flow.missingTerms || []).includes(initialGapTerm))) {
-            state.activeGapTerm = initialGapTerm;
-            state.selectedId = nextState.flows.find((flow) => (flow.missingTerms || []).includes(initialGapTerm))?.id ?? state.selectedId;
-          }
-          if (state.activeGapTerm && !getGapSummary().some((entry) => entry.term === state.activeGapTerm)) {
-            state.activeGapTerm = null;
-          }
           if (!state.selectedId && state.flows[0]) {
             state.selectedId = state.flows[0].id;
           }
@@ -2458,44 +2444,6 @@ function renderCriticalFlowsPage() {
         render();
       }
 
-      function renderGapSummary() {
-        const container = document.getElementById("gapSummary");
-        const gaps = getGapSummary();
-
-        if (gaps.length === 0) {
-          container.innerHTML = "";
-          return;
-        }
-
-        container.innerHTML = \`
-          <div class="gap-summary">
-            <p class="rail-title">Missing Coverage</p>
-            \${gaps.map((gap) => \`
-              <article class="gap-card \${gap.term === state.activeGapTerm ? "active" : ""}" data-term="\${escapeHtml(gap.term)}">
-                <div class="gap-term">\${escapeHtml(gap.term)}</div>
-                <div class="gap-meta">\${gap.flows.length === 1 ? "Expected behavior not observed in:" : \`Expected behavior not observed in \${escapeHtml(String(gap.flows.length))} flows:\`}</div>
-                <div class="gap-meta">
-                  \${gap.flows.slice(0, 2).map((flow) => \`<div>\${gap.flows.length === 1 ? escapeHtml(flow.name) : \`- \${escapeHtml(flow.name)}\`}</div>\`).join("")}
-                  \${gap.flows.length > 2 ? \`<div>+\${escapeHtml(String(gap.flows.length - 2))} more</div>\` : ""}
-                </div>
-              </article>\`).join("")}
-          </div>\`;
-
-        container.querySelectorAll(".gap-card").forEach((node) => {
-          node.addEventListener("click", () => {
-            const term = node.getAttribute("data-term");
-            state.activeGapTerm = state.activeGapTerm === term ? null : term;
-            if (state.activeGapTerm) {
-              const firstMatch = state.flows.find((flow) => (flow.missingTerms || []).includes(state.activeGapTerm));
-              if (firstMatch) {
-                state.selectedId = firstMatch.id;
-              }
-            }
-            render();
-          });
-        });
-      }
-
       function renderList() {
         const container = document.getElementById("flows");
         if (state.flows.length === 0) {
@@ -2504,11 +2452,9 @@ function renderCriticalFlowsPage() {
         }
 
         container.innerHTML = state.flows.map((flow) => {
-          const isAffectedByGap = state.activeGapTerm ? (flow.missingTerms || []).includes(state.activeGapTerm) : false;
-          const showDimmed = state.activeGapTerm && !isAffectedByGap;
           const missingPreview = getMissingPreview(flow);
           return \`
-          <article class="flow-card \${flow.id === state.selectedId ? "active" : ""} \${isAffectedByGap ? "related" : ""} \${showDimmed ? "dimmed" : ""}" data-id="\${escapeHtml(flow.id)}">
+          <article class="flow-card \${flow.id === state.selectedId ? "active" : ""}" data-id="\${escapeHtml(flow.id)}">
             <h2>\${escapeHtml(flow.name)}</h2>
             <span class="status-chip \${escapeHtml(flow.status)}">\${escapeHtml(statusLabel(flow.status))}</span>
             \${missingPreview ? \`<div class="missing-preview"><strong>Missing:</strong> \${escapeHtml(missingPreview)}</div>\` : ""}
@@ -2789,7 +2735,13 @@ function renderCriticalFlowsPage() {
           state.isWorking = false;
           render();
         });
-        detail.querySelector("#criticalFlowModal")?.focus();
+        const draftInput = detail.querySelector("#criticalFlowInput");
+        if (state.showDraftForm && draftInput instanceof HTMLTextAreaElement) {
+          draftInput.focus();
+          draftInput.setSelectionRange(draftInput.value.length, draftInput.value.length);
+        } else {
+          detail.querySelector("#criticalFlowModal")?.focus();
+        }
 
         detail.querySelector("#editCriticalFlow")?.addEventListener("click", () => {
           if (!selectedFlow) {
@@ -2849,6 +2801,15 @@ function renderCriticalFlowsPage() {
         detail.querySelector("#interpretFlow")?.addEventListener("click", async () => {
           const input = document.getElementById("criticalFlowInput");
           await interpretDraft(input.value);
+        });
+
+        detail.querySelector("#criticalFlowInput")?.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter" || !event.shiftKey) {
+            return;
+          }
+
+          event.preventDefault();
+          await interpretDraft(event.target.value);
         });
 
         detail.querySelector("#criticalFlowNameInput")?.addEventListener("input", (event) => {
@@ -2998,7 +2959,6 @@ function renderCriticalFlowsPage() {
       }
 
       function render() {
-        renderGapSummary();
         renderRailActions();
         renderList();
         renderDetail();
