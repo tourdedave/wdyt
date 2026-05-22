@@ -125,9 +125,8 @@ If your CI runner already has a reasonable job timeout, you may not need to set 
 
 Use the reference examples first:
 
-- [examples/README.md](../examples/README.md)
-- [examples/playwright/README.md](../examples/playwright/README.md)
-- [examples/selenium/README.md](../examples/selenium/README.md)
+- [examples/playwright](../examples/playwright)
+- [examples/selenium](../examples/selenium)
 
 The standard capture loop is:
 
