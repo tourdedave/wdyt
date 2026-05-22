@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifacts } from "../artifact/importArtifact.js";
+import { getRequiredLlmConfig, MissingLlmConfigError } from "../server/llm.js";
 import { buildReviewUnits, loadReviewUnitViews, queueProposalProcessing } from "../server/review.js";
 import { startWdytServer } from "../server/index.js";
 import { seedSyntheticRuntimeData } from "../server/synthetic.js";
@@ -65,10 +66,6 @@ const reviewSystemPromptPath = path.join(__dirname, "../prompts/review-system-pr
 const reviewTermRolePromptPath = path.join(__dirname, "../prompts/review-term-role-system-prompt.txt");
 const reviewEvidenceClassificationPromptPath = path.join(__dirname, "../prompts/review-evidence-classification-system-prompt.txt");
 const reviewConceptResolutionPromptPath = path.join(__dirname, "../prompts/review-concept-resolution-system-prompt.txt");
-const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-const DEFAULT_LLM_API_KEY = "ollama";
-const DEFAULT_LLM_MODEL = "mistral:instruct";
-
 type GroupedFlow = {
   flowId: string;
   count: number;
@@ -684,9 +681,10 @@ async function proposeDescriptor(
   stats: Map<string, VocabStats>,
   semanticIndex: ReturnType<typeof buildSemanticIndex>
 ) {
-  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
-  const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
-  const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+  const llmConfig = getRequiredLlmConfig();
+  const baseUrl = llmConfig?.baseUrl ?? "";
+  const model = llmConfig?.model ?? "";
+  const apiKey = llmConfig?.apiKey ?? "";
 
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const roleSystemPrompt = await readFile(reviewTermRolePromptPath, "utf8");
@@ -1211,4 +1209,13 @@ async function main() {
   process.exitCode = 1;
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  if (error instanceof MissingLlmConfigError) {
+    console.error(error.message);
+    process.exitCode = 1;
+  } else {
+    throw error;
+  }
+}

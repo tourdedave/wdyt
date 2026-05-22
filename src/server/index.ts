@@ -21,6 +21,7 @@ import {
 import type { BrowserInfo, RunEnvironment } from "../shared/types.js";
 import { validateIngestPayload } from "../shared/validation.js";
 import { createCriticalFlow, deleteCriticalFlow, loadCriticalFlowState, parseCriticalFlow, updateCriticalFlow } from "./critical-flows.js";
+import { getRequiredLlmConfig, MissingLlmConfigError } from "./llm.js";
 import { startMemoryLogging } from "./memory.js";
 import {
   getReviewUnitViewCount,
@@ -3548,6 +3549,7 @@ export async function startWdytServer() {
     return server;
   }
 
+  getRequiredLlmConfig();
   await ensureDataDir();
   startMemoryLogging();
   void queueProposalProcessing();
@@ -3564,5 +3566,14 @@ export async function startWdytServer() {
 }
 
 if (import.meta.url === new URL(process.argv[1] ?? "", "file:").href) {
-  await startWdytServer();
+  try {
+    await startWdytServer();
+  } catch (error) {
+    if (error instanceof MissingLlmConfigError) {
+      console.error(error.message);
+      process.exitCode = 1;
+    } else {
+      throw error;
+    }
+  }
 }

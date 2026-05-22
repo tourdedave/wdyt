@@ -57,7 +57,7 @@ import {
   scoreProposalConfidence,
   validateProposal,
 } from "../shared/proposal-validation.js";
-import { DEFAULT_LLM_API_KEY, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, requestJsonCompletion } from "./llm.js";
+import { getRequiredLlmConfig, requestJsonCompletion } from "./llm.js";
 import { logProcessMemoryUsage } from "./memory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -674,9 +674,10 @@ async function proposeDescriptor(
   stats: Map<string, VocabStats>,
   semanticIndex: ReturnType<typeof buildSemanticIndex>
 ) {
-  const baseUrl = process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
-  const model = process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL;
-  const apiKey = process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY;
+  const llmConfig = getRequiredLlmConfig();
+  const baseUrl = llmConfig?.baseUrl ?? "";
+  const model = llmConfig?.model ?? "";
+  const apiKey = llmConfig?.apiKey ?? "";
   const systemPrompt = await readFile(reviewSystemPromptPath, "utf8");
   const roleSystemPrompt = await readFile(reviewTermRolePromptPath, "utf8");
   const evidenceClassificationSystemPrompt = await readFile(reviewEvidenceClassificationPromptPath, "utf8");

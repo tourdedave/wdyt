@@ -1,6 +1,40 @@
-export const DEFAULT_LLM_BASE_URL = "http://localhost:11434/v1";
-export const DEFAULT_LLM_API_KEY = "ollama";
-export const DEFAULT_LLM_MODEL = "mistral:instruct";
+export class MissingLlmConfigError extends Error {
+  constructor() {
+    super(
+      "wdyt needs to know about your OpenAI-compatible API connection details. Please provide them in the following environment variables: WDYT_LLM_BASE_URL, WDYT_LLM_API_KEY, WDYT_LLM_MODEL."
+    );
+    this.name = "MissingLlmConfigError";
+  }
+}
+
+export function isFakeLlmEnabled() {
+  return process.env.WDYT_LLM_FAKE === "1";
+}
+
+export function getRequiredLlmConfig() {
+  if (isFakeLlmEnabled()) {
+    return null;
+  }
+
+  const baseUrl = process.env.WDYT_LLM_BASE_URL?.trim();
+  const apiKey = process.env.WDYT_LLM_API_KEY?.trim();
+  const model = process.env.WDYT_LLM_MODEL?.trim();
+  const missing = [
+    !baseUrl ? "WDYT_LLM_BASE_URL" : null,
+    !apiKey ? "WDYT_LLM_API_KEY" : null,
+    !model ? "WDYT_LLM_MODEL" : null,
+  ].filter(Boolean);
+
+  if (missing.length > 0) {
+    throw new MissingLlmConfigError();
+  }
+
+  return {
+    baseUrl,
+    apiKey,
+    model,
+  };
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,7 +101,7 @@ async function maybeReturnFakeResponse(input: {
   systemPrompt: string;
   userPrompt: string;
 }) {
-  if (process.env.WDYT_LLM_FAKE !== "1") {
+  if (!isFakeLlmEnabled()) {
     return null;
   }
 

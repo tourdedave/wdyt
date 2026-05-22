@@ -18,7 +18,7 @@ import {
   getApprovedVocabulary,
   resolveApprovedVocabularyTerm,
 } from "../shared/vocabulary.js";
-import { DEFAULT_LLM_API_KEY, DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, requestJsonCompletion } from "./llm.js";
+import { getRequiredLlmConfig, requestJsonCompletion } from "./llm.js";
 import { loadReviewUnits } from "./review.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -400,11 +400,12 @@ export async function parseCriticalFlow(rawText: string): Promise<ParsedCritical
   );
 
   for (let attempt = 0; attempt < CRITICAL_FLOW_SCHEMA_RETRY_LIMIT; attempt += 1) {
+    const llmConfig = getRequiredLlmConfig();
     const parsed = normalizeParsedCriticalFlow(
       await requestJsonCompletion({
-        baseUrl: process.env.WDYT_LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL,
-        apiKey: process.env.WDYT_LLM_API_KEY ?? DEFAULT_LLM_API_KEY,
-        model: process.env.WDYT_LLM_MODEL ?? DEFAULT_LLM_MODEL,
+        baseUrl: llmConfig?.baseUrl ?? "",
+        apiKey: llmConfig?.apiKey ?? "",
+        model: llmConfig?.model ?? "",
         systemPrompt,
         userPrompt,
       }),
