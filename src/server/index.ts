@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import os from "node:os";
 import path from "node:path";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import { DEFAULT_EXPORT_FILE_NAMES, exportArtifact } from "../artifact/exportArtifact.js";
 import { importArtifactBuffers } from "../artifact/importArtifact.js";
@@ -35,6 +36,7 @@ import {
 } from "./review.js";
 import { persistRun } from "./storage.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.WDYT_PORT ?? "3876");
 const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
@@ -772,10 +774,10 @@ function renderReviewPage() {
       .doc-section h3 { margin: 0; font-family: var(--font-serif); font-size: 20px; font-weight: 600; line-height: 1.15; color: var(--ink); }
       .section-body { display: grid; gap: 12px; }
       .section-copy { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-      .sequence { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; font-size: 13px; line-height: 1.5; }
+      .sequence { display: inline-flex; flex-wrap: nowrap; gap: 7px; align-items: center; font-size: 13px; line-height: 1.5; min-width: max-content; }
       .sequence-step { padding: 2px 0; border-radius: 0; background: transparent; border: 0; color: var(--ink); }
       .sequence-arrow { color: var(--muted-2); font-size: 12px; }
-      .flow-block { padding: 2px 0 0; }
+      .flow-block { padding: 2px 0 4px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
       .evidence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 28px; }
       .evidence-group { min-width: 0; }
       .evidence-group h4 { margin: 0 0 8px; font-family: var(--font-sans); font-size: 13px; font-weight: 600; letter-spacing: 0.01em; color: var(--ink); }
@@ -866,6 +868,19 @@ function renderReviewPage() {
         const text = String(value || "").trim();
         if (!text) return "";
         return text.length > max ? text.slice(0, max - 1) + "…" : text;
+      };
+      const summarizeUrl = (value, max = 64) => {
+        const text = String(value || "").trim();
+        if (!text) return "";
+        try {
+          const parsed = new URL(text);
+          const segments = parsed.pathname.split("/").filter(Boolean);
+          const tail = segments.length > 0 ? segments[segments.length - 1] : "";
+          const summary = tail ? \`\${parsed.host}/…/\${tail}\` : parsed.host;
+          return truncate(summary, max);
+        } catch {
+          return truncate(text, max);
+        }
       };
       const escapeHtml = (value) => String(value)
         .replaceAll("&", "&amp;")
@@ -997,7 +1012,7 @@ function renderReviewPage() {
       const getUnitSummary = (unit) =>
         unit.proposedRationale ||
         (getPrimaryHeading(unit) ? \`Ended on \${getPrimaryHeading(unit)}.\` : "") ||
-        (getPrimaryFinalUrl(unit) ? \`Ended at \${getPrimaryFinalUrl(unit)}.\` : "") ||
+        (getPrimaryFinalUrl(unit) ? \`Ended at \${summarizeUrl(getPrimaryFinalUrl(unit))}.\` : "") ||
         "";
       const humanizeRawStep = (step) => {
         if (step === "NAVIGATE") return "Navigate";
@@ -1010,7 +1025,11 @@ function renderReviewPage() {
       const humanizeCanonicalStep = (step, unit) => {
         if (step === "NAVIGATE") {
           const finalLabel = getPrimaryHeading(unit);
-          return finalLabel ? \`Navigate to \${finalLabel}\` : "Navigate";
+          if (finalLabel) {
+            return \`Navigate to \${truncate(finalLabel, 48)}\`;
+          }
+          const finalUrl = getPrimaryFinalUrl(unit);
+          return finalUrl ? \`Navigate to \${summarizeUrl(finalUrl, 48)}\` : "Navigate";
         }
         if (step === "INPUT" || step === "CHANGE") {
           const targets = Array.isArray(unit.targets) ? unit.targets.join(" ") : "";
@@ -1075,6 +1094,14 @@ function renderReviewPage() {
         Array.from(document.querySelectorAll("#detail details[open][data-preserve-open]"))
           .map((node) => node.getAttribute("id"))
           .filter(Boolean);
+      const getDetailScrollPositions = () =>
+        Array.from(document.querySelectorAll("#detail [data-preserve-scroll]"))
+          .map((node) => ({
+            id: node.getAttribute("id"),
+            left: node.scrollLeft,
+            top: node.scrollTop,
+          }))
+          .filter((entry) => entry.id);
       const restoreOpenDetailSections = (sectionIds) => {
         if (!Array.isArray(sectionIds) || sectionIds.length === 0) {
           return;
@@ -1083,6 +1110,18 @@ function renderReviewPage() {
           const node = document.getElementById(id);
           if (node && node.tagName === "DETAILS") {
             node.open = true;
+          }
+        });
+      };
+      const restoreDetailScrollPositions = (positions) => {
+        if (!Array.isArray(positions) || positions.length === 0) {
+          return;
+        }
+        positions.forEach((entry) => {
+          const node = document.getElementById(entry.id);
+          if (node) {
+            node.scrollLeft = entry.left;
+            node.scrollTop = entry.top;
           }
         });
       };
@@ -1536,7 +1575,6 @@ function renderReviewPage() {
               \${getPrimaryTest(unit) ? \`<span class="meta-item"><strong>Test</strong> \${escapeHtml(getPrimaryTest(unit))}</span>\` : ""}
               \${getPrimaryTool(unit) ? \`<span class="meta-item"><strong>Tool</strong> \${escapeHtml(getPrimaryTool(unit))}</span>\` : ""}
               \${getPrimaryBrowser(unit) ? \`<span class="meta-item"><strong>Browser</strong> \${escapeHtml(getPrimaryBrowser(unit))}</span>\` : ""}
-              \${getPrimaryFinalUrl(unit) ? \`<span class="meta-item"><strong>Final URL</strong> \${escapeHtml(getPrimaryFinalUrl(unit))}</span>\` : ""}
             </div>
           </div>
           <div class="section-stack">
@@ -1544,7 +1582,7 @@ function renderReviewPage() {
               <h3>Interpreted flow</h3>
               <div class="section-body">
                 <p class="section-copy">This behavior was inferred from the captured execution evidence shown below.</p>
-                <div class="flow-block">
+                <div class="flow-block" id="interpretedFlowBlock" data-preserve-scroll="true">
                   <div class="sequence">
                     \${flowSequence.map((step, index) => \`
                       <span class="sequence-step">\${escapeHtml(step)}</span>\${index < flowSequence.length - 1 ? '<span class="sequence-arrow">→</span>' : ''}
@@ -1682,6 +1720,7 @@ function renderReviewPage() {
         const preserveDetail = options.preserveDetail === true;
         const preserveListControls = options.preserveListControls === true;
         const openDetailSections = preserveDetail ? [] : getOpenDetailSections();
+        const detailScrollPositions = preserveDetail ? [] : getDetailScrollPositions();
         const rebuildButton = document.getElementById("rebuildReviewUnits");
         if (rebuildButton) {
           rebuildButton.disabled = state.rebuilding;
@@ -1696,6 +1735,7 @@ function renderReviewPage() {
         if (!preserveDetail) {
           renderDetail();
           restoreOpenDetailSections(openDetailSections);
+          restoreDetailScrollPositions(detailScrollPositions);
         }
       }
       loadState();

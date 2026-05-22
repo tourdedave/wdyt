@@ -22,7 +22,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs && node scripts/copy-cli-assets.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/fix-extension-build.mjs && node scripts/copy-extension-manifest.mjs && node scripts/copy-cli-assets.mjs && node scripts/clean-legacy-build-artifacts.mjs",
     "release:package": "npm run build && node scripts/package-release.mjs",
     "dev:server": "node --watch dist/server/index.js",
     "start:server": "node dist/server/index.js",
