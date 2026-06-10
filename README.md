@@ -6,6 +6,8 @@ It helps you understand what your automated tests actually did.
 
 It captures browser execution evidence from real test runs, interprets the behaviors those tests produced, and helps you compare them against expected flows to determine business coverage.
 
+[![WDYT Demo](https://img.youtube.com/vi/p4wMBUeOThs/maxresdefault.jpg)](https://www.youtube.com/watch?v=p4wMBUeOThs)
+
 ## What `wdyt` Is
 
 `wdyt` is:
