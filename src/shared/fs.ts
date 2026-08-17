@@ -1,4 +1,5 @@
 import { mkdir, appendFile, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 
 function resolveDataDir() {
@@ -81,7 +82,7 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
 
 export async function writeJsonFile(filePath: string, value: unknown) {
   await ensureDataDir();
-  const tempFilePath = `${filePath}.${process.pid}.tmp`;
+  const tempFilePath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(tempFilePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tempFilePath, filePath);
 }

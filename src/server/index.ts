@@ -42,6 +42,7 @@ const HOST = process.env.WDYT_HOST ?? "127.0.0.1";
 const PORT = Number(process.env.WDYT_PORT ?? "3876");
 const EXPECTED_BEHAVIORS_PATH = "/expected-behaviors";
 const GETTING_STARTED_PATH = "/getting-started";
+const GETTING_STARTED_GUIDE_PATH = path.join(__dirname, "../docs/getting-started.md");
 const REVIEW_PAGINATION_THRESHOLD = Number.parseInt(process.env.WDYT_REVIEW_PAGINATION_THRESHOLD ?? "50", 10) || 50;
 const REVIEW_PAGE_SIZE = Number.parseInt(process.env.WDYT_REVIEW_PAGE_SIZE ?? "10", 10) || 10;
 
@@ -59,6 +60,106 @@ async function readJsonBody(req: http.IncomingMessage) {
 function writeJson(res: http.ServerResponse, statusCode: number, payload: unknown) {
   res.writeHead(statusCode, { "content-type": "application/json" });
   res.end(JSON.stringify(payload));
+}
+
+function escapeGuideHtml(value: string) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function renderGuideMarkdown(markdown: string) {
+  const inline = (value: string) => escapeGuideHtml(value)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+  const lines = markdown.split(/\r?\n/);
+  const output: string[] = [];
+  let paragraph: string[] = [];
+  let listType: "ul" | "ol" | null = null;
+  let code: string[] | null = null;
+
+  const flushParagraph = () => {
+    if (paragraph.length > 0) output.push(`<p>${inline(paragraph.join(" "))}</p>`);
+    paragraph = [];
+  };
+  const closeList = () => {
+    if (listType) output.push(`</${listType}>`);
+    listType = null;
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("```")) {
+      flushParagraph();
+      closeList();
+      if (code) {
+        output.push(`<pre><code>${escapeGuideHtml(code.join("\n"))}</code></pre>`);
+        code = null;
+      } else {
+        code = [];
+      }
+      continue;
+    }
+    if (code) {
+      code.push(line);
+      continue;
+    }
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      flushParagraph();
+      closeList();
+      output.push(`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`);
+      continue;
+    }
+    const unordered = /^-\s+(.+)$/.exec(line);
+    const ordered = /^\d+\.\s+(.+)$/.exec(line);
+    if (unordered || ordered) {
+      flushParagraph();
+      const nextType = unordered ? "ul" : "ol";
+      if (listType !== nextType) {
+        closeList();
+        listType = nextType;
+        output.push(`<${listType}>`);
+      }
+      output.push(`<li>${inline((unordered ?? ordered)![1])}</li>`);
+      continue;
+    }
+    if (line.trim() === "") {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    paragraph.push(line.trim());
+  }
+  flushParagraph();
+  closeList();
+  if (code) output.push(`<pre><code>${escapeGuideHtml(code.join("\n"))}</code></pre>`);
+  return output.join("\n");
+}
+
+async function renderGettingStartedPage() {
+  const guide = await readFile(GETTING_STARTED_GUIDE_PATH, "utf8");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>What Did You Test? | Getting Started</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 32px; background: #f6f1e7; color: #1d1a16; line-height: 1.55; }
+      main { max-width: 780px; margin: 0 auto; background: #fffdf8; border: 1px solid #d8cfbf; border-radius: 16px; padding: 32px; }
+      h1, h2, h3 { line-height: 1.2; }
+      h2 { margin-top: 2em; }
+      a { color: #1f6f4a; font-weight: 600; }
+      code { background: #eee8dc; border-radius: 4px; padding: 2px 5px; }
+      pre { overflow-x: auto; background: #1d1a16; color: #fffdf8; border-radius: 8px; padding: 16px; }
+      pre code { background: transparent; padding: 0; }
+    </style>
+  </head>
+  <body><main>${renderGuideMarkdown(guide)}</main></body>
+</html>`;
 }
 
 async function hasAnyRuntimeData() {
@@ -2970,28 +3071,6 @@ function renderCriticalFlowsPage() {
 </html>`;
 }
 
-function renderCaptureGuidePage() {
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>What Did You Test? | Capture Guide</title>
-    <style>
-      body { font-family: "Iowan Old Style", "Palatino Linotype", serif; margin: 0; padding: 32px; background: #f6f1e7; color: #1d1a16; }
-      main { max-width: 720px; margin: 0 auto; background: #fffdf8; border: 1px solid #d8cfbf; border-radius: 16px; padding: 24px; }
-      a { color: #1f6f4a; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Learn How To Capture A Test</h1>
-      <p>This page is a placeholder for the getting started guide.</p>
-      <p>TODO: Add product-specific guidance for capturing and reviewing the first test run.</p>
-    </main>
-  </body>
-</html>`;
-}
-
 function inferBrowserInfo(req: http.IncomingMessage): BrowserInfo | undefined {
   const userAgent = req.headers["user-agent"];
 
@@ -3184,7 +3263,7 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && requestPath === GETTING_STARTED_PATH) {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(renderCaptureGuidePage());
+    res.end(await renderGettingStartedPage());
     return;
   }
 

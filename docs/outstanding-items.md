@@ -24,14 +24,6 @@
 - Distinguish between "untested" and "not yet reviewed".
 - Improve ambiguity handling when vocabulary or semantic interpretation is weak.
 
-## Getting Started Guide
-
-- The first-run getting-started route is still a placeholder.
-
-### Follow-up
-
-- Replace the placeholder content on [`/getting-started`](/Users/dp/dev/wdyt/src/server/index.ts:2967) with real product guidance for capture, review, and export.
-
 ## Expected Behavior Duplicate Detection
 
 - Duplicate detection for expected behaviors exists in the page client, but it is still a lightweight UI heuristic.

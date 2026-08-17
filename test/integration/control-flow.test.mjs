@@ -15,6 +15,23 @@ function randomPort() {
   return 4100 + Math.floor(Math.random() * 1000);
 }
 
+test("concurrent atomic JSON writes use independent temporary files", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-json-write-"));
+  const targetPath = path.join(tempDir, "state.json");
+  const { writeJsonFile } = await import(path.join(repoRoot, "dist", "shared", "fs.js"));
+
+  try {
+    await Promise.all(
+      Array.from({ length: 32 }, (_, index) => writeJsonFile(targetPath, { index }))
+    );
+    const persisted = JSON.parse(await readFile(targetPath, "utf8"));
+    assert.equal(typeof persisted.index, "number");
+    assert.ok(persisted.index >= 0 && persisted.index < 32);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 async function waitForHealth(serverUrl, timeoutMs = 15_000) {
   const start = Date.now();
 
@@ -1346,12 +1363,15 @@ test("proposal processing stores LLM-backed descriptor proposals", { timeout: 15
   const llmPort = randomPort();
   const serverUrl = `http://127.0.0.1:${port}`;
   const llmUrl = `http://127.0.0.1:${llmPort}/v1`;
+  const llmRequests = [];
   const { child } = spawnServer(tempDir, port, {
     WDYT_LLM_BASE_URL: llmUrl,
     WDYT_LLM_API_KEY: "ollama",
     WDYT_LLM_MODEL: "mistral:instruct",
   });
-  const llmServer = await startMockLlmServer(llmPort);
+  const llmServer = await startMockLlmServer(llmPort, {
+    onRequest: (body) => llmRequests.push(body),
+  });
 
   try {
     await waitForHealth(serverUrl);
@@ -1405,6 +1425,8 @@ test("proposal processing stores LLM-backed descriptor proposals", { timeout: 15
     assert.equal(proposedUnit.proposedRationale, "The flow ends at Dashboard and includes search interactions.");
     assert.deepEqual(proposedUnit.approvedVocabUsed, []);
     assert.deepEqual(proposedUnit.proposedVocab, ["search"]);
+    assert.ok(llmRequests.length >= 4);
+    assert.ok(llmRequests.every((request) => !("temperature" in request)));
 
   } finally {
     llmServer.close();
@@ -3230,7 +3252,7 @@ test("API validation rejects missing required fields and accepts omitted bootstr
   assert.match(getOutput(), /WDYT server listening/);
 });
 
-test("critical flows cold start saves missing flows and exposes placeholder guidance", { timeout: 15_000 }, async () => {
+test("critical flows cold start saves missing flows and serves getting started guidance", { timeout: 15_000 }, async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-critical-flows-cold-"));
   const port = randomPort();
   const llmPort = randomPort();
@@ -3277,8 +3299,12 @@ test("critical flows cold start saves missing flows and exposes placeholder guid
     assert.equal(state.flows.length, 1);
     assert.equal(state.flows[0].status, "not_covered");
 
-    const captureGuide = await fetch(`${serverUrl}/getting-started`).then((response) => response.text());
-    assert.match(captureGuide, /TODO: Add product-specific guidance/);
+    const captureGuide = await fetch(`${serverUrl}/getting-started`);
+    assert.equal(captureGuide.status, 200);
+    assert.match(captureGuide.headers.get("content-type") ?? "", /text\/html/);
+    const captureGuideHtml = await captureGuide.text();
+    assert.match(captureGuideHtml, /<h1>Getting Started<\/h1>/);
+    assert.match(captureGuideHtml, /WDYT_LLM_BASE_URL/);
   } finally {
     llmServer.close();
     await stopChildProcess(child);
