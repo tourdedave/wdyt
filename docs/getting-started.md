@@ -177,6 +177,17 @@ CLI inspection is also available:
 wdyt flows
 ```
 
+Inspect the interpreted observed behaviors without structural grouping:
+
+```bash
+wdyt behaviors
+wdyt behaviors --descriptors-only
+wdyt behaviors --verbose
+wdyt behaviors --json
+```
+
+The JSON form is suitable for scripts and agents. It includes each behavior's descriptor, tests, prerequisites, primary and outcome terms, confidence, and supporting evidence.
+
 ### 6b. CI Or Remote Execution: Export And Review Later
 
 If tests run in CI:

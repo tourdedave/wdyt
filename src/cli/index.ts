@@ -584,6 +584,92 @@ async function printFlows(options: { verbose: boolean }) {
   printFlowTable(toFlowRows(groupedFlows), options);
 }
 
+function toBehaviorRecord(unit: ReviewUnitViewRecord) {
+  return {
+    reviewId: unit.reviewId,
+    flowId: unit.flowId,
+    descriptor: unit.activeDescriptor ?? unit.proposedDescriptor ?? null,
+    proposalState: unit.proposalState,
+    interpretationStatus: unit.interpretationStatus ?? null,
+    confidence: unit.proposedConfidence ?? null,
+    rationale: unit.proposedRationale ?? null,
+    count: unit.count,
+    suites: unit.suites,
+    tests: unit.tests,
+    tools: unit.tools,
+    browsers: unit.browsers,
+    prerequisites: unit.prerequisiteTerms ?? unit.prerequisites ?? [],
+    primaryTerms: unit.primaryTerms ?? [],
+    outcomeTerms: unit.outcomeTerms ?? [],
+    uncertainTerms: unit.uncertainTerms ?? [],
+    canonical: unit.canonical,
+    evidence: {
+      urls: unit.urls,
+      targets: unit.targets,
+      finalUrls: unit.finalUrls,
+      titles: unit.titles,
+      headings: unit.headings,
+      alerts: unit.alerts,
+      items: unit.evidenceItems ?? [],
+    },
+  };
+}
+
+function printBehaviorList(units: ReviewUnitViewRecord[], options: { verbose: boolean }) {
+  for (const [index, unit] of units.entries()) {
+    const descriptor = unit.activeDescriptor ?? unit.proposedDescriptor ?? formatFlow(unit.canonical);
+    console.log(descriptor);
+    console.log(`  Status: ${unit.proposalState}${unit.interpretationStatus ? ` (${unit.interpretationStatus})` : ""}`);
+    console.log(`  Tests: ${summarizeList(unit.tests)}`);
+    console.log(`  Prerequisites: ${summarizeList(unit.prerequisiteTerms ?? unit.prerequisites ?? [])}`);
+    console.log(`  Primary behavior: ${summarizeList(unit.primaryTerms ?? [])}`);
+    console.log(`  Outcomes: ${summarizeList(unit.outcomeTerms ?? [])}`);
+    console.log(`  Confidence: ${typeof unit.proposedConfidence === "number" ? `${Math.round(unit.proposedConfidence * 100)}%` : "-"}`);
+
+    if (options.verbose) {
+      console.log(`  Rationale: ${unit.proposedRationale ?? "-"}`);
+      console.log(`  Canonical: ${formatFlow(unit.canonical)}`);
+      printDetailList("URLs", unit.urls);
+      printDetailList("Final URLs", unit.finalUrls);
+      printDetailList("Titles", unit.titles);
+      printDetailList("Headings", unit.headings);
+      printDetailList("Alerts", unit.alerts);
+      printDetailList("Targets", unit.targets);
+    }
+
+    if (index < units.length - 1) {
+      console.log("");
+    }
+  }
+}
+
+async function printBehaviors(options: { verbose: boolean; json: boolean; descriptorsOnly: boolean }) {
+  const units = (await loadReviewUnitViews()).sort((a, b) => {
+    const left = a.activeDescriptor ?? a.proposedDescriptor ?? formatFlow(a.canonical);
+    const right = b.activeDescriptor ?? b.proposedDescriptor ?? formatFlow(b.canonical);
+    return left.localeCompare(right) || a.reviewId.localeCompare(b.reviewId);
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify(units.map(toBehaviorRecord), null, 2));
+    return;
+  }
+
+  if (units.length === 0) {
+    console.log("No observed behaviors found.");
+    return;
+  }
+
+  if (options.descriptorsOnly) {
+    units.forEach((unit) => {
+      console.log(unit.activeDescriptor ?? unit.proposedDescriptor ?? formatFlow(unit.canonical));
+    });
+    return;
+  }
+
+  printBehaviorList(units, options);
+}
+
 function sortStrings(values: string[]) {
   return [...new Set(values)].sort((a, b) => a.localeCompare(b));
 }
@@ -1042,9 +1128,20 @@ async function main() {
     "  wdyt settings synthetic benchmark [--units <count>] [--offset <count>]",
   ].join("\n");
 
+  const behaviorsUsage = [
+    "Usage:",
+    "  wdyt behaviors [--verbose] [--json] [--descriptors-only]",
+    "",
+    "Options:",
+    "  --verbose  Include rationale, canonical steps, and captured evidence",
+    "  --json     Emit complete machine-readable behavior records",
+    "  --descriptors-only  Print one behavior descriptor per line",
+  ].join("\n");
+
   const topLevelUsage = [
     "Usage:",
     "  wdyt server start",
+    "  wdyt behaviors [--verbose] [--json] [--descriptors-only]",
     "  wdyt flows [--verbose]",
     "  wdyt artifact",
     "  wdyt settings",
@@ -1065,6 +1162,19 @@ async function main() {
   if (command === "flows") {
     await printFlows({
       verbose: args.includes("--verbose"),
+    });
+    return;
+  }
+
+  if (command === "behaviors") {
+    if (args.includes("help") || args.includes("--help") || args.includes("-h")) {
+      console.log(behaviorsUsage);
+      return;
+    }
+    await printBehaviors({
+      verbose: args.includes("--verbose"),
+      json: args.includes("--json"),
+      descriptorsOnly: args.includes("--descriptors-only"),
     });
     return;
   }

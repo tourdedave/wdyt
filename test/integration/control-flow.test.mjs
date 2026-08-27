@@ -32,6 +32,68 @@ test("concurrent atomic JSON writes use independent temporary files", async () =
   }
 });
 
+test("behaviors CLI exposes interpreted behaviors as prose and JSON", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "wdyt-behaviors-cli-"));
+  const dataDir = path.join(tempDir, ".wdyt");
+  const unit = {
+    reviewId: "review-search-empty",
+    runId: "run-search-empty",
+    flowId: "flow-search",
+    canonical: ["NAVIGATE", "INPUT", "SUBMIT", "NAVIGATE"],
+    count: 1,
+    suites: ["demo"],
+    tests: ["search-empty"],
+    tools: ["playwright"],
+    browsers: ["chromium 146"],
+    urls: ["http://127.0.0.1:4010/search"],
+    targets: ["input(\"empty\")", "button(\"Search\")"],
+    finalUrls: ["http://127.0.0.1:4010/search/empty?q=empty"],
+    titles: ["No Results"],
+    headings: ["No Results"],
+    alerts: [],
+    proposalState: "proposed",
+    proposedDescriptor: "Search returns no results",
+    proposedConfidence: 0.91,
+    proposedRationale: "The search completed with an empty result state.",
+    approvedVocabUsed: [],
+    proposedVocab: ["search", "no results"],
+    activeDescriptor: "Search returns no results",
+    activeVocab: ["search", "no results"],
+    prerequisiteTerms: ["login"],
+    primaryTerms: ["search"],
+    outcomeTerms: ["no results"],
+    uncertainTerms: [],
+    interpretationStatus: "auto-generated",
+    updatedAt: Date.now(),
+  };
+
+  try {
+    await mkdir(dataDir, { recursive: true });
+    await writeFile(path.join(dataDir, "review-units.json"), `${JSON.stringify([unit], null, 2)}\n`, "utf8");
+
+    const prose = await runCli(tempDir, ["behaviors"]);
+    assert.match(prose, /Search returns no results/);
+    assert.match(prose, /Tests: search-empty/);
+    assert.match(prose, /Prerequisites: login/);
+    assert.match(prose, /Primary behavior: search/);
+    assert.match(prose, /Outcomes: no results/);
+    assert.match(prose, /Confidence: 91%/);
+
+    const descriptors = await runCli(tempDir, ["behaviors", "--descriptors-only"]);
+    assert.equal(descriptors, "Search returns no results");
+
+    const json = JSON.parse(await runCli(tempDir, ["behaviors", "--json"]));
+    assert.equal(json.length, 1);
+    assert.equal(json[0].descriptor, "Search returns no results");
+    assert.deepEqual(json[0].prerequisites, ["login"]);
+    assert.deepEqual(json[0].primaryTerms, ["search"]);
+    assert.deepEqual(json[0].outcomeTerms, ["no results"]);
+    assert.equal(json[0].evidence.headings[0], "No Results");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 async function waitForHealth(serverUrl, timeoutMs = 15_000) {
   const start = Date.now();
 
